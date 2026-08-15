@@ -79,6 +79,26 @@ export function sanitizeFilename(name: string): string {
   return cleaned.length === 0 ? "file" : cleaned;
 }
 
+/** Canonical game key used for loader files + /connect game matching. */
+export const GAME_KEYS = ["MLBB", "FREEFIRE", "PUBG"] as const;
+export type GameKey = (typeof GAME_KEYS)[number];
+
+/** Normalize any client-provided game string to a canonical key.
+ *  "MLBB" / "Mobile Legends" → MLBB · "FF" / "Free Fire" → FREEFIRE ·
+ *  "PUBG" / "PUBG Mobile" → PUBG. Unknown values pass through uppercased. */
+export function normalizeGame(raw: string): string {
+  const s = raw.trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+  if (s.startsWith("MOBILELEGENDS") || s === "ML" || s === "MLBB") return "MLBB";
+  if (
+    s.startsWith("FREEFIRE") ||
+    s === "FF" ||
+    s === "FREE"
+  )
+    return "FREEFIRE";
+  if (s.startsWith("PUBG") || s === "BGMI") return "PUBG";
+  return s.slice(0, 24);
+}
+
 /** Public settings the panel shows (upload limit). */
 export const getSettings = query({
   args: {},
@@ -109,6 +129,7 @@ export const registerFile = mutation({
     note: v.optional(v.string()),
     size: v.number(),
     contentType: v.string(),
+    game: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const userId = await getAuthUserId(ctx);
@@ -130,6 +151,7 @@ export const registerFile = mutation({
       storageId: args.storageId,
       downloadCount: 0,
       ownerId: userId,
+      game: args.game ? normalizeGame(args.game) : undefined,
     });
   },
 });
@@ -150,6 +172,18 @@ export const get = query({
     const userId = await getAuthUserId(ctx);
     if (userId === null) return null;
     return await ctx.db.get(id);
+  },
+});
+
+/** Latest loader/APK file for a game (used by the /connect response). */
+export const getLoaderForGame = internalQuery({
+  args: { game: v.string() },
+  handler: async (ctx, { game }) => {
+    return await ctx.db
+      .query("files")
+      .withIndex("by_game", (q) => q.eq("game", game))
+      .order("desc")
+      .first();
   },
 });
 

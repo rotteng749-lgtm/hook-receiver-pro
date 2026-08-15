@@ -251,6 +251,13 @@ const endpoints = [
     methodClass: "bg-emerald-600/90 text-white",
   },
   {
+    method: "GET",
+    path: "/databases/:id",
+    auth: "public",
+    desc: "APK response URL — download a game loader (returned as data.url by /connect)",
+    methodClass: "bg-sky-600/90 text-white",
+  },
+  {
     method: "DELETE",
     path: "/api/files/:id",
     auth: "Bearer",

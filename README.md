@@ -108,6 +108,30 @@ game=MLBB&version=1.0&user_key=NS-…&serial=device-abc&resource=menu
 - Responses match the original shape, so the validator's parser needs no
   changes: `{"status":true,"message":"…","data":{…}}` or
   `{"status":false,"message":"…"}`
+- On success, `data.url` is the **APK response URL** — the newest loader/APK
+  uploaded for that game (see Databases below):
+
+  ```json
+  {"status":true,"message":"connected","data":{"server":{…},"key":{…},"url":"https://…/databases/<id>"}}
+  ```
+
+## Databases (loaders / APK)
+
+The panel has a **Databases** page (`/owner/databases` and `/admin/databases`)
+where you upload the loader/APK files clients download after connecting — one
+per game: **MLBB**, **Free Fire** and **PUBG**. Uploads go straight to Convex
+object storage (no file size limit issues), SHA-256 is computed server-side,
+and each file gets a public download URL:
+
+```
+GET /databases/<id>   →  the loader file (public, attachment download)
+```
+
+That URL is what `/connect` returns as `data.url` for the matching game, so
+the tool can download its loader right after a successful connect. The URLs
+are served from the Convex site, so they work from any frontend host —
+**including Vercel** (no storage server needed; files never touch the Vercel
+function filesystem).
 
 ## Local development
 

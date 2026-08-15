@@ -4,6 +4,7 @@ import { useQuery } from "convex/react";
 import {
   Activity,
   Braces,
+  Database,
   KeyRound,
   LayoutDashboard,
   Send,
@@ -17,6 +18,7 @@ const navItems = [
   { to: "/owner/servers", label: "Servers", icon: Server, end: false },
   { to: "/owner/keys", label: "Keys", icon: KeyRound, end: false },
   { to: "/owner/connections", label: "Connections", icon: Activity, end: false },
+  { to: "/owner/databases", label: "Databases", icon: Database, end: false },
   { to: "/owner/telegram", label: "Telegram", icon: Send, end: false },
   { to: "/owner/api", label: "API", icon: Braces, end: false },
   { to: "/owner/members", label: "Members", icon: Users, end: false },

@@ -25,7 +25,7 @@ import { internal } from "./_generated/api";
 import { httpAction } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import { auth } from "./auth";
-import { contentTypeFor, sanitizeFilename } from "./files";
+import { contentTypeFor, normalizeGame, sanitizeFilename } from "./files";
 import { webhook as telegramWebhook } from "./telegram";
 
 const http = httpRouter();
@@ -134,14 +134,26 @@ const health = httpAction(async (ctx, request) => {
 });
 
 /**
- * Public download: GET /files/:id
+ * Public download: GET /files/:id or GET /databases/:id
  * Small files are proxied through this action (200, attachment headers,
  * X-Checksum-Sha256). Large files redirect (302) to the signed storage URL.
+ * `/databases/…` is the "APK response URL" alias — the URL returned in the
+ * /connect success payload (data.url) for the matching game's loader.
  */
 const download = httpAction(async (ctx, request) => {
-  const fileId = new URL(request.url).pathname.replace(/^\/files\//, "").split("/")[0];
+  const fileId = new URL(request.url)
+    .pathname.replace(/^\/(files|databases)\//, "")
+    .split("/")[0];
   if (fileId.length === 0) return json({ error: "missing file id" }, 400);
-  const file = await ctx.runQuery(internal.files.getAny, { fileId: fileId as Id<"files"> });
+  let file: Doc<"files"> | null = null;
+  try {
+    file = await ctx.runQuery(internal.files.getAny, {
+      fileId: fileId as Id<"files">,
+    });
+  } catch {
+    // Malformed id → treat as not found, never a 500.
+    file = null;
+  }
   if (file === null) return json({ error: "file not found" }, 404);
 
   // Best-effort counter; never blocks the download.
@@ -468,7 +480,7 @@ const connect = httpAction(async (ctx, request) => {
           message: body.message ?? "Connected",
           data:
             body.server !== undefined
-              ? { server: body.server, key: body.key }
+              ? { server: body.server, key: body.key, url: body.url }
               : undefined,
         },
         status,
@@ -656,6 +668,19 @@ const connect = httpAction(async (ctx, request) => {
     return await fail(403, "device_mismatch", "key is bound to another device");
   }
 
+  // The "APK response URL": if a loader/APK file is uploaded for this
+  // game (Databases page), point the client at it so it can download the
+  // loader after a successful connect.
+  let loaderUrl: string | null = null;
+  if (game.length > 0) {
+    const loader = await ctx.runQuery(internal.files.getLoaderForGame, {
+      game: normalizeGame(game),
+    });
+    if (loader !== null) {
+      loaderUrl = `${new URL(request.url).origin}/databases/${loader._id}`;
+    }
+  }
+
   await ctx.runMutation(internal.nameserver.recordConnect, {
     keyId: keyDoc._id,
     key,
@@ -678,6 +703,7 @@ const connect = httpAction(async (ctx, request) => {
       uses: keyDoc.uses + 1,
       maxUses: keyDoc.maxUses,
     },
+    url: loaderUrl,
     message: "connected",
   });
 });
@@ -702,11 +728,13 @@ http.route({ path: "/api/files", method: "GET", handler: listFiles });
 http.route({ pathPrefix: "/api/files/", method: "DELETE", handler: deleteFile });
 
 http.route({ pathPrefix: "/files/", method: "GET", handler: download });
+http.route({ pathPrefix: "/databases/", method: "GET", handler: download });
 
 http.route({ path: "/telegram/webhook", method: "POST", handler: telegramWebhook });
 
 http.route({ path: "/connect", method: "OPTIONS", handler: preflight });
 http.route({ pathPrefix: "/api/", method: "OPTIONS", handler: preflight });
 http.route({ pathPrefix: "/files/", method: "OPTIONS", handler: preflight });
+http.route({ pathPrefix: "/databases/", method: "OPTIONS", handler: preflight });
 
 export default http;

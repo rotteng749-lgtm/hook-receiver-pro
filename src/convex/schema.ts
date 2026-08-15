@@ -50,7 +50,10 @@ const schema = defineSchema(
       storageId: v.id("_storage"), // the blob in Convex storage
       downloadCount: v.number(), // increments on every public download
       ownerId: v.optional(v.id("users")), // who uploaded it (informational)
-    }),
+      // Game this file is the loader/APK for (canonical: MLBB, FREEFIRE,
+      // PUBG, …). /connect returns this file's URL for the matching game.
+      game: v.optional(v.string()),
+    }).index("by_game", ["game"]),
 
     // API access tokens for the REST API (POST /api/login or the panel's API
     // page). Only the sha256 hash is stored; the plaintext is shown once.
