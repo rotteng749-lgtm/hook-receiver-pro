@@ -3,6 +3,7 @@ import { api } from "@/convex/_generated/api";
 import { useQuery } from "convex/react";
 import {
   Activity,
+  Braces,
   KeyRound,
   LayoutDashboard,
   Server,
@@ -15,6 +16,7 @@ const navItems = [
   { to: "/owner/servers", label: "Servers", icon: Server, end: false },
   { to: "/owner/keys", label: "Keys", icon: KeyRound, end: false },
   { to: "/owner/connections", label: "Connections", icon: Activity, end: false },
+  { to: "/owner/api", label: "API", icon: Braces, end: false },
   { to: "/owner/members", label: "Members", icon: Users, end: false },
   { to: "/owner/settings", label: "Settings", icon: Settings, end: false },
 ];

@@ -25,6 +25,7 @@ const AdminOverview = lazy(() => import("./pages/admin/Overview.tsx"));
 const AdminKeys = lazy(() => import("./pages/admin/Keys.tsx"));
 const Servers = lazy(() => import("./pages/Servers.tsx"));
 const Connections = lazy(() => import("./pages/Connections.tsx"));
+const ApiTokens = lazy(() => import("./pages/ApiTokens.tsx"));
 const NotFound = lazy(() => import("./pages/NotFound.tsx"));
 
 // Simple loading fallback for route transitions
@@ -148,6 +149,7 @@ createRoot(document.getElementById("root")!).render(
                 <Route path="keys" element={<OwnerKeys />} />
                 <Route path="connections" element={<Connections />} />
                 <Route path="members" element={<OwnerMembers />} />
+                <Route path="api" element={<ApiTokens />} />
                 <Route path="settings" element={<OwnerSettings />} />
               </Route>
 
@@ -166,6 +168,7 @@ createRoot(document.getElementById("root")!).render(
                 <Route path="servers" element={<Servers />} />
                 <Route path="keys" element={<AdminKeys />} />
                 <Route path="connections" element={<Connections />} />
+                <Route path="api" element={<ApiTokens />} />
               </Route>
 
               {/* Regular accounts */}

@@ -45,7 +45,10 @@ type ServerRow = Doc<"servers"> & {
   canManage: boolean;
 };
 
-const CONNECT_BASE = (import.meta.env.VITE_CONVEX_URL as string).replace(/\/$/, "");
+// Public HTTP routes (like /connect) are served from the Convex site URL.
+const CONNECT_BASE = (import.meta.env.VITE_CONVEX_URL as string)
+  .replace(/\.convex\.cloud$/, ".convex.site")
+  .replace(/\/$/, "");
 
 function slugify(name: string): string {
   return name

@@ -134,6 +134,29 @@ deployment (spec: file server v1). See `src/convex/http.ts`:
 | GET    | `/files/:id`    | public       | download (stream ≤15 MB, else 302) |
 | GET    | `/health`       | public       | `{"status":"ok"}` |
 
+## API tokens & client libraries
+
+The panel has an **API & Tokens** page (`/owner/api` and `/admin/api`) where
+you can:
+
+- **Create an API token** (Bearer) for the REST API — the plaintext is shown
+  once, and tokens can be revoked any time.
+- See the **base URL** (the Convex site URL, `…convex.site`) and the endpoint
+  reference (`/connect`, `/api/login`, `/api/files`).
+- Copy **ready-to-use client libraries** for **Next.js**, **Node.js**, **Python**
+  and **Android Kotlin** — each shows `connect()` (public key validation),
+  `apiLogin()` (username/password → 24 h token) and `listFiles()` (Bearer).
+
+Example — validate a key from Python:
+
+```python
+import requests
+
+r = requests.post("https://<deployment>.convex.site/connect",
+                  json={"key": "NS-XXXX-…", "server": "eu-main"})
+print(r.json())  # {"ok": true, "server": {…}, "key": {…}} or {"ok": false, "error": …}
+```
+
 ## Project structure
 
 - `src/convex/nameserver.ts` — servers, keys, balance, settings, connections,
