@@ -1,5 +1,4 @@
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { PageHeader } from "@/components/panel/PageHeader";
 import { api } from "@/convex/_generated/api";
@@ -7,8 +6,7 @@ import type { Doc } from "@/convex/_generated/dataModel";
 import { formatRelative } from "@/lib/format";
 import { useAuth } from "@/hooks/use-auth";
 import { useQuery } from "convex/react";
-import { Activity, Loader2, RefreshCw } from "lucide-react";
-import { useState } from "react";
+import { Activity, Loader2 } from "lucide-react";
 
 type ConnRow = Doc<"connections"> & {
   serverName: string;
@@ -22,7 +20,6 @@ function reasonLabel(reason?: string): string {
 
 export default function Connections() {
   const { user } = useAuth();
-  const [tick, setTick] = useState(0);
   const connections = useQuery(api.nameserver.listConnections);
   const role = user?.role ?? "user";
 
@@ -44,15 +41,10 @@ export default function Connections() {
             : "Every /connect attempt against your keys."
         }
         actions={
-          <Button
-            variant="outline"
-            size="sm"
-            className="cursor-pointer"
-            onClick={() => setTick((n) => n + 1)}
-          >
-            <RefreshCw className="size-3.5" />
-            Refresh
-          </Button>
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-2.5 py-1 text-xs text-muted-foreground">
+            <span className="size-1.5 animate-pulse rounded-full bg-emerald-500" />
+            Live — updates automatically
+          </span>
         }
       />
 

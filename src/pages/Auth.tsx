@@ -291,6 +291,13 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
             </a>
           </div>
         </Card>
+
+        <p className="mx-auto mt-4 max-w-[350px] text-center text-xs leading-relaxed text-muted-foreground">
+          The first account to sign up becomes the <span className="font-medium text-foreground">owner</span>{" "}
+          (panel at <code className="rounded bg-muted px-1 py-0.5">/owner</code>).
+          Admins are promoted by the owner in Members — panel access lands at{" "}
+          <code className="rounded bg-muted px-1 py-0.5">/admin</code>.
+        </p>
         </div>
       </div>
     </div>
