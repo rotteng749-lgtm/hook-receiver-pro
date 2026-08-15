@@ -22,9 +22,13 @@ user agent, result).
 | **user**  | Account holder — sees their profile and balance. No key generation.     |
 | client  | No panel — just calls `/connect` with a key + server code.              |
 
-**Owner bootstrap:** the very first non-anonymous account to sign up becomes
-the **owner** (guests are never promoted). After that, the owner promotes
-others to admin in **Members**.
+**Owner account:** the owner logs in with **username + password** (defaults
+`Panxcz` / `Panxxcz`, overridable via the `ADMIN_USERNAME` / `ADMIN_PASSWORD`
+environment variables). The account is created automatically the first time
+the sign-in page loads — no email or sign-up needed. Admins and other members
+are created by the owner in **Members → Add member** (username, password,
+role, starting balance). Guests ("Continue as Guest") get a session but no
+panel rights.
 
 ## Balance
 
@@ -37,11 +41,14 @@ others to admin in **Members**.
 
 ## Quick start
 
-1. **Sign up** with any email (OTP) — first account becomes owner.
+1. **Sign in** at `/auth` with the owner username & password
+   (`Panxcz` / `Panxxcz` by default) → you land on the owner panel `/owner`.
 2. **Servers → New server** — name it, set a code (e.g. `eu-main`).
 3. **Keys → Generate key** — pick the server, set uses/lifetime (or use the
    defaults), pay from balance, copy the key.
 4. Client calls the connect URL with the key + server code.
+5. **Members → Add member** — create admin accounts (username + password +
+   starting balance) and hand them `/admin`.
 
 ```
 curl -X POST https://<deployment>.convex.site/connect \
@@ -67,7 +74,8 @@ bun dev                    # terminal 2 — runs the panel UI
 is served at the same URL (`.convex.site`).
 
 **Demo mode:** on the sign-in page, click **"Continue as Guest"**. Guests get a
-session but are never promoted to owner.
+session but no panel rights — they land on `/dashboard` and can't generate
+keys or manage servers.
 
 ## Environment variables
 
@@ -81,10 +89,11 @@ session but are never promoted to owner.
 
 | Variable          | Default  | Description |
 | ----------------- | -------- | ----------- |
-| `ADMIN_USERNAME`  | `Panxcz` | Legacy `POST /api/login` credentials (kept for the REST API) |
-| `ADMIN_PASSWORD`  | `Panxxcz`| Legacy `POST /api/login` password |
+| `ADMIN_USERNAME`  | `Panxcz` | Owner panel login **and** the legacy `POST /api/login` username |
+| `ADMIN_PASSWORD`  | `Panxxcz`| Owner panel login **and** the legacy `POST /api/login` password |
 
-Panel logins use Convex Auth (email OTP via the template provider).
+Panel logins use Convex Auth with the username/password provider — no email
+addresses are used anywhere.
 
 ## Deployment
 

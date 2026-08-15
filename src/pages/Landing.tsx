@@ -70,12 +70,12 @@ const roles = [
   {
     icon: ShieldCheck,
     title: "Owner",
-    body: "Everything: all servers, every key, member roles, balances, and global settings. Log in at /owner.",
+    body: "Everything: all servers, every key, member roles, balances, and global settings. Logs in at /owner with the owner username & password.",
   },
   {
     icon: Users,
     title: "Admin",
-    body: "Creates servers, generates keys from their balance, and watches their keys' connections. Log in at /admin.",
+    body: "Created by the owner with their own username & password. Creates servers, generates keys from their balance, and watches their keys' connections at /admin.",
   },
   {
     icon: TerminalSquare,
@@ -159,7 +159,8 @@ export default function Landing() {
               </Button>
             </div>
             <p className="mt-4 text-xs text-muted-foreground">
-              First account to sign up becomes the owner · no credit card
+              Sign in with username &amp; password — the owner account is
+              created automatically, no email needed
             </p>
           </motion.div>
 
@@ -324,8 +325,8 @@ export default function Landing() {
             Gate your clients, track every connect.
           </h2>
           <p className="mt-3 max-w-md text-muted-foreground">
-            Sign up, become the owner, create your first server, and generate a
-            key — all in under ten minutes.
+            Sign in as the owner, create your first server, generate a key, and
+            connect your first client — all in under ten minutes.
           </p>
           <Button asChild size="lg" className="mt-7 cursor-pointer">
             <Link to={ctaHref}>

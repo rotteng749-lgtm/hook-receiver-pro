@@ -13,7 +13,8 @@
  * The public connect endpoint lives in convex/http.ts and calls the
  * internal helpers at the bottom of this file.
  */
-import { getAuthUserId } from "@convex-dev/auth/server";
+import { createAccount, getAuthUserId } from "@convex-dev/auth/server";
+import type { GenericActionCtx, GenericDataModel } from "convex/server";
 import { v } from "convex/values";
 import {
   internalMutation,
@@ -25,6 +26,12 @@ import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 
 export type PanelRole = "owner" | "admin" | "user" | "member";
+
+/** createAccount is typed for a bare GenericActionCtx; our generated
+ *  MutationCtx is runtime-compatible but TS can't prove the variance. */
+function asActionCtx(ctx: MutationCtx): GenericActionCtx<GenericDataModel> {
+  return ctx as unknown as GenericActionCtx<GenericDataModel>;
+}
 
 export const DEFAULT_SETTINGS = {
   keyPrice: 10,
@@ -124,6 +131,90 @@ export const bootstrapOwner = mutation({
     if (ownerExists.length === 0) {
       await ctx.db.patch(userId, { role: "owner", balance: user.balance ?? 0 });
     }
+  },
+});
+
+/* --------------------------- owner account --------------------------- */
+
+/**
+ * Ensures the fixed owner account exists and is the owner. Credentials come
+ * from ADMIN_USERNAME / ADMIN_PASSWORD (defaults: Panxcz / Panxxcz) — the
+ * same pair used by the REST /api/login endpoint. Called from the sign-in
+ * page on mount so the owner can always log in with username + password,
+ * no email needed. Idempotent: if the username already has an account it is
+ * promoted to owner (if needed) instead of creating a duplicate.
+ */
+export const seedOwner = mutation({
+  args: {},
+  handler: async (ctx) => {
+    const username = (process.env.ADMIN_USERNAME ?? "Panxcz").trim();
+    const password = process.env.ADMIN_PASSWORD ?? "Panxxcz";
+    if (username.length === 0 || password.length === 0) {
+      return { created: false, username: "" };
+    }
+    const existing = await ctx.db
+      .query("authAccounts")
+      .withIndex("providerAndAccountId", (q) =>
+        q.eq("provider", "password").eq("providerAccountId", username),
+      )
+      .first();
+    if (existing) {
+      const user = await ctx.db.get(existing.userId);
+      if (user && user.role !== "owner") {
+        await ctx.db.patch(existing.userId, { role: "owner" });
+      }
+      return { created: false, username };
+    }
+    await createAccount(asActionCtx(ctx), {
+      provider: "password",
+      account: { id: username, secret: password },
+      profile: { email: username, name: username, role: "owner", balance: 0 },
+    });
+    return { created: true, username };
+  },
+});
+
+/** Owner-only: create a member account with username/password. */
+export const createMember = mutation({
+  args: {
+    username: v.string(),
+    password: v.string(),
+    role: v.union(
+      v.literal("admin"),
+      v.literal("user"),
+      v.literal("member"),
+    ),
+    balance: v.number(),
+  },
+  handler: async (ctx, args) => {
+    await requireRole(ctx, ["owner"]);
+    const username = args.username.trim().slice(0, 60);
+    if (username.length < 3) {
+      throw new Error("Username must be at least 3 characters");
+    }
+    if (args.password.length < 4) {
+      throw new Error("Password must be at least 4 characters");
+    }
+    const existing = await ctx.db
+      .query("authAccounts")
+      .withIndex("providerAndAccountId", (q) =>
+        q.eq("provider", "password").eq("providerAccountId", username),
+      )
+      .first();
+    if (existing) {
+      throw new Error(`Username "${username}" is already taken`);
+    }
+    await createAccount(asActionCtx(ctx), {
+      provider: "password",
+      account: { id: username, secret: args.password },
+      profile: {
+        email: username,
+        name: username,
+        role: args.role,
+        balance: Math.max(0, Math.round(args.balance)),
+      },
+    });
+    return { username };
   },
 });
 

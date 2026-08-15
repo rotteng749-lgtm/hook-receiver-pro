@@ -7,7 +7,17 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/panel/PageHeader";
 import { StatCard } from "@/components/panel/StatCard";
 import {
@@ -21,7 +31,7 @@ import { api } from "@/convex/_generated/api";
 import { formatRelative } from "@/lib/format";
 import { useAuth } from "@/hooks/use-auth";
 import { useMutation, useQuery } from "convex/react";
-import { Coins, Loader2, Users } from "lucide-react";
+import { Coins, Loader2, Plus, Users } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
@@ -31,6 +41,116 @@ const ROLE_LABEL: Record<string, string> = {
   user: "user",
   member: "member",
 };
+
+function NewMemberDialog() {
+  const createMember = useMutation(api.nameserver.createMember);
+  const [open, setOpen] = useState(false);
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [role, setRole] = useState("admin");
+  const [balance, setBalance] = useState("0");
+  const [busy, setBusy] = useState(false);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    try {
+      await createMember({
+        username,
+        password,
+        role: role as "admin" | "user" | "member",
+        balance: Number(balance) || 0,
+      });
+      toast.success(`Account "${username}" created`);
+      setOpen(false);
+      setUsername("");
+      setPassword("");
+      setRole("admin");
+      setBalance("0");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to create account");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button className="cursor-pointer">
+          <Plus className="size-4" />
+          Add member
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Create a member account</DialogTitle>
+          <DialogDescription>
+            The new member signs in with this username &amp; password at{" "}
+            <code className="rounded bg-muted px-1 py-0.5 text-xs">/auth</code>.
+            Give admins a starting balance so they can generate keys.
+          </DialogDescription>
+        </DialogHeader>
+        <form onSubmit={submit} className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="member-username">Username</Label>
+            <Input
+              id="member-username"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              placeholder="e.g. admin1"
+              minLength={3}
+              required
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="member-password">Password</Label>
+            <Input
+              id="member-password"
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="••••••••"
+              minLength={4}
+              required
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label>Role</Label>
+              <Select value={role} onValueChange={setRole}>
+                <SelectTrigger className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="admin">admin</SelectItem>
+                  <SelectItem value="user">user</SelectItem>
+                  <SelectItem value="member">member</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="member-balance">Starting balance</Label>
+              <Input
+                id="member-balance"
+                type="number"
+                min={0}
+                value={balance}
+                onChange={(e) => setBalance(e.target.value)}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button type="submit" disabled={busy}>
+              {busy && <Loader2 className="size-4 animate-spin" />}
+              Create account
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
 
 function RoleBadge({ role }: { role: string }) {
   if (role === "owner")
@@ -182,6 +302,7 @@ export default function Members() {
       <PageHeader
         title="Members"
         description="Manage who can do what. Admins create servers and generate keys; the owner controls everything."
+        actions={<NewMemberDialog />}
       />
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
