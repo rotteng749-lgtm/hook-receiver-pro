@@ -53,7 +53,12 @@ export default function OwnerOverview() {
         <StatCard icon={Users} label="Members" value={stats.memberCount} hint="accounts on the panel" />
       </div>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <StatCard icon={Wallet} label="Your balance" value={stats.balance.toLocaleString()} hint="deducted per generated key" />
+        <StatCard
+          icon={Wallet}
+          label="Your balance"
+          value={stats.unlimited ? "∞" : stats.balance.toLocaleString()}
+          hint={stats.unlimited ? "unlimited — never deducted" : "deducted per generated key"}
+        />
         <StatCard icon={Coins} label="Total balances" value={stats.totalBalance.toLocaleString()} hint="across all members" />
       </div>
 

@@ -260,25 +260,34 @@ function MemberRow({
             ))}
           </SelectContent>
         </Select>
-        <div className="flex items-center gap-1.5">
-          <Input
-            type="number"
-            min={0}
-            value={balanceInput}
-            onChange={(e) => setBalanceInput(e.target.value)}
-            className="w-28 font-mono text-right tabular-nums"
-            aria-label="Balance"
-          />
-          <Button
-            variant="outline"
-            size="sm"
-            className="cursor-pointer"
-            onClick={saveBalance}
-            disabled={busy}
-          >
-            {busy ? <Loader2 className="size-3.5 animate-spin" /> : "Set"}
-          </Button>
-        </div>
+        {member.role === "owner" ? (
+          <span className="inline-flex items-center gap-1.5 rounded-md border border-border bg-muted/40 px-3 py-1.5 font-mono text-sm font-bold tabular-nums">
+            ∞{" "}
+            <span className="text-[10px] font-medium text-muted-foreground">
+              unlimited
+            </span>
+          </span>
+        ) : (
+          <div className="flex items-center gap-1.5">
+            <Input
+              type="number"
+              min={0}
+              value={balanceInput}
+              onChange={(e) => setBalanceInput(e.target.value)}
+              className="w-28 font-mono text-right tabular-nums"
+              aria-label="Balance"
+            />
+            <Button
+              variant="outline"
+              size="sm"
+              className="cursor-pointer"
+              onClick={saveBalance}
+              disabled={busy}
+            >
+              {busy ? <Loader2 className="size-3.5 animate-spin" /> : "Set"}
+            </Button>
+          </div>
+        )}
       </div>
     </li>
   );

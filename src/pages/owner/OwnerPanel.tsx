@@ -26,6 +26,11 @@ const navItems = [
 export default function OwnerPanel() {
   const stats = useQuery(api.nameserver.overviewStats);
   return (
-    <PanelShell navItems={navItems} balance={stats?.balance} roleLabel="owner" />
+    <PanelShell
+      navItems={navItems}
+      balance={stats?.balance}
+      unlimited={stats?.unlimited}
+      roleLabel="owner"
+    />
   );
 }

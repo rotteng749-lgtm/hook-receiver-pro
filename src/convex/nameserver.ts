@@ -368,8 +368,10 @@ export const generateKey = mutation({
       Math.round(args.hours ?? settings?.defaultKeyHours ?? DEFAULT_SETTINGS.defaultKeyHours),
     );
     const cost = settings?.keyPrice ?? DEFAULT_SETTINGS.keyPrice;
+    const isOwner = roleOf(user) === "owner";
     const balance = user.balance ?? 0;
-    if (balance < cost) {
+    // The owner's wallet is unlimited — no check, nothing is deducted.
+    if (!isOwner && balance < cost) {
       throw new Error(
         `Insufficient balance — this key costs ${cost}, your balance is ${balance}`,
       );
@@ -396,8 +398,10 @@ export const generateKey = mutation({
       cost,
       note: args.note?.trim().slice(0, 160) || undefined,
     });
-    await ctx.db.patch(userId, { balance: balance - cost });
-    return { id, key, cost, balance: balance - cost };
+    if (!isOwner) {
+      await ctx.db.patch(userId, { balance: balance - cost });
+    }
+    return { id, key, cost, balance: isOwner ? balance : balance - cost };
   },
 });
 
@@ -596,6 +600,7 @@ export const overviewStats = query({
     return {
       role: roleOf(user),
       balance: user.balance ?? 0,
+      unlimited: isOwner,
       serverCount,
       keyCount: keys.length,
       activeKeyCount: keys.filter((k) => k.status === "active").length,
@@ -705,6 +710,7 @@ export const ownerStatsInternal = internalQuery({
     const owner = members.find((m) => m.role === "owner");
     return {
       balance: owner?.balance ?? 0,
+      unlimited: true,
       serverCount: servers.length,
       keyCount: keys.length,
       activeKeyCount: keys.filter((k) => k.status === "active").length,
@@ -774,9 +780,7 @@ export const genKeyAsOwner = internalMutation({
       .first();
     if (owner === null) throw new Error("No owner account configured");
     const balance = owner.balance ?? 0;
-    if (balance < cost) {
-      throw new Error(`Insufficient balance — key costs ${cost}, balance is ${balance}`);
-    }
+    // The owner's wallet is unlimited — no check, nothing is deducted.
 
     let key = generateKeyValue();
     for (let i = 0; i < 5; i++) {
@@ -800,11 +804,11 @@ export const genKeyAsOwner = internalMutation({
       cost,
       note: args.note?.trim().slice(0, 160) || undefined,
     });
-    await ctx.db.patch(owner._id, { balance: balance - cost });
     return {
       key,
       cost,
-      balance: balance - cost,
+      balance,
+      unlimited: true,
       serverName: server.name,
       serverCode: server.code,
       maxUses,

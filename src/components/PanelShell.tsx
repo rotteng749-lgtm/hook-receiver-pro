@@ -18,11 +18,13 @@ export interface PanelNavItem {
 function SidebarContent({
   navItems,
   balance,
+  unlimited,
   roleLabel,
   onNavigate,
 }: {
   navItems: PanelNavItem[];
   balance?: number | null;
+  unlimited?: boolean;
   roleLabel: string;
   onNavigate?: () => void;
 }) {
@@ -87,7 +89,7 @@ function SidebarContent({
             <Coins className="size-4 text-primary" />
             <span className="text-xs text-muted-foreground">Balance</span>
             <span className="ml-auto text-sm font-bold tabular-nums">
-              {balance.toLocaleString()}
+              {unlimited ? "∞" : balance.toLocaleString()}
             </span>
           </div>
         )}
@@ -122,10 +124,12 @@ function SidebarContent({
 export function PanelShell({
   navItems,
   balance,
+  unlimited,
   roleLabel,
 }: {
   navItems: PanelNavItem[];
   balance?: number | null;
+  unlimited?: boolean;
   roleLabel: string;
 }) {
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -137,6 +141,7 @@ export function PanelShell({
         <SidebarContent
           navItems={navItems}
           balance={balance}
+          unlimited={unlimited}
           roleLabel={roleLabel}
         />
       </aside>
@@ -160,6 +165,7 @@ export function PanelShell({
             <SidebarContent
               navItems={navItems}
               balance={balance}
+              unlimited={unlimited}
               roleLabel={roleLabel}
               onNavigate={() => setMobileOpen(false)}
             />

@@ -22,7 +22,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { PageHeader } from "@/components/panel/PageHeader";
 import { api } from "@/convex/_generated/api";
-import { useMutation, useQuery } from "convex/react";
+import { useAction, useQuery } from "convex/react";
 import {
   Bot,
   ExternalLink,
@@ -41,16 +41,16 @@ const COMMANDS = [
   { cmd: "/servers", desc: "List all servers with status" },
   { cmd: "/keys", desc: "Last 5 generated keys" },
   { cmd: "/server <code>", desc: "Server detail + recent connect results" },
-  { cmd: "/genkey <code> [uses] [hours]", desc: "Generate a key — deducted from your balance" },
+  { cmd: "/genkey <code> [uses] [hours]", desc: "Generate a key — free for the owner (unlimited wallet)" },
   { cmd: "/maintenance on|off [message]", desc: "Block or allow all /connect calls" },
   { cmd: "/id", desc: "Show your chat id (use this when binding)" },
 ];
 
 export default function TelegramPage() {
   const status = useQuery(api.telegram.status);
-  const refreshBotInfo = useMutation(api.telegram.refreshBotInfo);
-  const enable = useMutation(api.telegram.enable);
-  const disable = useMutation(api.telegram.disable);
+  const refreshBotInfo = useAction(api.telegram.refreshBotInfo);
+  const enable = useAction(api.telegram.enable);
+  const disable = useAction(api.telegram.disable);
 
   const [chatId, setChatId] = useState("");
   const [busy, setBusy] = useState(false);

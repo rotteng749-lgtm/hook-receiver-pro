@@ -17,8 +17,14 @@
  */
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { v } from "convex/values";
-import { httpAction, internalQuery, mutation, query } from "./_generated/server";
-import type { MutationCtx, QueryCtx } from "./_generated/server";
+import {
+  action,
+  httpAction,
+  internalMutation,
+  internalQuery,
+  query,
+} from "./_generated/server";
+import type { ActionCtx, MutationCtx, QueryCtx } from "./_generated/server";
 import { internal } from "./_generated/api";
 
 const BOT_TOKEN =
@@ -66,6 +72,14 @@ async function requireOwner(ctx: MutationCtx) {
   const userId = await getAuthUserId(ctx);
   if (userId === null) throw new Error("Not authenticated");
   const user = await ctx.db.get(userId);
+  if (!user || user.role !== "owner") throw new Error("Forbidden");
+}
+
+/** Owner check for actions (no direct ctx.db — look the user up via a query). */
+async function requireOwnerAction(ctx: ActionCtx) {
+  const userId = await getAuthUserId(ctx);
+  if (userId === null) throw new Error("Not authenticated");
+  const user = await ctx.runQuery(internal.telegram.getUserInternal, { userId });
   if (!user || user.role !== "owner") throw new Error("Forbidden");
 }
 
@@ -119,14 +133,14 @@ export const status = query({
 });
 
 /** Fetch the bot username from Telegram and cache it (for the panel link). */
-export const refreshBotInfo = mutation({
+export const refreshBotInfo = action({
   args: {},
   handler: async (ctx) => {
-    await requireOwner(ctx);
+    await requireOwnerAction(ctx);
     const me = await tgFetch("getMe");
     if (!me.ok) throw new Error(me.description ?? "Invalid bot token");
     const username = me.result?.username ?? null;
-    await upsertSettings(ctx, {
+    await ctx.runMutation(internal.telegram.upsertSettingsInternal, {
       telegramBotUsername: username ?? undefined,
     });
     return { botUsername: username };
@@ -134,10 +148,10 @@ export const refreshBotInfo = mutation({
 });
 
 /** Bind a Telegram chat as the owner-level controller and register the webhook. */
-export const enable = mutation({
+export const enable = action({
   args: { chatId: v.string() },
   handler: async (ctx, { chatId }) => {
-    await requireOwner(ctx);
+    await requireOwnerAction(ctx);
     const cleaned = chatId.trim();
     if (!/^-?\d{5,}$/.test(cleaned)) {
       throw new Error("Invalid chat id — send /id to the bot and paste the number here");
@@ -160,7 +174,7 @@ export const enable = mutation({
       webhookSet = true;
     }
 
-    await upsertSettings(ctx, {
+    await ctx.runMutation(internal.telegram.upsertSettingsInternal, {
       telegramOwnerChatId: cleaned,
       telegramBotUsername: username ?? undefined,
     });
@@ -169,12 +183,12 @@ export const enable = mutation({
 });
 
 /** Unbind the bot (deletes the webhook and clears the bound chat). */
-export const disable = mutation({
+export const disable = action({
   args: {},
   handler: async (ctx) => {
-    await requireOwner(ctx);
+    await requireOwnerAction(ctx);
     await tgFetch("deleteWebhook");
-    await upsertSettings(ctx, {
+    await ctx.runMutation(internal.telegram.upsertSettingsInternal, {
       telegramOwnerChatId: undefined,
       telegramBotUsername: undefined,
     });
@@ -187,6 +201,21 @@ export const disable = mutation({
 export const getSettingsInternal = internalQuery({
   args: {},
   handler: async (ctx) => await getSettings(ctx),
+});
+
+export const getUserInternal = internalQuery({
+  args: { userId: v.id("users") },
+  handler: async (ctx, { userId }) => await ctx.db.get(userId),
+});
+
+export const upsertSettingsInternal = internalMutation({
+  args: {
+    telegramOwnerChatId: v.optional(v.string()),
+    telegramBotUsername: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    await upsertSettings(ctx, args);
+  },
 });
 
 const webhook = httpAction(async (ctx, request) => {
@@ -243,7 +272,7 @@ const webhook = httpAction(async (ctx, request) => {
         `Members: ${s.memberCount}`,
         `Total balances: ${s.totalBalance}`,
         `Revenue: ${s.revenue}`,
-        `Your balance: ${s.balance}`,
+        `Your balance: ${s.unlimited ? "∞ (unlimited)" : s.balance}`,
       ].join("\n"),
     );
   }
@@ -251,7 +280,9 @@ const webhook = httpAction(async (ctx, request) => {
   if (cmd === "/balance") {
     const s = await ctx.runQuery(internal.nameserver.ownerStatsInternal, {});
     const price = settings?.keyPrice ?? 10;
-    return reply(`Your balance: ${s.balance}\nKey price: ${price} per key`);
+    return reply(
+      `Your balance: ${s.unlimited ? "∞ (unlimited)" : s.balance}\nKey price: ${price} per key`,
+    );
   }
 
   if (cmd === "/servers") {
@@ -321,7 +352,7 @@ const webhook = httpAction(async (ctx, request) => {
         [
           `Key generated for ${r.serverName} (${r.serverCode})`,
           r.key,
-          `Cost: ${r.cost} · Remaining balance: ${r.balance}`,
+          `Cost: ${r.cost} · Remaining balance: ${r.unlimited ? "∞ (unlimited)" : r.balance}`,
           `Uses: ${r.maxUses > 0 ? r.maxUses : "unlimited"}`,
           `Expires: ${expires}`,
         ].join("\n"),

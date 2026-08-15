@@ -104,6 +104,7 @@ function GenerateKeyCard({ scope }: { scope: "owner" | "admin" }) {
 
   const cost = settings?.keyPrice ?? 0;
   const balance = stats?.balance ?? 0;
+  const unlimited = scope === "owner" && stats?.unlimited === true;
   const activeServers = servers.filter((s) => s.status === "active");
 
   const submit = async (e: React.FormEvent) => {
@@ -137,10 +138,22 @@ function GenerateKeyCard({ scope }: { scope: "owner" | "admin" }) {
         <CardHeader>
           <CardTitle className="text-base">Generate a key</CardTitle>
           <CardDescription>
-            Each key costs{" "}
-            <span className="font-semibold text-foreground">{cost}</span> balance,
-            deducted from your wallet ({balance} left). The client presents this
-            key at <code className="rounded bg-muted px-1 py-0.5 text-xs">/connect</code>.
+            {unlimited ? (
+              <>
+                Each key costs{" "}
+                <span className="font-semibold text-foreground">{cost}</span> balance
+                — your wallet is unlimited, so nothing is deducted. The client
+                presents this key at{" "}
+                <code className="rounded bg-muted px-1 py-0.5 text-xs">/connect</code>.
+              </>
+            ) : (
+              <>
+                Each key costs{" "}
+                <span className="font-semibold text-foreground">{cost}</span> balance,
+                deducted from your wallet ({balance} left). The client presents this
+                key at <code className="rounded bg-muted px-1 py-0.5 text-xs">/connect</code>.
+              </>
+            )}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -210,7 +223,7 @@ function GenerateKeyCard({ scope }: { scope: "owner" | "admin" }) {
             <div className="flex items-end">
               <Button
                 type="submit"
-                disabled={busy || activeServers.length === 0 || balance < cost}
+                disabled={busy || activeServers.length === 0 || (!unlimited && balance < cost)}
                 className="w-full cursor-pointer sm:w-auto"
               >
                 {busy ? (
@@ -218,7 +231,7 @@ function GenerateKeyCard({ scope }: { scope: "owner" | "admin" }) {
                 ) : (
                   <Plus className="size-4" />
                 )}
-                Generate key — {cost} balance
+                {unlimited ? "Generate key" : `Generate key — ${cost} balance`}
               </Button>
             </div>
           </form>
@@ -232,7 +245,9 @@ function GenerateKeyCard({ scope }: { scope: "owner" | "admin" }) {
             <DialogDescription className="flex items-center gap-1.5">
               <AlertTriangle className="size-3.5 text-amber-500" />
               Shown once — copy it now. Cost: {result?.cost} balance
-              {scope === "owner" ? " (from your wallet)" : ""}.
+              {scope === "owner"
+                ? " (no deduction — owner wallet is unlimited)."
+                : "."}
             </DialogDescription>
           </DialogHeader>
           <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/50 p-3">
@@ -243,7 +258,9 @@ function GenerateKeyCard({ scope }: { scope: "owner" | "admin" }) {
           </div>
           <p className="text-xs text-muted-foreground">
             Remaining balance:{" "}
-            <span className="font-semibold text-foreground">{result?.balance}</span>
+            <span className="font-semibold text-foreground">
+              {unlimited ? "∞ (unlimited)" : result?.balance}
+            </span>
           </p>
         </DialogContent>
       </Dialog>
