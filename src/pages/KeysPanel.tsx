@@ -143,7 +143,7 @@ function GenerateKeyCard({ scope }: { scope: "owner" | "admin" }) {
                 Each key costs{" "}
                 <span className="font-semibold text-foreground">{cost}</span> balance
                 — your wallet is unlimited, so nothing is deducted. The client
-                presents this key at{" "}
+                asks the user to enter this license key at{" "}
                 <code className="rounded bg-muted px-1 py-0.5 text-xs">/connect</code>,
                 and it binds to the first device that connects (1 key = 1 device).
               </>
@@ -151,8 +151,9 @@ function GenerateKeyCard({ scope }: { scope: "owner" | "admin" }) {
               <>
                 Each key costs{" "}
                 <span className="font-semibold text-foreground">{cost}</span> balance,
-                deducted from your wallet ({balance} left). The client presents this
-                key at <code className="rounded bg-muted px-1 py-0.5 text-xs">/connect</code>,
+                deducted from your wallet ({balance} left). The client asks the
+                user to enter this license key at{" "}
+                <code className="rounded bg-muted px-1 py-0.5 text-xs">/connect</code>,
                 and it binds to the first device that connects (1 key = 1 device).
               </>
             )}

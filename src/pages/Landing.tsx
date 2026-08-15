@@ -30,7 +30,7 @@ const features = [
   {
     icon: KeyRound,
     title: "Key-gated connect",
-    body: "Every client presents a generated key at /connect. Invalid, revoked, expired, or exhausted keys are rejected — every attempt is logged with its IP and result.",
+    body: "Every client asks the user to enter a license key at /connect. Invalid, revoked, expired, or exhausted keys are rejected — every attempt is logged with its IP and result.",
   },
   {
     icon: Coins,
@@ -188,7 +188,7 @@ export default function Landing() {
                   <span className="text-zinc-300">$</span> curl -X POST{" "}
                   <span className="text-teal-300">https://ns.example/connect</span> \
                   <br />
-                  &nbsp;&nbsp;-d '{"{"}"key":"NS-K4F2-X9LM-…","server":"eu-main"{"}"}'
+                  &nbsp;&nbsp;-d '{"{"}"license":"NS-K4F2-X9LM-…","device":"device-abc"{"}"}'
                 </p>
                 <p className="text-zinc-500">
                   <span className="text-zinc-300">→</span>{" "}
@@ -201,7 +201,7 @@ export default function Landing() {
                   <span className="text-zinc-300">$</span> curl -X POST{" "}
                   <span className="text-teal-300">https://ns.example/connect</span> \
                   <br />
-                  &nbsp;&nbsp;-d '{"{"}"key":"NS-EXPIRED-…","server":"eu-main"{"}"}'
+                  &nbsp;&nbsp;-d '{"{"}"license":"NS-EXPIRED-…","device":"device-abc"{"}"}'
                 </p>
                 <p className="text-zinc-500">
                   <span className="text-zinc-300">→</span>{" "}

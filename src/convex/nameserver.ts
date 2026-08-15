@@ -39,6 +39,7 @@ export const DEFAULT_SETTINGS = {
   defaultKeyHours: 0, // 0 = never expires
   maintenance: false,
   downMessage: "",
+  keyPrefix: "NS", // keys look like NS-XXXX-XXXX-… (customizable in Settings)
 } as const;
 
 /** Look up the single global settings doc (or null when never saved). */
@@ -81,6 +82,7 @@ export const getSettings = query({
       defaultKeyHours: doc?.defaultKeyHours ?? DEFAULT_SETTINGS.defaultKeyHours,
       maintenance: doc?.maintenance ?? DEFAULT_SETTINGS.maintenance,
       downMessage: doc?.downMessage ?? DEFAULT_SETTINGS.downMessage,
+      keyPrefix: doc?.keyPrefix ?? DEFAULT_SETTINGS.keyPrefix,
     };
   },
 });
@@ -92,15 +94,23 @@ export const updateSettings = mutation({
     defaultKeyHours: v.number(),
     maintenance: v.boolean(),
     downMessage: v.optional(v.string()),
+    keyPrefix: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     await requireRole(ctx, ["owner"]);
+    // Sanitize the key prefix: A-Z, 0-9, 1-10 chars.
+    const rawPrefix = (args.keyPrefix ?? DEFAULT_SETTINGS.keyPrefix)
+      .trim()
+      .toUpperCase()
+      .replace(/[^A-Z0-9]/g, "");
+    const keyPrefix = rawPrefix.slice(0, 10) || DEFAULT_SETTINGS.keyPrefix;
     const patch = {
       keyPrice: Math.max(0, Math.round(args.keyPrice)),
       defaultKeyUses: Math.max(0, Math.round(args.defaultKeyUses)),
       defaultKeyHours: Math.max(0, Math.round(args.defaultKeyHours)),
       maintenance: args.maintenance,
       downMessage: args.downMessage?.trim().slice(0, 200) || "",
+      keyPrefix,
     };
     const doc = await getSettingsDoc(ctx);
     if (doc) {
@@ -338,12 +348,12 @@ export const deleteServer = mutation({
 /* ------------------------------ keys ------------------------------ */
 
 const KEY_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no 0/O/1/I
-function generateKeyValue(): string {
+function generateKeyValue(prefix: string): string {
   const bytes = new Uint8Array(20);
   crypto.getRandomValues(bytes);
   let out = "";
   for (const b of bytes) out += KEY_ALPHABET[b % KEY_ALPHABET.length];
-  return `NS-${out.slice(0, 4)}-${out.slice(4, 8)}-${out.slice(8, 12)}-${out.slice(12, 16)}-${out.slice(16, 20)}`;
+  return `${prefix}-${out.slice(0, 4)}-${out.slice(4, 8)}-${out.slice(8, 12)}-${out.slice(12, 16)}-${out.slice(16, 20)}`;
 }
 
 export const generateKey = mutation({
@@ -369,6 +379,7 @@ export const generateKey = mutation({
       Math.round(args.hours ?? settings?.defaultKeyHours ?? DEFAULT_SETTINGS.defaultKeyHours),
     );
     const cost = settings?.keyPrice ?? DEFAULT_SETTINGS.keyPrice;
+    const prefix = settings?.keyPrefix ?? DEFAULT_SETTINGS.keyPrefix;
     const isOwner = roleOf(user) === "owner";
     const balance = user.balance ?? 0;
     // The owner's wallet is unlimited — no check, nothing is deducted.
@@ -378,14 +389,14 @@ export const generateKey = mutation({
       );
     }
 
-    let key = generateKeyValue();
+    let key = generateKeyValue(prefix);
     for (let i = 0; i < 5; i++) {
       const dup = await ctx.db
         .query("connectKeys")
         .withIndex("by_key", (q) => q.eq("key", key))
         .first();
       if (dup === null) break;
-      key = generateKeyValue();
+      key = generateKeyValue(prefix);
     }
 
     const id = await ctx.db.insert("connectKeys", {
@@ -552,7 +563,11 @@ export const listConnections = query({
         .order("desc")
         .take(200);
     }
-    const serverIds = new Set(conns.map((c) => c.serverId));
+    const serverIds = new Set(
+      conns
+        .map((c) => c.serverId)
+        .filter((id): id is Id<"servers"> => id !== undefined),
+    );
     const servers = new Map<Id<"servers">, Doc<"servers">>();
     for (const id of serverIds) {
       const s = await ctx.db.get(id);
@@ -560,8 +575,8 @@ export const listConnections = query({
     }
     return conns.map((c) => ({
       ...c,
-      serverName: servers.get(c.serverId)?.name ?? "deleted server",
-      serverCode: servers.get(c.serverId)?.code ?? "",
+      serverName: c.serverId ? (servers.get(c.serverId)?.name ?? "deleted server") : "—",
+      serverCode: c.serverId ? (servers.get(c.serverId)?.code ?? "") : "",
     }));
   },
 });
@@ -636,6 +651,11 @@ export const getKeyByValue = internalQuery({
   },
 });
 
+export const getServerById = internalQuery({
+  args: { serverId: v.id("servers") },
+  handler: async (ctx, { serverId }) => await ctx.db.get(serverId),
+});
+
 export const getSettingsInternal = internalQuery({
   args: {},
   handler: async (ctx) => await getSettingsDoc(ctx),
@@ -646,7 +666,7 @@ export const recordConnect = internalMutation({
   args: {
     keyId: v.optional(v.id("connectKeys")),
     key: v.string(),
-    serverId: v.id("servers"),
+    serverId: v.optional(v.id("servers")),
     ip: v.string(),
     userAgent: v.optional(v.string()),
     deviceId: v.optional(v.string()),
@@ -787,6 +807,7 @@ export const genKeyAsOwner = internalMutation({
       Math.round(args.hours ?? settings?.defaultKeyHours ?? DEFAULT_SETTINGS.defaultKeyHours),
     );
     const cost = settings?.keyPrice ?? DEFAULT_SETTINGS.keyPrice;
+    const prefix = settings?.keyPrefix ?? DEFAULT_SETTINGS.keyPrefix;
 
     const owner = await ctx.db
       .query("users")
@@ -796,14 +817,14 @@ export const genKeyAsOwner = internalMutation({
     const balance = owner.balance ?? 0;
     // The owner's wallet is unlimited — no check, nothing is deducted.
 
-    let key = generateKeyValue();
+    let key = generateKeyValue(prefix);
     for (let i = 0; i < 5; i++) {
       const dup = await ctx.db
         .query("connectKeys")
         .withIndex("by_key", (q) => q.eq("key", key))
         .first();
       if (dup === null) break;
-      key = generateKeyValue();
+      key = generateKeyValue(prefix);
     }
 
     const expiresAt = hours > 0 ? Date.now() + hours * 60 * 60 * 1000 : 0;

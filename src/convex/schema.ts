@@ -107,10 +107,12 @@ const schema = defineSchema(
       .index("by_creator", ["createdBy"]),
 
     // Every /connect attempt (success or failure) — the request log.
+    // serverId is optional: attempts with an unknown key and no server code
+    // are still logged.
     connections: defineTable({
       keyId: v.optional(v.id("connectKeys")),
       key: v.string(),
-      serverId: v.id("servers"),
+      serverId: v.optional(v.id("servers")),
       ip: v.string(),
       userAgent: v.optional(v.string()),
       deviceId: v.optional(v.string()), // device id presented by the client
@@ -128,6 +130,8 @@ const schema = defineSchema(
       defaultKeyHours: v.number(), // 0 = never expires
       maintenance: v.boolean(), // blocks all /connect calls
       downMessage: v.optional(v.string()), // shown to clients during maintenance
+      // Prefix used when generating keys, e.g. "NS" → NS-XXXX-… or "LIC" → LIC-XXXX-…
+      keyPrefix: v.optional(v.string()),
       telegramOwnerChatId: v.optional(v.string()), // bound Telegram chat (owner-level bot access)
       telegramBotUsername: v.optional(v.string()), // bot username cached from getMe
     }).index("by_scope", ["scope"]),

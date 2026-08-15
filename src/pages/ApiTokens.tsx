@@ -51,12 +51,12 @@ const SITE_URL =
 const nextjsCode = `// lib/nameserver.ts  — works in route handlers, server actions & client components
 const CONVEX_SITE = process.env.CONVEX_SITE_URL ?? "${SITE_URL}";
 
-// 'device' binds the key to one device (1 key = 1 device).
-export async function connect(key: string, server: string, device?: string) {
+// The app asks the user for their license key. 'device' binds 1 key = 1 device.
+export async function connect(license: string, device?: string) {
   const res = await fetch(\`\${CONVEX_SITE}/connect\`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ key, server, device }),
+    body: JSON.stringify({ license, device }),
   });
   return res.json(); // { ok, server, key } | { ok: false, error }
 }
@@ -80,12 +80,12 @@ export async function listFiles(apiToken: string) {
 const nodejsCode = `// nameserver.mjs — Node.js 18+ (no framework)
 const CONVEX_SITE = process.env.CONVEX_SITE_URL ?? "${SITE_URL}";
 
-// 'device' binds the key to one device (1 key = 1 device).
-export async function connect(key, server, device) {
+// The app asks the user for their license key. 'device' binds 1 key = 1 device.
+export async function connect(license, device) {
   const res = await fetch(\`\${CONVEX_SITE}/connect\`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ key, server, device }),
+    body: JSON.stringify({ license, device }),
   });
   return res.json();
 }
@@ -97,7 +97,7 @@ export async function listFiles(apiToken) {
   return res.json();
 }
 
-// connect("NS-XXXX-XXXX-XXXX-XXXX-XXXX", "eu-main", "device-abc-123").then(console.log);`;
+// connect("LIC-XXXX-XXXX-XXXX-XXXX-XXXX", "device-abc-123").then(console.log);`;
 
 const pythonCode = `# nameserver.py — pip install requests
 import requests
@@ -105,10 +105,10 @@ import requests
 CONVEX_SITE = "${SITE_URL}"
 
 
-def connect(key: str, server: str, device: str | None = None) -> dict:
-    # 'device' binds the key to one device (1 key = 1 device).
+def connect(license: str, device: str | None = None) -> dict:
+    # The app asks the user for their license key; 'device' binds 1 key = 1 device.
     r = requests.post(
-        f"{CONVEX_SITE}/connect", json={"key": key, "server": server, "device": device}
+        f"{CONVEX_SITE}/connect", json={"license": license, "device": device}
     )
     return r.json()  # {"ok": True, ...} or {"ok": False, "error": ...}
 
@@ -129,7 +129,7 @@ def list_files(api_token: str) -> dict:
     return r.json()
 
 
-# connect("NS-XXXX-XXXX-XXXX-XXXX-XXXX", "eu-main", "device-abc-123")`;
+# connect("LIC-XXXX-XXXX-XXXX-XXXX-XXXX", "device-abc-123")`;
 
 const kotlinCode = `// NameserverApi.kt — dependencies: implementation("com.squareup.okhttp3:okhttp:4.12.0")
 import kotlinx.coroutines.Dispatchers
@@ -145,11 +145,10 @@ object NameserverApi {
     private val client = OkHttpClient()
     private val json = "application/json".toMediaType()
 
-    // 'device' binds the key to one device (1 key = 1 device).
-    suspend fun connect(key: String, server: String, device: String? = null): JSONObject = withContext(Dispatchers.IO) {
+    // The app asks the user for their license key; 'device' binds 1 key = 1 device.
+    suspend fun connect(license: String, device: String? = null): JSONObject = withContext(Dispatchers.IO) {
         val body = JSONObject()
-            .put("key", key)
-            .put("server", server)
+            .put("license", license)
             .put("device", device)
             .toString()
         val request = Request.Builder()
@@ -173,21 +172,21 @@ object NameserverApi {
 }
 
 // Usage (inside a coroutine):
-// val result = NameserverApi.connect("NS-XXXX-XXXX-XXXX-XXXX-XXXX", "eu-main", "device-abc-123")`;
+// val result = NameserverApi.connect("LIC-XXXX-XXXX-XXXX-XXXX-XXXX", "device-abc-123")`;
 
 const endpoints = [
   {
     method: "POST",
     path: "/connect",
     auth: "public",
-    desc: "Validate a key + server code. Body: {\"key\": \"NS-…\", \"server\": \"eu-main\", \"device\": \"device-abc\"} — device binds 1 key to 1 device",
+    desc: "Validate a license key. Body: {\"license\": \"LIC-…\", \"device\": \"device-abc\"} — server is optional, detected from the key",
     methodClass: "bg-emerald-600/90 text-white",
   },
   {
     method: "GET",
     path: "/connect",
     auth: "public",
-    desc: "Same via query string: ?key=NS-…&server=eu-main&device=device-abc",
+    desc: "Same via query string: ?license=LIC-…&device=device-abc",
     methodClass: "bg-sky-600/90 text-white",
   },
   {

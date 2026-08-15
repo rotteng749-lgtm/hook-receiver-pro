@@ -101,9 +101,10 @@ function NewServerDialog({ onCreated }: { onCreated?: () => void }) {
         <DialogHeader>
           <DialogTitle>Create a server</DialogTitle>
           <DialogDescription>
-            Clients will connect to it with a key at{" "}
+            Clients connect to it at{" "}
             <code className="rounded bg-muted px-1 py-0.5 text-xs">/connect</code>{" "}
-            using this server's code.
+            with a license key — the server is detected from the key
+            automatically, no code needed.
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={submit} className="space-y-4">
@@ -258,16 +259,17 @@ export default function Servers() {
         <CardHeader>
           <CardTitle className="text-base">How clients connect</CardTitle>
           <CardDescription>
-            Give your app / script / loader the connect URL and a generated key:
+            Your app / script / loader asks the user for their license key and
+            calls /connect with it — the server is detected automatically:
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/50 p-3 font-mono text-[12.5px]">
             <span className="truncate">
-              {`curl -X POST ${CONNECT_BASE}/connect -d '{"key":"NS-XXXX-…","server":"<code>","device":"device-abc"}'`}
+              {`curl -X POST ${CONNECT_BASE}/connect -d '{"license":"LIC-XXXX-…","device":"device-abc"}'`}
             </span>
             <CopyButton
-              value={`curl -X POST ${CONNECT_BASE}/connect -d '{"key":"NS-XXXX-XXXX-XXXX-XXXX-XXXX","server":"<code>","device":"device-abc"}'`}
+              value={`curl -X POST ${CONNECT_BASE}/connect -d '{"license":"LIC-XXXX-XXXX-XXXX-XXXX-XXXX","device":"device-abc"}'`}
               label="cURL"
               size="icon"
             />
@@ -275,11 +277,13 @@ export default function Servers() {
           <p className="text-xs text-muted-foreground">
             GET works too:{" "}
             <code className="rounded bg-muted px-1 py-0.5">
-              {CONNECT_BASE}/connect?key=NS-…&amp;server=&lt;code&gt;&amp;device=device-abc
+              {CONNECT_BASE}/connect?license=LIC-…&amp;device=device-abc
             </code>{" "}
-            — replace <code className="rounded bg-muted px-1 py-0.5">&lt;code&gt;</code> with the
-            server code below. Include <code className="rounded bg-muted px-1 py-0.5">device</code>{" "}
-            to bind the key to that device — 1 key = 1 device.
+            — the client only needs the license key the user typed in. Include{" "}
+            <code className="rounded bg-muted px-1 py-0.5">device</code> to bind
+            the license to that device — 1 key = 1 device. Keys are generated
+            with the prefix you set in Settings (default {" "}
+            <code className="rounded bg-muted px-1 py-0.5">NS</code>).
           </p>
         </CardContent>
       </Card>

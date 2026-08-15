@@ -7,8 +7,8 @@
  *
  * Routes:
  *   GET    /health            → public status
- *   POST   /connect           → public, validate { key, server } (JSON)
- *   GET    /connect           → public, validate ?key=…&server=…
+ *   POST   /connect           → public, validate { license, device? } (JSON)
+ *   GET    /connect           → public, validate ?license=…&device=…
  *   POST   /api/login         → public, {username,password} → {token} (24 h)
  *   POST   /api/files         → admin (Bearer), multipart upload
  *   GET    /api/files         → admin (Bearer), list all files
@@ -23,7 +23,7 @@ import { httpRouter } from "convex/server";
 import type { GenericActionCtx } from "convex/server";
 import { internal } from "./_generated/api";
 import { httpAction } from "./_generated/server";
-import type { Id } from "./_generated/dataModel";
+import type { Doc, Id } from "./_generated/dataModel";
 import { auth } from "./auth";
 import { contentTypeFor, sanitizeFilename } from "./files";
 import { webhook as telegramWebhook } from "./telegram";
@@ -350,14 +350,15 @@ const deleteFile = httpAction(async (ctx, request) => {
 
 /**
  * Public connect endpoint: a client (app, .sh script, .dll loader…) presents
- * a generated key for a server and gets validated.
+ * a license key and gets validated. The app just asks the user for their
+ * license key — the server is optional and inferred from the key.
  *
- *   POST /connect  body { key, server, device }   (JSON)
- *   GET  /connect?key=NS-…&server=<code>&device=<id>
+ *   POST /connect  body { license, server?, device? }   (JSON)
+ *                  `key` / `licenseKey` / `license_key` are accepted as aliases.
+ *   GET  /connect?license=LIC-…&server=<code>&device=<id>
  *
- * `server` is the server code (lowercase slug). `device` is optional but
- * recommended: each key is bound to the FIRST device that connects (1 key =
- * 1 device) — a second, different device is rejected with 403.
+ * `device` is optional but recommended: each key is bound to the FIRST device
+ * that connects (1 key = 1 device) — a second, different device is rejected.
  *
  * Responses are always JSON:
  *   { ok: true,  server: {name, code}, key: {expiresAt, uses, maxUses}, message }
@@ -375,38 +376,65 @@ const connect = httpAction(async (ctx, request) => {
     try {
       body = await request.json();
     } catch {
-      return json({ ok: false, error: "expected JSON body { key, server }" }, 400);
+      return json({ ok: false, error: "expected a JSON body with a key" }, 400);
     }
-    const obj = body as { key?: unknown; server?: unknown; device?: unknown };
-    key = typeof obj.key === "string" ? obj.key.trim() : "";
+    const obj = body as Record<string, unknown>;
+    const rawKey =
+      typeof obj.key === "string"
+        ? obj.key
+        : typeof obj.license === "string"
+          ? obj.license
+          : typeof obj.licenseKey === "string"
+            ? obj.licenseKey
+            : typeof obj.license_key === "string"
+              ? obj.license_key
+              : "";
+    key = rawKey.trim();
     serverRef = typeof obj.server === "string" ? obj.server.trim() : "";
     device = typeof obj.device === "string" ? obj.device.trim().slice(0, 128) : "";
   } else {
-    key = (url.searchParams.get("key") ?? "").trim();
+    key = (
+      url.searchParams.get("key") ??
+      url.searchParams.get("license") ??
+      url.searchParams.get("license_key") ??
+      ""
+    ).trim();
     serverRef = (url.searchParams.get("server") ?? "").trim();
     device = (url.searchParams.get("device") ?? "").trim().slice(0, 128);
   }
 
-  if (key.length === 0 || serverRef.length === 0) {
-    return json({ ok: false, error: "missing key or server" }, 400);
+  if (key.length === 0) {
+    return json({ ok: false, error: "missing key" }, 400);
   }
 
   const ip = clientIp(request);
   const ua = request.headers.get("user-agent") ?? undefined;
 
-  const server = await ctx.runQuery(internal.nameserver.getServerByCode, {
-    code: serverRef.toLowerCase(),
-  });
-  if (server === null) {
-    accessLog(request, 404, "-");
-    return json({ ok: false, error: "server not found" }, 404);
+  // `server` is optional — when omitted it is inferred from the key.
+  let server: Doc<"servers"> | null = null;
+  if (serverRef.length > 0) {
+    server = await ctx.runQuery(internal.nameserver.getServerByCode, {
+      code: serverRef.toLowerCase(),
+    });
+    if (server === null) {
+      await ctx.runMutation(internal.nameserver.recordConnect, {
+        key,
+        ip,
+        userAgent: ua,
+        deviceId: device || undefined,
+        ok: false,
+        reason: "server_not_found",
+      });
+      accessLog(request, 404, "-");
+      return json({ ok: false, error: "server not found" }, 404);
+    }
   }
 
   const settings = await ctx.runQuery(internal.nameserver.getSettingsInternal, {});
   if (settings?.maintenance) {
     await ctx.runMutation(internal.nameserver.recordConnect, {
       key,
-      serverId: server._id,
+      serverId: server?._id,
       ip,
       userAgent: ua,
       deviceId: device || undefined,
@@ -419,7 +447,7 @@ const connect = httpAction(async (ctx, request) => {
       503,
     );
   }
-  if (server.status === "off") {
+  if (server !== null && server.status === "off") {
     await ctx.runMutation(internal.nameserver.recordConnect, {
       key,
       serverId: server._id,
@@ -437,7 +465,7 @@ const connect = httpAction(async (ctx, request) => {
   const fail = async (status: number, reason: string, error: string) => {
     await ctx.runMutation(internal.nameserver.recordConnect, {
       key,
-      serverId: server._id,
+      serverId: server?._id,
       ip,
       userAgent: ua,
       deviceId: device || undefined,
@@ -449,8 +477,21 @@ const connect = httpAction(async (ctx, request) => {
   };
 
   if (keyDoc === null) return await fail(401, "invalid_key", "invalid key");
-  if (keyDoc.serverId !== server._id) {
+  if (serverRef.length > 0 && keyDoc.serverId !== server!._id) {
     return await fail(401, "wrong_server", "key does not belong to this server");
+  }
+  if (server === null) {
+    // No server code was sent — derive the server from the key itself.
+    const inferred = await ctx.runQuery(internal.nameserver.getServerById, {
+      serverId: keyDoc.serverId,
+    });
+    if (inferred === null) {
+      return await fail(403, "server_missing", "the server for this key no longer exists");
+    }
+    if (inferred.status === "off") {
+      return await fail(403, "offline", "server is offline");
+    }
+    server = inferred;
   }
   if (keyDoc.status === "revoked") {
     return await fail(403, "revoked", "key has been revoked");

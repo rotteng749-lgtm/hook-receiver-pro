@@ -23,6 +23,7 @@ export default function SettingsPage() {
   const [keyPrice, setKeyPrice] = useState("10");
   const [defaultKeyUses, setDefaultKeyUses] = useState("0");
   const [defaultKeyHours, setDefaultKeyHours] = useState("0");
+  const [keyPrefix, setKeyPrefix] = useState("NS");
   const [maintenance, setMaintenance] = useState(false);
   const [downMessage, setDownMessage] = useState("");
   const [busy, setBusy] = useState(false);
@@ -32,6 +33,7 @@ export default function SettingsPage() {
       setKeyPrice(String(settings.keyPrice));
       setDefaultKeyUses(String(settings.defaultKeyUses));
       setDefaultKeyHours(String(settings.defaultKeyHours));
+      setKeyPrefix(settings.keyPrefix);
       setMaintenance(settings.maintenance);
       setDownMessage(settings.downMessage);
     }
@@ -53,6 +55,7 @@ export default function SettingsPage() {
         keyPrice: Number(keyPrice) || 0,
         defaultKeyUses: Number(defaultKeyUses) || 0,
         defaultKeyHours: Number(defaultKeyHours) || 0,
+        keyPrefix: keyPrefix || undefined,
         maintenance,
         downMessage: downMessage || undefined,
       });
@@ -78,10 +81,11 @@ export default function SettingsPage() {
             <CardDescription>
               Generating a key always deducts the price from the generator's
               balance. Use limits and lifetime default to what new keys get when
-              the admin leaves them blank.
+              the admin leaves them blank. The prefix controls the license key
+              format, e.g. "NS" → NS-XXXX-… or "LIC" → LIC-XXXX-…
             </CardDescription>
           </CardHeader>
-          <CardContent className="grid grid-cols-1 gap-5 sm:grid-cols-3">
+          <CardContent className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-4">
             <div className="space-y-2">
               <Label htmlFor="key-price">Key price (balance per key)</Label>
               <Input
@@ -110,6 +114,16 @@ export default function SettingsPage() {
                 min={0}
                 value={defaultKeyHours}
                 onChange={(e) => setDefaultKeyHours(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="key-prefix">License key prefix (A-Z, 0-9)</Label>
+              <Input
+                id="key-prefix"
+                value={keyPrefix}
+                onChange={(e) => setKeyPrefix(e.target.value.toUpperCase())}
+                placeholder="NS"
+                maxLength={10}
               />
             </div>
           </CardContent>

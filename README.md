@@ -5,17 +5,25 @@ costs **balance**), and your apps / `.sh` scripts / `.dll` loaders authenticate
 through a single public endpoint:
 
 ```
-POST /connect   { "key": "NS-XXXX-…", "server": "<code>", "device": "device-abc" }
-GET  /connect   ?key=NS-XXXX-…&server=<code>&device=device-abc
+POST /connect   { "license": "NS-XXXX-…", "device": "device-abc" }
+GET  /connect   ?license=NS-XXXX-…&device=device-abc
 ```
 
 Valid keys get `{ ok: true, … }`; invalid, expired, revoked, or exhausted keys
 are rejected with a reason — and **every attempt is logged** (server, key,
 device, IP, user agent, result).
 
+**License-key flow:** the client (app / `.sh` / `.dll`) just asks the user to
+enter their license key. The `server` field is optional — it is detected from
+the key automatically. `key` / `licenseKey` / `license_key` are accepted as
+aliases for the license field.
+
 **1 key = 1 device:** the optional `device` field binds a key to the first
 device that connects. Once bound, a different device presenting the same key
 is rejected with `403 {"ok":false,"error":"key is bound to another device"}`.
+
+**Custom key format:** the owner sets the key prefix in **Settings** (e.g.
+`NS` → `NS-XXXX-…`, or `LIC` → `LIC-XXXX-…`). Only A-Z / 0-9, up to 10 chars.
 
 ## Roles
 
@@ -53,14 +61,14 @@ accounts get a starting balance to generate keys.
 2. **Servers → New server** — name it, set a code (e.g. `eu-main`).
 3. **Keys → Generate key** — pick the server, set uses/lifetime (or use the
    defaults), pay from balance, copy the key.
-4. Client calls the connect URL with the key + server code.
+4. The client calls the connect URL with the license key the user entered.
 5. **Members → Add member** — create admin accounts (username + password +
    starting balance) and hand them `/admin`.
 
 ```
 curl -X POST https://<deployment>.convex.site/connect \
   -H "Content-Type: application/json" \
-  -d '{"key":"NS-K4F2-X9LM-P7QW-3RTY-5VBN","server":"eu-main","device":"device-abc"}'
+  -d '{"license":"NS-K4F2-X9LM-P7QW-3RTY-5VBN","device":"device-abc"}'
 
 # 200 → {"ok":true,"server":{"name":"EU Main","code":"eu-main"},"key":{…},"message":"connected"}
 # 401 → {"ok":false,"error":"invalid key"}
