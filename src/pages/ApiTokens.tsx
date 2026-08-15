@@ -131,6 +131,46 @@ def list_files(api_token: str) -> dict:
 
 # connect("LIC-XXXX-XXXX-XXXX-XXXX-XXXX", "device-abc-123")`;
 
+const shellCode = `#!/usr/bin/env bash
+# nameserver.sh — gate your .sh app with a license key
+# Usage: ./nameserver.sh [LICENSE]   (prompts when not given)
+set -euo pipefail
+
+CONVEX_SITE="$CONVEX_SITE_URL"
+[ -n "$CONVEX_SITE" ] || CONVEX_SITE="https://lovable-dove-890.convex.site"
+
+# --- 1. Stable device id (1 key = 1 device) ---
+DEVICE_ID=""
+if [ -r /etc/machine-id ]; then
+  DEVICE_ID="$(tr -d '\\n' < /etc/machine-id)"
+else
+  DEVICE_FILE="$HOME/.nameserver-device"
+  [ -f "$DEVICE_FILE" ] || head -c 32 /dev/urandom | md5sum | cut -d' ' -f1 > "$DEVICE_FILE"
+  DEVICE_ID="$(tr -d '\\n' < "$DEVICE_FILE")"
+fi
+
+# --- 2. Ask the user for their license key ---
+LICENSE="$1"
+if [ -z "$LICENSE" ]; then
+  read -r -p "Enter your license key: " LICENSE
+fi
+LICENSE="$(echo "$LICENSE" | tr -d '[:space:]')"
+[ -n "$LICENSE" ] || { echo "No license key entered." >&2; exit 1; }
+
+# --- 3. Validate against /connect (server is detected from the key) ---
+RESPONSE="$(curl -sS -X POST "$CONVEX_SITE/connect" \\
+  -H "Content-Type: application/json" \\
+  -d "{\\"license\\":\\"$LICENSE\\",\\"device\\":\\"$DEVICE_ID\\"}")"
+
+# --- 4. Only continue when ok:true ---
+if echo "$RESPONSE" | grep -q '"ok":true'; then
+  echo "Connected - server $(echo "$RESPONSE" | sed -n 's/.*"code":"\\([^\"]*\\)\".*/\\1/p')"
+  # >>> your app logic starts here <<<
+else
+  echo "License rejected: $(echo "$RESPONSE" | sed -n 's/.*"error":"\\([^\"]*\\)\".*/\\1/p')" >&2
+  exit 1
+fi`;
+
 const kotlinCode = `// NameserverApi.kt — dependencies: implementation("com.squareup.okhttp3:okhttp:4.12.0")
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -478,8 +518,9 @@ export default function ApiTokens() {
             <code className="rounded bg-muted px-1 py-0.5 text-xs">
               NS-XXXX-…
             </code>{" "}
-            with a generated key and <code className="rounded bg-muted px-1 py-0.5 text-xs">eu-main</code>{" "}
-            with a server code.
+            with a generated key — the server is detected from the key
+            automatically. Each client asks the user for their license key and
+            only proceeds when <code className="rounded bg-muted px-1 py-0.5 text-xs">ok: true</code>.
           </p>
         </div>
 
@@ -490,6 +531,7 @@ export default function ApiTokens() {
                 <TabsTrigger value="nextjs">Next.js</TabsTrigger>
                 <TabsTrigger value="nodejs">Node.js</TabsTrigger>
                 <TabsTrigger value="python">Python</TabsTrigger>
+                <TabsTrigger value="shell">Shell (.sh)</TabsTrigger>
                 <TabsTrigger value="kotlin">Android Kotlin</TabsTrigger>
               </TabsList>
               <TabsContent value="nextjs" className="mt-4">
@@ -500,6 +542,9 @@ export default function ApiTokens() {
               </TabsContent>
               <TabsContent value="python" className="mt-4">
                 <CodeBlock code={pythonCode} />
+              </TabsContent>
+              <TabsContent value="shell" className="mt-4">
+                <CodeBlock code={shellCode} />
               </TabsContent>
               <TabsContent value="kotlin" className="mt-4">
                 <CodeBlock code={kotlinCode} />
