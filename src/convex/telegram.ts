@@ -47,7 +47,51 @@ const HELP_OWNER = [
   "- /server <code> — server detail + recent connects",
   "- /genkey <code> [uses] [hours] — generate a key (from your balance)",
   "- /maintenance on|off [message] — toggle maintenance",
+  "- /tutorial — cara connect app/script dari awal sampai jalan",
   "- /id — your chat id",
+].join("\n");
+
+/** Step-by-step guide for hooking up an app / script (.sh, .dll, etc.) to
+ *  the connect endpoint. Public — harmless info, so it is answered before
+ *  the owner check. */
+const TUTORIAL = [
+  "📘 TUTORIAL — CARA CONNECT APP / SCRIPT",
+  "",
+  "1️⃣ Bikin server dulu (kalau belum ada):",
+  "   Panel → Servers → New server (kode: eu-main, dll)",
+  "   Cek daftarnya: /servers",
+  "",
+  "2️⃣ Generate key:",
+  "   /genkey <kode> [uses] [jam]",
+  "   Contoh: /genkey eu-main 3 24",
+  "   → key: NS-XXXX-XXXX-XXXX-XXXX-XXXX",
+  "",
+  "3️⃣ Connect dari aplikasi (.sh, .dll, dll):",
+  "   App tinggal minta user enter license key, lalu POST ke:",
+  "   https://lovable-dove-890.convex.site/connect",
+  "   Body JSON: {\"key\":\"NS-...\",\"device\":\"<device-id>\"}",
+  "",
+  "   Contoh .sh (taruh di awal script):",
+  "   read -r -p \"License key: \" KEY",
+  "   RESP=$(curl -sS -X POST https://lovable-dove-890.convex.site/connect \\",
+  "     -H \"Content-Type: application/json\" \\",
+  "     -d \"{\\\"key\\\":\\\"$KEY\\\"}\")",
+  "   echo \"$RESP\" | grep -q '\"ok\":true' || { echo \"License rejected\"; exit 1; }",
+  "",
+  "   ok:true → lanjut jalan. ok:false → tampilkan error-nya.",
+  "",
+  "4️⃣ 1 key = 1 device:",
+  "   Key ke-bind ke device pertama yang connect.",
+  "   Mau pindah device? Reset dari device lama:",
+  "   curl -X POST https://lovable-dove-890.convex.site/connect \\",
+  "     -H \"Content-Type: application/json\" \\",
+  "     -d '{\"key\":\"NS-...\",\"device\":\"device-lama\",\"action\":\"reset\"}'",
+  "   atau minta owner reset dari panel → Keys.",
+  "",
+  "5️⃣ Client library lengkap (Node.js, Python, Kotlin, Next.js, .sh):",
+  "   Panel → API & Tokens",
+  "",
+  "6️⃣ Pantau panel: /stats · /servers · /server <kode> · /keys",
 ].join("\n");
 
 async function tgFetch(method: string, body: Record<string, unknown> = {}) {
@@ -259,6 +303,9 @@ const webhook = httpAction(async (ctx, request) => {
   }
   if (text === "/start" || text === "/help") {
     return reply(HELP_OWNER);
+  }
+  if (text === "/tutorial" || text === "/cara") {
+    return reply(TUTORIAL);
   }
   if (!isOwner) {
     return reply("This bot is bound to the panel owner. Not authorized.");

@@ -146,6 +146,7 @@ permissions:
 | `/server <code>` | Server detail + recent connect results |
 | `/genkey <code> [uses] [hours]` | Generate a key (deducted from your balance) |
 | `/maintenance on\|off [message]` | Block / allow all `/connect` calls |
+| `/tutorial` | Step-by-step guide: connect an app/script (.sh, .dll, …), generate keys, reset devices |
 | `/id` | Show your chat id |
 
 You can skip the panel step by setting `TELEGRAM_OWNER_CHAT_ID` as an
