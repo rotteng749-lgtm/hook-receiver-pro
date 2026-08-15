@@ -352,18 +352,23 @@ const deleteFile = httpAction(async (ctx, request) => {
  * Public connect endpoint: a client (app, .sh script, .dll loader…) presents
  * a generated key for a server and gets validated.
  *
- *   POST /connect  body { key, server }   (JSON)
- *   GET  /connect?key=NS-…&server=<code>
+ *   POST /connect  body { key, server, device }   (JSON)
+ *   GET  /connect?key=NS-…&server=<code>&device=<id>
  *
- * `server` is the server code (lowercase slug). Responses are always JSON:
+ * `server` is the server code (lowercase slug). `device` is optional but
+ * recommended: each key is bound to the FIRST device that connects (1 key =
+ * 1 device) — a second, different device is rejected with 403.
+ *
+ * Responses are always JSON:
  *   { ok: true,  server: {name, code}, key: {expiresAt, uses, maxUses}, message }
  *   { ok: false, error }  (400 / 401 / 403 / 404 / 503)
- * Every attempt is logged (IP, user agent, result).
+ * Every attempt is logged (IP, user agent, device, result).
  */
 const connect = httpAction(async (ctx, request) => {
   const url = new URL(request.url);
   let key = "";
   let serverRef = "";
+  let device = "";
 
   if (request.method === "POST") {
     let body: unknown;
@@ -372,12 +377,14 @@ const connect = httpAction(async (ctx, request) => {
     } catch {
       return json({ ok: false, error: "expected JSON body { key, server }" }, 400);
     }
-    const obj = body as { key?: unknown; server?: unknown };
+    const obj = body as { key?: unknown; server?: unknown; device?: unknown };
     key = typeof obj.key === "string" ? obj.key.trim() : "";
     serverRef = typeof obj.server === "string" ? obj.server.trim() : "";
+    device = typeof obj.device === "string" ? obj.device.trim().slice(0, 128) : "";
   } else {
     key = (url.searchParams.get("key") ?? "").trim();
     serverRef = (url.searchParams.get("server") ?? "").trim();
+    device = (url.searchParams.get("device") ?? "").trim().slice(0, 128);
   }
 
   if (key.length === 0 || serverRef.length === 0) {
@@ -402,6 +409,7 @@ const connect = httpAction(async (ctx, request) => {
       serverId: server._id,
       ip,
       userAgent: ua,
+      deviceId: device || undefined,
       ok: false,
       reason: "maintenance",
     });
@@ -417,6 +425,7 @@ const connect = httpAction(async (ctx, request) => {
       serverId: server._id,
       ip,
       userAgent: ua,
+      deviceId: device || undefined,
       ok: false,
       reason: "offline",
     });
@@ -431,6 +440,7 @@ const connect = httpAction(async (ctx, request) => {
       serverId: server._id,
       ip,
       userAgent: ua,
+      deviceId: device || undefined,
       ok: false,
       reason,
     });
@@ -452,13 +462,20 @@ const connect = httpAction(async (ctx, request) => {
     return await fail(403, "usage_limit", "key has reached its usage limit");
   }
 
+  // 1 key = 1 device: reject a different device once the key is bound.
+  if (keyDoc.deviceId !== undefined && keyDoc.deviceId !== device) {
+    return await fail(403, "device_mismatch", "key is bound to another device");
+  }
+
   await ctx.runMutation(internal.nameserver.recordConnect, {
     keyId: keyDoc._id,
     key,
     serverId: server._id,
     ip,
     userAgent: ua,
+    deviceId: device || undefined,
     ok: true,
+    bindDevice: true,
   });
   accessLog(request, 200, "-");
   return json({

@@ -307,7 +307,8 @@ const webhook = httpAction(async (ctx, request) => {
           const expires =
             k.expiresAt === 0 ? "never" : new Date(k.expiresAt).toISOString().slice(0, 10);
           const uses = `${k.uses}/${k.maxUses === 0 ? "unlimited" : k.maxUses}`;
-          return `${k.key}\n  ${server?.name ?? "?"} · ${k.status} · ${uses} · expires ${expires}${k.note ? ` · ${k.note}` : ""}`;
+          const device = k.deviceId ? `device ${k.deviceId}` : "not bound";
+          return `${k.key}\n  ${server?.name ?? "?"} · ${k.status} · ${uses} · expires ${expires} · ${device}${k.note ? ` · ${k.note}` : ""}`;
         })
         .join("\n"),
     );

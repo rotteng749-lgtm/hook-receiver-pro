@@ -264,10 +264,10 @@ export default function Servers() {
         <CardContent className="space-y-3">
           <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/50 p-3 font-mono text-[12.5px]">
             <span className="truncate">
-              {`curl -X POST ${CONNECT_BASE}/connect -d '{"key":"NS-XXXX-…","server":"<code>"}'`}
+              {`curl -X POST ${CONNECT_BASE}/connect -d '{"key":"NS-XXXX-…","server":"<code>","device":"device-abc"}'`}
             </span>
             <CopyButton
-              value={`curl -X POST ${CONNECT_BASE}/connect -d '{"key":"NS-XXXX-XXXX-XXXX-XXXX-XXXX","server":"<code>"}'`}
+              value={`curl -X POST ${CONNECT_BASE}/connect -d '{"key":"NS-XXXX-XXXX-XXXX-XXXX-XXXX","server":"<code>","device":"device-abc"}'`}
               label="cURL"
               size="icon"
             />
@@ -275,10 +275,11 @@ export default function Servers() {
           <p className="text-xs text-muted-foreground">
             GET works too:{" "}
             <code className="rounded bg-muted px-1 py-0.5">
-              {CONNECT_BASE}/connect?key=NS-…&amp;server=&lt;code&gt;
+              {CONNECT_BASE}/connect?key=NS-…&amp;server=&lt;code&gt;&amp;device=device-abc
             </code>{" "}
             — replace <code className="rounded bg-muted px-1 py-0.5">&lt;code&gt;</code> with the
-            server code below.
+            server code below. Include <code className="rounded bg-muted px-1 py-0.5">device</code>{" "}
+            to bind the key to that device — 1 key = 1 device.
           </p>
         </CardContent>
       </Card>

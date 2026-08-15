@@ -58,7 +58,7 @@ function NewMemberDialog() {
       await createMember({
         username,
         password,
-        role: role as "admin" | "user" | "member",
+        role: role as "owner" | "admin" | "user" | "member",
         balance: Number(balance) || 0,
       });
       toast.success(`Account "${username}" created`);
@@ -84,11 +84,12 @@ function NewMemberDialog() {
       </DialogTrigger>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Create a member account</DialogTitle>
+          <DialogTitle>Create an account</DialogTitle>
           <DialogDescription>
-            The new member signs in with this username &amp; password at{" "}
+            The new account signs in with this username &amp; password at{" "}
             <code className="rounded bg-muted px-1 py-0.5 text-xs">/auth</code>.
-            Give admins a starting balance so they can generate keys.
+            Admins need a starting balance to generate keys; owners get an
+            unlimited wallet and full control.
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={submit} className="space-y-4">
@@ -123,6 +124,7 @@ function NewMemberDialog() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
+                  <SelectItem value="owner">owner</SelectItem>
                   <SelectItem value="admin">admin</SelectItem>
                   <SelectItem value="user">user</SelectItem>
                   <SelectItem value="member">member</SelectItem>

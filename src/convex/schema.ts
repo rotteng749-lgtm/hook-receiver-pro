@@ -97,6 +97,10 @@ const schema = defineSchema(
       expiresAt: v.number(), // epoch ms; 0 = never expires
       cost: v.number(), // balance that was deducted
       note: v.optional(v.string()),
+      // Device this key is bound to (1 key = 1 device). Bound on the first
+      // successful /connect; unset means not bound yet. Empty string is the
+      // placeholder when the client didn't send a device id.
+      deviceId: v.optional(v.string()),
     })
       .index("by_key", ["key"])
       .index("by_server", ["serverId"])
@@ -109,6 +113,7 @@ const schema = defineSchema(
       serverId: v.id("servers"),
       ip: v.string(),
       userAgent: v.optional(v.string()),
+      deviceId: v.optional(v.string()), // device id presented by the client
       ok: v.boolean(), // did the validation succeed?
       reason: v.optional(v.string()),
     })

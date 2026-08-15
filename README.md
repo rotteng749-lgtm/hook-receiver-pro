@@ -5,19 +5,23 @@ costs **balance**), and your apps / `.sh` scripts / `.dll` loaders authenticate
 through a single public endpoint:
 
 ```
-POST /connect   { "key": "NS-XXXX-…", "server": "<code>" }
-GET  /connect   ?key=NS-XXXX-…&server=<code>
+POST /connect   { "key": "NS-XXXX-…", "server": "<code>", "device": "device-abc" }
+GET  /connect   ?key=NS-XXXX-…&server=<code>&device=device-abc
 ```
 
 Valid keys get `{ ok: true, … }`; invalid, expired, revoked, or exhausted keys
-are rejected with a reason — and **every attempt is logged** (server, key, IP,
-user agent, result).
+are rejected with a reason — and **every attempt is logged** (server, key,
+device, IP, user agent, result).
+
+**1 key = 1 device:** the optional `device` field binds a key to the first
+device that connects. Once bound, a different device presenting the same key
+is rejected with `403 {"ok":false,"error":"key is bound to another device"}`.
 
 ## Roles
 
 | Role    | Access                                                                 |
 | ------- | ---------------------------------------------------------------------- |
-| **owner** | Everything: all servers/keys/connections, member roles, balances, global settings. Panel at `/owner`. |
+| **owner** | Everything: all servers/keys/connections, member roles, balances, global settings. **Unlimited wallet** — key generation never deducts. Panel at `/owner`. |
 | **admin** | Creates & manages servers (theirs), generates keys. Each key deducts `keyPrice` from their balance. Panel at `/admin`. |
 | **user**  | Account holder — sees their profile and balance. No key generation.     |
 | client  | No panel — just calls `/connect` with a key + server code.              |
@@ -25,16 +29,20 @@ user agent, result).
 **Owner account:** the owner logs in with **username + password** (defaults
 `Panxcz` / `Panxxcz`, overridable via the `ADMIN_USERNAME` / `ADMIN_PASSWORD`
 environment variables). The account is created automatically the first time
-the sign-in page loads — no email or sign-up needed. Admins and other members
-are created by the owner in **Members → Add member** (username, password,
-role, starting balance).
+the sign-in page loads — no email or sign-up needed.
+
+**Adding owners & admins:** the owner can create more accounts in **Members →
+Add member** (username, password, role, starting balance). Any account created
+with role **owner** gets full owner access + unlimited wallet; **admin**
+accounts get a starting balance to generate keys.
 
 ## Balance
 
 - `users.balance` is the wallet. The owner sets balances (top-up/deduct) per
   member in **Members**.
 - `generateKey` deducts `settings.keyPrice` from the generator's wallet; the
-  key row records the cost.
+  key row records the cost. **The owner's wallet is unlimited** — the balance
+  check and deduction are skipped for owner accounts (shown as `∞` in the panel).
 - The owner controls `keyPrice`, default max-uses, default lifetime, and
   maintenance mode in **Settings** (owner panel).
 
@@ -52,11 +60,11 @@ role, starting balance).
 ```
 curl -X POST https://<deployment>.convex.site/connect \
   -H "Content-Type: application/json" \
-  -d '{"key":"NS-K4F2-X9LM-P7QW-3RTY-5VBN","server":"eu-main"}'
+  -d '{"key":"NS-K4F2-X9LM-P7QW-3RTY-5VBN","server":"eu-main","device":"device-abc"}'
 
 # 200 → {"ok":true,"server":{"name":"EU Main","code":"eu-main"},"key":{…},"message":"connected"}
 # 401 → {"ok":false,"error":"invalid key"}
-# 403 → {"ok":false,"error":"key has expired"}   (or revoked / usage limit / server offline)
+# 403 → {"ok":false,"error":"key has expired"}   (or revoked / usage limit / server offline / bound to another device)
 # 503 → {"ok":false,"error":"server under maintenance"}
 # 404 → {"ok":false,"error":"server not found"}
 ```

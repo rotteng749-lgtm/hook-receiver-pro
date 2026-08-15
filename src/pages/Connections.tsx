@@ -66,6 +66,7 @@ export default function Connections() {
                 <th className="px-4 py-3 font-medium">Time</th>
                 <th className="px-4 py-3 font-medium">Server</th>
                 <th className="px-4 py-3 font-medium">Key</th>
+                <th className="px-4 py-3 font-medium">Device</th>
                 <th className="px-4 py-3 font-medium">IP</th>
                 <th className="px-4 py-3 font-medium">Result</th>
                 <th className="px-4 py-3 font-medium">User agent</th>
@@ -85,6 +86,15 @@ export default function Connections() {
                   </td>
                   <td className="max-w-[160px] px-4 py-3">
                     <code className="truncate font-mono text-xs">{conn.key}</code>
+                  </td>
+                  <td className="max-w-[140px] px-4 py-3">
+                    {conn.deviceId ? (
+                      <code className="truncate font-mono text-[11px] text-muted-foreground">
+                        {conn.deviceId}
+                      </code>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">—</span>
+                    )}
                   </td>
                   <td className="px-4 py-3 font-mono text-xs text-muted-foreground">
                     {conn.ip}

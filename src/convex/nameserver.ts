@@ -180,6 +180,7 @@ export const createMember = mutation({
     username: v.string(),
     password: v.string(),
     role: v.union(
+      v.literal("owner"),
       v.literal("admin"),
       v.literal("user"),
       v.literal("member"),
@@ -648,8 +649,11 @@ export const recordConnect = internalMutation({
     serverId: v.id("servers"),
     ip: v.string(),
     userAgent: v.optional(v.string()),
+    deviceId: v.optional(v.string()),
     ok: v.boolean(),
     reason: v.optional(v.string()),
+    // Bind the key to this device on the first successful connect.
+    bindDevice: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     await ctx.db.insert("connections", {
@@ -658,6 +662,7 @@ export const recordConnect = internalMutation({
       serverId: args.serverId,
       ip: args.ip.slice(0, 64),
       userAgent: args.userAgent?.slice(0, 200) || undefined,
+      deviceId: args.deviceId?.slice(0, 128) || undefined,
       ok: args.ok,
       reason: args.reason,
     });
@@ -667,7 +672,16 @@ export const recordConnect = internalMutation({
         const uses = key.uses + 1;
         const status =
           key.maxUses > 0 && uses >= key.maxUses ? "used" : key.status;
-        await ctx.db.patch(args.keyId, { uses, status });
+        const patch: {
+          uses: number;
+          status: Doc<"connectKeys">["status"];
+          deviceId?: string;
+        } = { uses, status };
+        // 1 key = 1 device: bind on first successful connect.
+        if (args.bindDevice && key.deviceId === undefined && args.deviceId) {
+          patch.deviceId = args.deviceId.slice(0, 128);
+        }
+        await ctx.db.patch(args.keyId, patch);
       }
     }
   },

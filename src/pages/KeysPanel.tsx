@@ -144,14 +144,16 @@ function GenerateKeyCard({ scope }: { scope: "owner" | "admin" }) {
                 <span className="font-semibold text-foreground">{cost}</span> balance
                 — your wallet is unlimited, so nothing is deducted. The client
                 presents this key at{" "}
-                <code className="rounded bg-muted px-1 py-0.5 text-xs">/connect</code>.
+                <code className="rounded bg-muted px-1 py-0.5 text-xs">/connect</code>,
+                and it binds to the first device that connects (1 key = 1 device).
               </>
             ) : (
               <>
                 Each key costs{" "}
                 <span className="font-semibold text-foreground">{cost}</span> balance,
                 deducted from your wallet ({balance} left). The client presents this
-                key at <code className="rounded bg-muted px-1 py-0.5 text-xs">/connect</code>.
+                key at <code className="rounded bg-muted px-1 py-0.5 text-xs">/connect</code>,
+                and it binds to the first device that connects (1 key = 1 device).
               </>
             )}
           </CardDescription>
@@ -340,6 +342,7 @@ export default function KeysPanel({ scope }: { scope: "owner" | "admin" }) {
                   <th className="px-4 py-3 font-medium">Server</th>
                   <th className="px-4 py-3 font-medium">Status</th>
                   <th className="px-4 py-3 font-medium">Uses</th>
+                  <th className="px-4 py-3 font-medium">Device</th>
                   <th className="px-4 py-3 font-medium">Expires</th>
                   <th className="px-4 py-3 font-medium">Cost</th>
                   {scope === "owner" && (
@@ -374,6 +377,17 @@ export default function KeysPanel({ scope }: { scope: "owner" | "admin" }) {
                     </td>
                     <td className="px-4 py-3 text-xs tabular-nums">
                       {formatUses(key.uses, key.maxUses)}
+                    </td>
+                    <td className="max-w-[140px] px-4 py-3">
+                      {key.deviceId ? (
+                        <code className="truncate font-mono text-[11px]">
+                          {key.deviceId}
+                        </code>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">
+                          unbound — binds on first connect
+                        </span>
+                      )}
                     </td>
                     <td className="px-4 py-3 text-xs">{formatExpiry(key.expiresAt)}</td>
                     <td className="px-4 py-3 text-xs tabular-nums">{key.cost}</td>
