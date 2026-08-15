@@ -86,9 +86,38 @@ is served at the same URL (`.convex.site`).
 | ----------------- | -------- | ----------- |
 | `ADMIN_USERNAME`  | `Panxcz` | Owner panel login **and** the legacy `POST /api/login` username |
 | `ADMIN_PASSWORD`  | `Panxxcz`| Owner panel login **and** the legacy `POST /api/login` password |
+| `TELEGRAM_BOT_TOKEN` | *(the project bot)* | Telegram bot token (owner-level bot control) |
+| `TELEGRAM_OWNER_CHAT_ID` | — | Optional: pre-bind the owner Telegram chat (skip the panel step) |
 
 Panel logins use Convex Auth with the username/password provider — no email
 addresses are used anywhere.
+
+## Telegram bot (owner level)
+
+Open **Settings → Telegram** in the owner panel (`/owner/telegram`) to connect
+the bot:
+
+1. **Check bot** → the bot username appears → **Open in Telegram**.
+2. Send `/id` to the bot and copy the number it replies with.
+3. Paste the chat id in the panel and press **Bind as owner** — the webhook
+   is registered at `/telegram/webhook` automatically.
+
+Only the bound chat can talk to the bot, and every command runs with owner
+permissions:
+
+| Command | Description |
+| ------- | ----------- |
+| `/stats` | Panel overview (servers, keys, connects, revenue) |
+| `/balance` | Your balance and the key price |
+| `/servers` | List servers with status |
+| `/keys` | Last 5 generated keys |
+| `/server <code>` | Server detail + recent connect results |
+| `/genkey <code> [uses] [hours]` | Generate a key (deducted from your balance) |
+| `/maintenance on\|off [message]` | Block / allow all `/connect` calls |
+| `/id` | Show your chat id |
+
+You can skip the panel step by setting `TELEGRAM_OWNER_CHAT_ID` as an
+environment variable (it still requires `TELEGRAM_BOT_TOKEN`).
 
 ## Deployment
 

@@ -20,6 +20,7 @@ const OwnerOverview = lazy(() => import("./pages/owner/Overview.tsx"));
 const OwnerKeys = lazy(() => import("./pages/owner/Keys.tsx"));
 const OwnerMembers = lazy(() => import("./pages/owner/Members.tsx"));
 const OwnerSettings = lazy(() => import("./pages/owner/Settings.tsx"));
+const OwnerTelegram = lazy(() => import("./pages/owner/Telegram.tsx"));
 const AdminPanel = lazy(() => import("./pages/admin/AdminPanel.tsx"));
 const AdminOverview = lazy(() => import("./pages/admin/Overview.tsx"));
 const AdminKeys = lazy(() => import("./pages/admin/Keys.tsx"));
@@ -150,6 +151,7 @@ createRoot(document.getElementById("root")!).render(
                 <Route path="connections" element={<Connections />} />
                 <Route path="members" element={<OwnerMembers />} />
                 <Route path="api" element={<ApiTokens />} />
+                <Route path="telegram" element={<OwnerTelegram />} />
                 <Route path="settings" element={<OwnerSettings />} />
               </Route>
 

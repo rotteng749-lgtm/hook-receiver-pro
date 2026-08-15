@@ -123,6 +123,8 @@ const schema = defineSchema(
       defaultKeyHours: v.number(), // 0 = never expires
       maintenance: v.boolean(), // blocks all /connect calls
       downMessage: v.optional(v.string()), // shown to clients during maintenance
+      telegramOwnerChatId: v.optional(v.string()), // bound Telegram chat (owner-level bot access)
+      telegramBotUsername: v.optional(v.string()), // bot username cached from getMe
     }).index("by_scope", ["scope"]),
 
   },

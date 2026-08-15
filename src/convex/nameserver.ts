@@ -667,3 +667,148 @@ export const recordConnect = internalMutation({
     }
   },
 });
+
+/* -------------------- internal helpers (telegram bot) -------------------- */
+
+export const listServersInternal = internalQuery({
+  args: {},
+  handler: async (ctx) =>
+    await ctx.db.query("servers").order("desc").take(100),
+});
+
+export const listKeysInternal = internalQuery({
+  args: { limit: v.number() },
+  handler: async (ctx, { limit }) =>
+    await ctx.db
+      .query("connectKeys")
+      .order("desc")
+      .take(Math.max(1, Math.min(limit, 20))),
+});
+
+export const listConnectionsInternal = internalQuery({
+  args: { limit: v.number() },
+  handler: async (ctx, { limit }) =>
+    await ctx.db
+      .query("connections")
+      .order("desc")
+      .take(Math.max(1, Math.min(limit, 20))),
+});
+
+/** Owner-level overview numbers (used by the Telegram bot). */
+export const ownerStatsInternal = internalQuery({
+  args: {},
+  handler: async (ctx) => {
+    const servers = await ctx.db.query("servers").collect();
+    const keys = await ctx.db.query("connectKeys").take(1000);
+    const conns = await ctx.db.query("connections").take(1000);
+    const members = await ctx.db.query("users").take(500);
+    const owner = members.find((m) => m.role === "owner");
+    return {
+      balance: owner?.balance ?? 0,
+      serverCount: servers.length,
+      keyCount: keys.length,
+      activeKeyCount: keys.filter((k) => k.status === "active").length,
+      connectCount: conns.length,
+      successCount: conns.filter((c) => c.ok).length,
+      memberCount: members.length,
+      totalBalance: members.reduce((sum, m) => sum + (m.balance ?? 0), 0),
+      revenue: keys.reduce((sum, k) => sum + k.cost, 0),
+    };
+  },
+});
+
+/** Toggle maintenance mode (used by the Telegram bot). */
+export const setMaintenanceInternal = internalMutation({
+  args: { on: v.boolean(), message: v.optional(v.string()) },
+  handler: async (ctx, { on, message }) => {
+    const doc = await getSettingsDoc(ctx);
+    const downMessage = message?.trim().slice(0, 200) ?? "";
+    if (doc) {
+      await ctx.db.patch(doc._id, { maintenance: on, downMessage });
+    } else {
+      await ctx.db.insert("settings", {
+        scope: "global",
+        keyPrice: DEFAULT_SETTINGS.keyPrice,
+        defaultKeyUses: DEFAULT_SETTINGS.defaultKeyUses,
+        defaultKeyHours: DEFAULT_SETTINGS.defaultKeyHours,
+        maintenance: on,
+        downMessage,
+      });
+    }
+  },
+});
+
+/**
+ * Generate a connect key on behalf of the owner (used by the Telegram bot
+ * /genkey command). Deducts the price from the owner's balance.
+ */
+export const genKeyAsOwner = internalMutation({
+  args: {
+    serverCode: v.string(),
+    uses: v.optional(v.number()),
+    hours: v.optional(v.number()),
+    note: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const server = await ctx.db
+      .query("servers")
+      .withIndex("by_code", (q) => q.eq("code", args.serverCode.toLowerCase()))
+      .first();
+    if (server === null) throw new Error(`Server "${args.serverCode}" not found`);
+    if (server.status !== "active") throw new Error("Server is offline");
+
+    const settings = await getSettingsDoc(ctx);
+    const maxUses = Math.max(
+      0,
+      Math.round(args.uses ?? settings?.defaultKeyUses ?? DEFAULT_SETTINGS.defaultKeyUses),
+    );
+    const hours = Math.max(
+      0,
+      Math.round(args.hours ?? settings?.defaultKeyHours ?? DEFAULT_SETTINGS.defaultKeyHours),
+    );
+    const cost = settings?.keyPrice ?? DEFAULT_SETTINGS.keyPrice;
+
+    const owner = await ctx.db
+      .query("users")
+      .filter((q) => q.eq(q.field("role"), "owner"))
+      .first();
+    if (owner === null) throw new Error("No owner account configured");
+    const balance = owner.balance ?? 0;
+    if (balance < cost) {
+      throw new Error(`Insufficient balance — key costs ${cost}, balance is ${balance}`);
+    }
+
+    let key = generateKeyValue();
+    for (let i = 0; i < 5; i++) {
+      const dup = await ctx.db
+        .query("connectKeys")
+        .withIndex("by_key", (q) => q.eq("key", key))
+        .first();
+      if (dup === null) break;
+      key = generateKeyValue();
+    }
+
+    const expiresAt = hours > 0 ? Date.now() + hours * 60 * 60 * 1000 : 0;
+    await ctx.db.insert("connectKeys", {
+      key,
+      serverId: server._id,
+      createdBy: owner._id,
+      status: "active",
+      maxUses,
+      uses: 0,
+      expiresAt,
+      cost,
+      note: args.note?.trim().slice(0, 160) || undefined,
+    });
+    await ctx.db.patch(owner._id, { balance: balance - cost });
+    return {
+      key,
+      cost,
+      balance: balance - cost,
+      serverName: server.name,
+      serverCode: server.code,
+      maxUses,
+      expiresAt,
+    };
+  },
+});

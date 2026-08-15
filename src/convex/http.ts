@@ -26,6 +26,7 @@ import { httpAction } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { auth } from "./auth";
 import { contentTypeFor, sanitizeFilename } from "./files";
+import { webhook as telegramWebhook } from "./telegram";
 
 const http = httpRouter();
 
@@ -492,6 +493,8 @@ http.route({ path: "/api/files", method: "GET", handler: listFiles });
 http.route({ pathPrefix: "/api/files/", method: "DELETE", handler: deleteFile });
 
 http.route({ pathPrefix: "/files/", method: "GET", handler: download });
+
+http.route({ path: "/telegram/webhook", method: "POST", handler: telegramWebhook });
 
 http.route({ path: "/connect", method: "OPTIONS", handler: preflight });
 http.route({ pathPrefix: "/api/", method: "OPTIONS", handler: preflight });
