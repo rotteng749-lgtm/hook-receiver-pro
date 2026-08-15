@@ -46,6 +46,7 @@ import {
   KeyRound,
   Loader2,
   Plus,
+  RefreshCw,
   Trash2,
   XCircle,
 } from "lucide-react";
@@ -276,6 +277,7 @@ export default function KeysPanel({ scope }: { scope: "owner" | "admin" }) {
   const stats = useQuery(api.nameserver.overviewStats);
   const revokeKey = useMutation(api.nameserver.revokeKey);
   const deleteKey = useMutation(api.nameserver.deleteKey);
+  const resetKeyDevice = useMutation(api.nameserver.resetKeyDevice);
   const balance = stats?.balance ?? 0;
 
   const revoke = async (key: KeyRow) => {
@@ -293,6 +295,19 @@ export default function KeysPanel({ scope }: { scope: "owner" | "admin" }) {
       toast.success("Key deleted");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to delete key");
+    }
+  };
+
+  const reset = async (key: KeyRow) => {
+    try {
+      const res = await resetKeyDevice({ id: key._id });
+      toast.success(
+        res.hadDevice
+          ? "Device unbound — the key will bind to the next device that connects"
+          : "Key was not bound to a device",
+      );
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to reset device");
     }
   };
 
@@ -402,6 +417,47 @@ export default function KeysPanel({ scope }: { scope: "owner" | "admin" }) {
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center justify-end gap-1">
+                        {key.canManage && key.deviceId && key.status !== "revoked" && (
+                          <AlertDialog>
+                            <AlertDialogTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="icon-sm"
+                                className="cursor-pointer text-muted-foreground hover:text-foreground"
+                                aria-label="Reset device binding"
+                                title="Reset device binding"
+                              >
+                                <RefreshCw className="size-4" />
+                              </Button>
+                            </AlertDialogTrigger>
+                            <AlertDialogContent>
+                              <AlertDialogHeader>
+                                <AlertDialogTitle>Reset device binding?</AlertDialogTitle>
+                                <AlertDialogDescription>
+                                  This key is bound to device{" "}
+                                  <code className="rounded bg-muted px-1 py-0.5 text-xs">
+                                    {key.deviceId}
+                                  </code>
+                                  . Unbinding lets it connect from a new device
+                                  — the next successful connect binds it again
+                                  (1 key = 1 device). The usage counter is not
+                                  affected.
+                                </AlertDialogDescription>
+                              </AlertDialogHeader>
+                              <AlertDialogFooter>
+                                <AlertDialogCancel className="cursor-pointer">
+                                  Cancel
+                                </AlertDialogCancel>
+                                <AlertDialogAction
+                                  className="cursor-pointer"
+                                  onClick={() => reset(key)}
+                                >
+                                  Reset device
+                                </AlertDialogAction>
+                              </AlertDialogFooter>
+                            </AlertDialogContent>
+                          </AlertDialog>
+                        )}
                         {key.canManage && key.status !== "revoked" && (
                           <Button
                             variant="ghost"

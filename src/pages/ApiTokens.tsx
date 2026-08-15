@@ -219,14 +219,14 @@ const endpoints = [
     method: "POST",
     path: "/connect",
     auth: "public",
-    desc: "Validate a license key. Body: {\"license\": \"LIC-…\", \"device\": \"device-abc\"} — server is optional, detected from the key",
+    desc: "Validate a license key. Body: {\"license\": \"LIC-…\", \"device\": \"device-abc\"} — server is optional, detected from the key. Add \"action\": \"reset\" (from the bound device) to unbind it",
     methodClass: "bg-emerald-600/90 text-white",
   },
   {
     method: "GET",
     path: "/connect",
     auth: "public",
-    desc: "Same via query string: ?license=LIC-…&device=device-abc",
+    desc: "Same via query string: ?license=LIC-…&device=device-abc&action=reset",
     methodClass: "bg-sky-600/90 text-white",
   },
   {

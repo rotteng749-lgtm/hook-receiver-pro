@@ -486,6 +486,29 @@ export const deleteKey = mutation({
   },
 });
 
+/**
+ * Unbind a key from its device (1 key = 1 device) so it can bind to a new
+ * device on the next successful connect. Owner, or the admin who generated
+ * the key. The key itself can also unbind from the bound device via the
+ * public /connect endpoint (action: "reset").
+ */
+export const resetKeyDevice = mutation({
+  args: { id: v.id("connectKeys") },
+  handler: async (ctx, { id }) => {
+    const { user } = await requireRole(ctx, ["owner", "admin"]);
+    const key = await ctx.db.get(id);
+    if (key === null) throw new Error("Key not found");
+    if (roleOf(user) !== "owner" && key.createdBy !== user._id) {
+      throw new Error("Forbidden");
+    }
+    const hadDevice = key.deviceId !== undefined;
+    if (hadDevice) {
+      await ctx.db.patch(id, { deviceId: undefined });
+    }
+    return { key: key.key, hadDevice };
+  },
+});
+
 /* ------------------------------ members (owner) ------------------------------ */
 
 export const listMembers = query({
@@ -661,6 +684,18 @@ export const getSettingsInternal = internalQuery({
   handler: async (ctx) => await getSettingsDoc(ctx),
 });
 
+/** Clear a key's device binding (used by the public /connect reset flow). */
+export const resetKeyDeviceInternal = internalMutation({
+  args: { keyId: v.id("connectKeys") },
+  handler: async (ctx, { keyId }) => {
+    const key = await ctx.db.get(keyId);
+    if (key === null) throw new Error("Key not found");
+    if (key.deviceId !== undefined) {
+      await ctx.db.patch(keyId, { deviceId: undefined });
+    }
+  },
+});
+
 /** Log an attempt and (on success) advance the key's usage counter. */
 export const recordConnect = internalMutation({
   args: {
@@ -674,6 +709,9 @@ export const recordConnect = internalMutation({
     reason: v.optional(v.string()),
     // Bind the key to this device on the first successful connect.
     bindDevice: v.optional(v.boolean()),
+    // Set false for informational log entries (e.g. a device reset) that
+    // should not advance the key's usage counter.
+    countUse: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     await ctx.db.insert("connections", {
@@ -686,7 +724,7 @@ export const recordConnect = internalMutation({
       ok: args.ok,
       reason: args.reason,
     });
-    if (args.ok && args.keyId !== undefined) {
+    if (args.ok && args.keyId !== undefined && args.countUse !== false) {
       const key = await ctx.db.get(args.keyId);
       if (key !== null) {
         const uses = key.uses + 1;

@@ -353,9 +353,12 @@ const deleteFile = httpAction(async (ctx, request) => {
  * a license key and gets validated. The app just asks the user for their
  * license key — the server is optional and inferred from the key.
  *
- *   POST /connect  body { license, server?, device? }   (JSON)
+ *   POST /connect  body { license, server?, device?, action? }   (JSON)
  *                  `key` / `licenseKey` / `license_key` are accepted as aliases.
- *   GET  /connect?license=LIC-…&server=<code>&device=<id>
+ *                  `action: "reset"` unbinds the key from its device (only
+ *                  the currently-bound device can reset — send the same
+ *                  `device` id it was bound with).
+ *   GET  /connect?license=LIC-…&server=<code>&device=<id>[&action=reset]
  *
  * `device` is optional but recommended: each key is bound to the FIRST device
  * that connects (1 key = 1 device) — a second, different device is rejected.
@@ -370,6 +373,7 @@ const connect = httpAction(async (ctx, request) => {
   let key = "";
   let serverRef = "";
   let device = "";
+  let wantsReset = false;
 
   if (request.method === "POST") {
     let body: unknown;
@@ -392,6 +396,10 @@ const connect = httpAction(async (ctx, request) => {
     key = rawKey.trim();
     serverRef = typeof obj.server === "string" ? obj.server.trim() : "";
     device = typeof obj.device === "string" ? obj.device.trim().slice(0, 128) : "";
+    wantsReset =
+      (typeof obj.action === "string" && obj.action.trim() === "reset") ||
+      obj.reset === true ||
+      obj.reset === "true";
   } else {
     key = (
       url.searchParams.get("key") ??
@@ -401,6 +409,10 @@ const connect = httpAction(async (ctx, request) => {
     ).trim();
     serverRef = (url.searchParams.get("server") ?? "").trim();
     device = (url.searchParams.get("device") ?? "").trim().slice(0, 128);
+    wantsReset =
+      url.searchParams.get("action") === "reset" ||
+      url.searchParams.get("reset") === "true" ||
+      url.searchParams.get("reset") === "1";
   }
 
   if (key.length === 0) {
@@ -501,6 +513,62 @@ const connect = httpAction(async (ctx, request) => {
   }
   if (keyDoc.maxUses > 0 && keyDoc.uses >= keyDoc.maxUses) {
     return await fail(403, "usage_limit", "key has reached its usage limit");
+  }
+
+  // Reset the device binding: the currently-bound device may unbind itself
+  // so the key can move to a new machine (or rebind on this one). Panel
+  // users can also unbind from the Keys page — the bound device id is not
+  // needed there.
+  if (wantsReset) {
+    if (keyDoc.deviceId === undefined) {
+      await ctx.runMutation(internal.nameserver.recordConnect, {
+        keyId: keyDoc._id,
+        key,
+        serverId: server._id,
+        ip,
+        userAgent: ua,
+        deviceId: device || undefined,
+        ok: true,
+        reason: "reset_already_unbound",
+        countUse: false,
+      });
+      accessLog(request, 200, "-");
+      return json({
+        ok: true,
+        action: "reset",
+        message: "key is not bound to a device",
+      });
+    }
+    if (device.length === 0) {
+      return await fail(
+        400,
+        "missing_device",
+        "send the bound device id to reset it",
+      );
+    }
+    if (device !== keyDoc.deviceId) {
+      return await fail(403, "device_mismatch", "key is bound to another device");
+    }
+    await ctx.runMutation(internal.nameserver.resetKeyDeviceInternal, {
+      keyId: keyDoc._id,
+    });
+    await ctx.runMutation(internal.nameserver.recordConnect, {
+      keyId: keyDoc._id,
+      key,
+      serverId: server._id,
+      ip,
+      userAgent: ua,
+      deviceId: device,
+      ok: true,
+      reason: "device_reset",
+      countUse: false,
+    });
+    accessLog(request, 200, "-");
+    return json({
+      ok: true,
+      action: "reset",
+      message: "device unbound — the key can now connect from a new device",
+    });
   }
 
   // 1 key = 1 device: reject a different device once the key is bound.

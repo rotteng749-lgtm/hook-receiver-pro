@@ -22,6 +22,22 @@ aliases for the license field.
 device that connects. Once bound, a different device presenting the same key
 is rejected with `403 {"ok":false,"error":"key is bound to another device"}`.
 
+**Reset a device binding** — when a key needs to move to a new machine:
+
+- Panel: **Keys → reset icon** (shown on keys with a bound device). The owner,
+  or the admin who generated the key, can unbind it any time.
+- API (from the bound device, using the login key): send `action: "reset"`
+  with the same `device` id — the device that owns the key unbinds itself:
+
+  ```
+  curl -X POST https://<deployment>.convex.site/connect \
+    -H "Content-Type: application/json" \
+    -d '{"key":"NS-…","device":"device-abc","action":"reset"}'
+  # 200 → {"ok":true,"action":"reset","message":"device unbound — the key can now connect from a new device"}
+  ```
+
+  The reset does not count as a key use, and the usage counter is untouched.
+
 **Custom key format:** the owner sets the key prefix in **Settings** (e.g.
 `NS` → `NS-XXXX-…`, or `LIC` → `LIC-XXXX-…`). Only A-Z / 0-9, up to 10 chars.
 
