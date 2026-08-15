@@ -142,6 +142,12 @@ const schema = defineSchema(
       keyPrefix: v.optional(v.string()),
       telegramOwnerChatId: v.optional(v.string()), // bound Telegram chat (owner-level bot access)
       telegramBotUsername: v.optional(v.string()), // bot username cached from getMe
+      // Bound Telegram chats for admin users: { chatId, userId } pairs.
+      // Admins can run a subset of bot commands (check / reset their own
+      // keys) from their bound chat.
+      telegramAdmins: v.optional(
+        v.array(v.object({ chatId: v.string(), userId: v.id("users") })),
+      ),
     }).index("by_scope", ["scope"]),
 
   },

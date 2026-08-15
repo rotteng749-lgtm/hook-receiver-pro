@@ -185,12 +185,33 @@ permissions:
 | `/keys` | Last 5 generated keys |
 | `/server <code>` | Server detail + recent connect results |
 | `/genkey <code> [uses] [hours]` | Generate a key (deducted from your balance) |
+| `/check <key>` | Key info — status, uses, device, id |
+| `/resetkey <key>` | Unbind a key's device so it can connect from a new device (1 key = 1 device) |
+| `/export` | JSON snapshot with ids — servers, keys, connections, members (chunked) |
 | `/maintenance on\|off [message]` | Block / allow all `/connect` calls |
 | `/tutorial` | Step-by-step guide: connect an app/script (.sh, .dll, …), generate keys, reset devices |
 | `/id` | Show your chat id |
 
 You can skip the panel step by setting `TELEGRAM_OWNER_CHAT_ID` as an
 environment variable (it still requires `TELEGRAM_BOT_TOKEN`).
+
+### Admin access (bind admin chats)
+
+In the owner panel → **Telegram**, the **Admin access** card lets you bind an
+admin's Telegram chat id (they send `/id` to the bot). Bound admins get a
+limited command set from the bot — scoped to keys they generated:
+
+| Command | Description |
+| ------- | ----------- |
+| `/keys` | Their last 5 generated keys |
+| `/servers` | List servers with status |
+| `/check <key>` | Key info — own keys only |
+| `/resetkey <key>` | Unbind device — own keys only (admins reset keys from the bot without opening the panel) |
+| `/tutorial` · `/id` | Guide · show chat id |
+
+Everything else (`/stats`, `/balance`, `/genkey`, `/server`, `/maintenance`,
+`/export`) stays owner-only. `/check` and `/resetkey` show the key's `_id` so
+you can cross-reference it with the panel / `/export` output.
 
 ## Deployment
 

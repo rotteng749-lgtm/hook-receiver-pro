@@ -22,9 +22,11 @@ import {
   httpAction,
   internalMutation,
   internalQuery,
+  mutation,
   query,
 } from "./_generated/server";
 import type { ActionCtx, MutationCtx, QueryCtx } from "./_generated/server";
+import type { Id } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
 
 const BOT_TOKEN =
@@ -46,9 +48,24 @@ const HELP_OWNER = [
   "- /keys — last 5 keys",
   "- /server <code> — server detail + recent connects",
   "- /genkey <code> [uses] [hours] — generate a key (from your balance)",
+  "- /check <key> — key info (status, uses, device, id)",
+  "- /resetkey <key> — unbind device (1 key = 1 device reset)",
+  "- /export — JSON snapshot with ids (servers/keys/connections/members)",
   "- /maintenance on|off [message] — toggle maintenance",
   "- /tutorial — cara connect app/script dari awal sampai jalan",
   "- /id — your chat id",
+].join("\n");
+
+const HELP_ADMIN = [
+  "Admin commands (bound by the owner in the panel → Telegram):",
+  "- /keys — your last 5 keys",
+  "- /servers — list servers",
+  "- /check <key> — key info (your keys only)",
+  "- /resetkey <key> — unbind device so the key can move to a new device (your keys only)",
+  "- /tutorial — cara connect app/script dari awal sampai jalan",
+  "- /id — your chat id",
+  "",
+  "Owner-only: /stats, /balance, /genkey, /server, /maintenance, /export",
 ].join("\n");
 
 /** Step-by-step guide for hooking up an app / script (.sh, .dll, etc.) to
@@ -142,6 +159,7 @@ async function upsertSettings(
   patch: {
     telegramOwnerChatId?: string | undefined;
     telegramBotUsername?: string | undefined;
+    telegramAdmins?: { chatId: string; userId: Id<"users"> }[] | undefined;
   },
 ) {
   const doc = await getSettings(ctx);
@@ -157,6 +175,7 @@ async function upsertSettings(
       downMessage: "",
       telegramOwnerChatId: patch.telegramOwnerChatId,
       telegramBotUsername: patch.telegramBotUsername,
+      telegramAdmins: patch.telegramAdmins,
     });
   }
 }
@@ -171,6 +190,17 @@ export const status = query({
     const user = await ctx.db.get(userId);
     if (!user || user.role !== "owner") throw new Error("Forbidden");
     const settings = await getSettings(ctx);
+    const admins = await Promise.all(
+      (settings?.telegramAdmins ?? []).map(async (a) => {
+        const u = await ctx.db.get(a.userId);
+        return {
+          userId: a.userId,
+          chatId: a.chatId,
+          maskedChatId: maskChatId(a.chatId),
+          name: u?.name ?? u?.email ?? "unknown",
+        };
+      }),
+    );
     return {
       botUsername: settings?.telegramBotUsername ?? null,
       ownerChatId: settings?.telegramOwnerChatId ?? null,
@@ -178,6 +208,7 @@ export const status = query({
         ? maskChatId(settings.telegramOwnerChatId)
         : null,
       envChatId: process.env.TELEGRAM_OWNER_CHAT_ID ?? null,
+      admins,
     };
   },
 });
@@ -194,6 +225,58 @@ export const refreshBotInfo = action({
       telegramBotUsername: username ?? undefined,
     });
     return { botUsername: username };
+  },
+});
+
+/** Bind a Telegram chat for an admin account (owner-only). Admins get a
+ *  limited command set: /check and /resetkey on their own keys, /keys, /servers. */
+export const addAdmin = mutation({
+  args: { chatId: v.string(), userId: v.id("users") },
+  handler: async (ctx, { chatId, userId }) => {
+    await requireOwner(ctx);
+    const cleaned = chatId.trim();
+    if (!/^-?\d{5,}$/.test(cleaned)) {
+      throw new Error("Invalid chat id — ask the admin to send /id to the bot");
+    }
+    const target = await ctx.db.get(userId);
+    if (target === null) throw new Error("User not found");
+    if (target.role !== "admin" && target.role !== "owner") {
+      throw new Error("Only admin/owner accounts can be bound as bot admins");
+    }
+    const doc = await getSettings(ctx);
+    const admins = (doc?.telegramAdmins ?? []).filter(
+      (a) => a.chatId !== cleaned && a.userId !== userId,
+    );
+    admins.push({ chatId: cleaned, userId });
+    if (doc) {
+      await ctx.db.patch(doc._id, { telegramAdmins: admins });
+    } else {
+      await ctx.db.insert("settings", {
+        scope: "global",
+        keyPrice: 10,
+        defaultKeyUses: 0,
+        defaultKeyHours: 0,
+        maintenance: false,
+        downMessage: "",
+        telegramAdmins: admins,
+      });
+    }
+    return { chatId: cleaned, userId };
+  },
+});
+
+/** Remove an admin's bound Telegram chat (owner-only). */
+export const removeAdmin = mutation({
+  args: { chatId: v.string() },
+  handler: async (ctx, { chatId }) => {
+    await requireOwner(ctx);
+    const doc = await getSettings(ctx);
+    if (doc?.telegramAdmins) {
+      await ctx.db.patch(doc._id, {
+        telegramAdmins: doc.telegramAdmins.filter((a) => a.chatId !== chatId),
+      });
+    }
+    return { ok: true };
   },
 });
 
@@ -262,6 +345,9 @@ export const upsertSettingsInternal = internalMutation({
   args: {
     telegramOwnerChatId: v.optional(v.string()),
     telegramBotUsername: v.optional(v.string()),
+    telegramAdmins: v.optional(
+      v.array(v.object({ chatId: v.string(), userId: v.id("users") })),
+    ),
   },
   handler: async (ctx, args) => {
     await upsertSettings(ctx, args);
@@ -293,8 +379,17 @@ const webhook = httpAction(async (ctx, request) => {
     process.env.TELEGRAM_OWNER_CHAT_ID ??
     null;
   const isOwner = bound !== null && chatId === String(bound);
+  const adminEntry =
+    (settings?.telegramAdmins ?? []).find((a) => a.chatId === chatId) ?? null;
+  const isAdmin = adminEntry !== null;
   const reply = async (t: string): Promise<Response> => {
     await sendMessage(chatId, t);
+    return new Response("ok");
+  };
+  const replyChunks = async (t: string, max = 3500): Promise<Response> => {
+    for (let i = 0; i < t.length; i += max) {
+      await sendMessage(chatId, t.slice(i, i + max));
+    }
     return new Response("ok");
   };
 
@@ -302,12 +397,12 @@ const webhook = httpAction(async (ctx, request) => {
     return reply(`Your chat id:\n${chatId}`);
   }
   if (text === "/start" || text === "/help") {
-    return reply(HELP_OWNER);
+    return reply(isAdmin && !isOwner ? HELP_ADMIN : HELP_OWNER);
   }
   if (text === "/tutorial" || text === "/cara") {
     return reply(TUTORIAL);
   }
-  if (!isOwner) {
+  if (!isOwner && !isAdmin) {
     return reply("This bot is bound to the panel owner. Not authorized.");
   }
 
@@ -349,10 +444,16 @@ const webhook = httpAction(async (ctx, request) => {
   }
 
   if (cmd === "/keys") {
-    const keys = await ctx.runQuery(internal.nameserver.listKeysInternal, { limit: 5 });
+    const keys = isOwner
+      ? await ctx.runQuery(internal.nameserver.listKeysInternal, { limit: 5 })
+      : await ctx.runQuery(internal.nameserver.listKeysByCreatorInternal, {
+          userId: adminEntry!.userId,
+          limit: 5,
+        });
     const servers = await ctx.runQuery(internal.nameserver.listServersInternal, {});
     const byId = new Map(servers.map((s) => [s._id, s]));
-    if (keys.length === 0) return reply("No keys yet.");
+    if (keys.length === 0)
+      return reply(isOwner ? "No keys yet." : "You haven't generated any keys yet.");
     return reply(
       keys
         .map((k) => {
@@ -414,6 +515,107 @@ const webhook = httpAction(async (ctx, request) => {
     } catch (err) {
       return reply(err instanceof Error ? err.message : "Failed to generate key");
     }
+  }
+
+  if (cmd === "/check") {
+    const key = (parts[1] ?? "").trim();
+    if (!key) return reply("Usage: /check <key>");
+    const r = await ctx.runQuery(internal.nameserver.getKeyByValue, { key });
+    if (r === null) return reply("Key not found.");
+    if (!isOwner && r.createdBy !== adminEntry!.userId) {
+      return reply("Key not found (you can only check keys you created).");
+    }
+    const servers = await ctx.runQuery(internal.nameserver.listServersInternal, {});
+    const server = servers.find((s) => s._id === r.serverId);
+    const creator = await ctx.runQuery(internal.telegram.getUserInternal, {
+      userId: r.createdBy,
+    });
+    const expires =
+      r.expiresAt === 0 ? "never" : new Date(r.expiresAt).toISOString().slice(0, 10);
+    return reply(
+      [
+        `Key: ${r.key}`,
+        `ID: ${r._id}`,
+        `Server: ${server?.name ?? "?"} (${server?.code ?? "?"})`,
+        `Status: ${r.status}`,
+        `Uses: ${r.uses}/${r.maxUses === 0 ? "unlimited" : r.maxUses}`,
+        `Expires: ${expires}`,
+        `Device: ${r.deviceId ? r.deviceId : "not bound"}`,
+        `Creator: ${creator?.name ?? creator?.email ?? r.createdBy}`,
+        `Cost: ${r.cost}`,
+        r.note ? `Note: ${r.note}` : "",
+      ]
+        .filter(Boolean)
+        .join("\n"),
+    );
+  }
+
+  if (cmd === "/resetkey") {
+    const key = (parts[1] ?? "").trim();
+    if (!key) {
+      return reply(
+        "Usage: /resetkey <key>\nUnbinds the device so the key can connect from a new device (1 key = 1 device).",
+      );
+    }
+    try {
+      const r = await ctx.runMutation(internal.nameserver.resetKeyByValueInternal, {
+        key,
+        actorUserId: isOwner ? undefined : adminEntry!.userId,
+      });
+      return reply(
+        r.hadDevice
+          ? `Device unbound for ${r.key} — it can now connect from a new device.`
+          : `${r.key} was not bound to a device.`,
+      );
+    } catch (err) {
+      return reply(err instanceof Error ? err.message : "Failed to reset key");
+    }
+  }
+
+  if (cmd === "/export") {
+    if (!isOwner) return reply("Owner-only command.");
+    const snap = await ctx.runQuery(internal.nameserver.exportSnapshotInternal, {});
+    const json = JSON.stringify(
+      {
+        generatedAt: new Date(snap.generatedAt).toISOString(),
+        servers: snap.servers.map((s) => ({
+          _id: s._id,
+          name: s.name,
+          code: s.code,
+          status: s.status,
+        })),
+        keys: snap.keys.map((k) => ({
+          _id: k._id,
+          key: k.key,
+          serverId: k.serverId,
+          createdBy: k.createdBy,
+          status: k.status,
+          uses: k.uses,
+          maxUses: k.maxUses,
+          expiresAt: k.expiresAt,
+          deviceId: k.deviceId ?? null,
+          note: k.note ?? null,
+        })),
+        connections: snap.connections.map((c) => ({
+          _id: c._id,
+          key: c.key,
+          serverId: c.serverId ?? null,
+          keyId: c.keyId ?? null,
+          ok: c.ok,
+          reason: c.reason ?? null,
+          deviceId: c.deviceId ?? null,
+          game: c.game ?? null,
+          version: c.version ?? null,
+          resource: c.resource ?? null,
+          ip: c.ip,
+          time: c._creationTime,
+        })),
+        members: snap.members,
+      },
+      null,
+      2,
+    );
+    return replyChunks(json);
   }
 
   if (cmd === "/maintenance") {

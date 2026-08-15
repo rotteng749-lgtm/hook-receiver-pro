@@ -22,7 +22,8 @@ import {
 } from "@/components/ui/alert-dialog";
 import { PageHeader } from "@/components/panel/PageHeader";
 import { api } from "@/convex/_generated/api";
-import { useAction, useQuery } from "convex/react";
+import type { Id } from "@/convex/_generated/dataModel";
+import { useAction, useMutation, useQuery } from "convex/react";
 import {
   Bot,
   ExternalLink,
@@ -30,9 +31,11 @@ import {
   MessageSquare,
   RefreshCw,
   Send,
+  ShieldCheck,
+  Trash2,
   Unplug,
 } from "lucide-react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { toast } from "sonner";
 
 const COMMANDS = [
@@ -42,18 +45,31 @@ const COMMANDS = [
   { cmd: "/keys", desc: "Last 5 generated keys" },
   { cmd: "/server <code>", desc: "Server detail + recent connect results" },
   { cmd: "/genkey <code> [uses] [hours]", desc: "Generate a key — free for the owner (unlimited wallet)" },
+  { cmd: "/check <key>", desc: "Key info — status, uses, device, id" },
+  { cmd: "/resetkey <key>", desc: "Unbind a key's device (1 key = 1 device reset)" },
+  { cmd: "/export", desc: "JSON snapshot with ids — servers, keys, connections, members" },
   { cmd: "/maintenance on|off [message]", desc: "Block or allow all /connect calls" },
   { cmd: "/id", desc: "Show your chat id (use this when binding)" },
 ];
 
 export default function TelegramPage() {
   const status = useQuery(api.telegram.status);
+  const members = useQuery(api.nameserver.listMembers);
   const refreshBotInfo = useAction(api.telegram.refreshBotInfo);
   const enable = useAction(api.telegram.enable);
   const disable = useAction(api.telegram.disable);
+  const addAdmin = useMutation(api.telegram.addAdmin);
+  const removeAdmin = useMutation(api.telegram.removeAdmin);
 
   const [chatId, setChatId] = useState("");
+  const [adminChatId, setAdminChatId] = useState("");
+  const [adminUserId, setAdminUserId] = useState("");
   const [busy, setBusy] = useState(false);
+
+  const adminMembers = useMemo(
+    () => (members ?? []).filter((m) => m.role === "admin" || m.role === "owner"),
+    [members],
+  );
 
   if (status === undefined) {
     return (
@@ -106,6 +122,37 @@ export default function TelegramPage() {
     }
   };
 
+  const handleAddAdmin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!adminUserId) {
+      toast.error("Pick an admin account first");
+      return;
+    }
+    setBusy(true);
+    try {
+      const r = await addAdmin({ chatId: adminChatId, userId: adminUserId as Id<"users"> });
+      toast.success(`Admin chat ${r.chatId} bound`);
+      setAdminChatId("");
+      setAdminUserId("");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to bind admin");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleRemoveAdmin = async (chatIdToRemove: string) => {
+    setBusy(true);
+    try {
+      await removeAdmin({ chatId: chatIdToRemove });
+      toast.success("Admin chat unbound");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to unbind admin");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <div className="space-y-8">
       <PageHeader
@@ -117,8 +164,8 @@ export default function TelegramPage() {
         <CardHeader>
           <CardTitle className="text-base">Bot status</CardTitle>
           <CardDescription>
-            The bot only answers the bound owner chat. All commands run with
-            owner permissions.
+            The bot answers the bound owner chat (full access) and any admin
+            chats you bind below (limited to their own keys).
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -280,11 +327,100 @@ export default function TelegramPage() {
         </Card>
       )}
 
+      {bound && (
+        <Card className="border-border/70">
+          <CardHeader>
+            <CardTitle className="text-base">Admin access</CardTitle>
+            <CardDescription>
+              Bind an admin's Telegram chat so they can check and reset their
+              own keys from the bot. Admins get: /keys, /servers, /check,
+              /resetkey (own keys only).
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {status.admins.length > 0 ? (
+              <ul className="divide-y divide-border rounded-lg border border-border">
+                {status.admins.map((a) => (
+                  <li
+                    key={a.chatId}
+                    className="flex items-center justify-between gap-3 px-4 py-2.5"
+                  >
+                    <div className="flex min-w-0 items-center gap-3">
+                      <ShieldCheck className="size-4 shrink-0 text-muted-foreground" />
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-medium">{a.name}</p>
+                        <p className="text-xs text-muted-foreground">
+                          chat {a.maskedChatId}
+                        </p>
+                      </div>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="cursor-pointer text-destructive hover:text-destructive"
+                      disabled={busy}
+                      onClick={() => handleRemoveAdmin(a.chatId)}
+                    >
+                      <Trash2 className="size-3.5" />
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                No admin chats bound yet.
+              </p>
+            )}
+            <form
+              onSubmit={handleAddAdmin}
+              className="flex flex-col gap-3 lg:flex-row lg:items-end"
+            >
+              <div className="flex-1 space-y-2">
+                <Label htmlFor="telegram-admin-user">Admin account</Label>
+                <select
+                  id="telegram-admin-user"
+                  value={adminUserId}
+                  onChange={(e) => setAdminUserId(e.target.value)}
+                  className="border-input bg-background ring-offset-background flex h-9 w-full rounded-md border px-3 py-1 text-sm shadow-sm focus-visible:ring-ring focus-visible:outline-none focus-visible:ring-2"
+                >
+                  <option value="">Select an admin…</option>
+                  {adminMembers.map((m) => (
+                    <option key={m._id} value={m._id}>
+                      {m.name || m.email} ({m.role})
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex-1 space-y-2">
+                <Label htmlFor="telegram-admin-chat">Their Telegram chat id</Label>
+                <Input
+                  id="telegram-admin-chat"
+                  value={adminChatId}
+                  onChange={(e) => setAdminChatId(e.target.value)}
+                  placeholder="e.g. 987654321 — ask them to send /id"
+                  inputMode="numeric"
+                  required
+                />
+              </div>
+              <Button type="submit" className="cursor-pointer" disabled={busy}>
+                Add admin
+              </Button>
+            </form>
+            <p className="text-xs text-muted-foreground">
+              Ask the admin to send{" "}
+              <code className="rounded bg-muted px-1 py-0.5">/id</code> to the bot
+              and paste the number here.
+            </p>
+          </CardContent>
+        </Card>
+      )}
+
       <Card className="border-border/70">
         <CardHeader>
           <CardTitle className="text-base">Commands</CardTitle>
           <CardDescription>
-            Owner-level — only your bound chat can run these.
+            Owner-level — only your bound chat can run these. Admins get the
+            subset listed in Admin access above.
           </CardDescription>
         </CardHeader>
         <CardContent className="px-0">
