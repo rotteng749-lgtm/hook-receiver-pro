@@ -14,7 +14,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { roleHome } from "@/lib/roles";
 import logo from "@/assets/logo.svg";
 import { useMutation } from "convex/react";
-import { ArrowRight, Loader2, Lock, User, UserX } from "lucide-react";
+import { ArrowRight, Loader2, Lock, User } from "lucide-react";
 import { Suspense, useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 
@@ -47,8 +47,8 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Make sure the owner account (ADMIN_USERNAME / ADMIN_PASSWORD, defaults
-  // Panxcz / Panxxcz) exists before the first login attempt.
+  // Make sure the owner account (ADMIN_USERNAME / ADMIN_PASSWORD env vars)
+  // exists before the first login attempt.
   useEffect(() => {
     void seedOwner()
       .catch((err) => console.warn("seedOwner failed:", err))
@@ -76,23 +76,6 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
     } catch (error) {
       console.error("Sign-in error:", error);
       setError("Invalid username or password.");
-      setIsLoading(false);
-    }
-  };
-
-  const handleGuestLogin = async () => {
-    setIsLoading(true);
-    setError(null);
-    try {
-      await signIn("anonymous");
-      navigate(redirect);
-    } catch (error) {
-      console.error("Guest login error:", error);
-      setError(
-        `Failed to sign in as guest: ${
-          error instanceof Error ? error.message : "Unknown error"
-        }`,
-      );
       setIsLoading(false);
     }
   };
@@ -128,7 +111,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                     <Input
                       id="username"
                       name="username"
-                      placeholder="e.g. Panxcz"
+                      placeholder="Username"
                       autoComplete="username"
                       className="pl-9"
                       disabled={isLoading || seeding}
@@ -169,28 +152,6 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                       ? "Signing in…"
                       : "Sign in"}
                 </Button>
-
-                <div className="relative">
-                  <div className="absolute inset-0 flex items-center">
-                    <span className="w-full border-t" />
-                  </div>
-                  <div className="relative flex justify-center text-xs uppercase">
-                    <span className="bg-background px-2 text-muted-foreground">
-                      Or
-                    </span>
-                  </div>
-                </div>
-
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="w-full cursor-pointer"
-                  onClick={handleGuestLogin}
-                  disabled={isLoading}
-                >
-                  <UserX className="mr-2 h-4 w-4" />
-                  Continue as Guest
-                </Button>
               </CardContent>
             </form>
 
@@ -208,13 +169,9 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
           </Card>
 
           <p className="mx-auto mt-4 max-w-[350px] text-center text-xs leading-relaxed text-muted-foreground">
-            Owner login: username{" "}
-            <code className="rounded bg-muted px-1 py-0.5">Panxcz</code> (set
-            via <code className="rounded bg-muted px-1 py-0.5">ADMIN_USERNAME</code> /{" "}
-            <code className="rounded bg-muted px-1 py-0.5">ADMIN_PASSWORD</code>{" "}
-            env vars) — the owner panel is at{" "}
-            <code className="rounded bg-muted px-1 py-0.5">/owner</code>. Admins
-            are created by the owner in Members.
+            Use the username &amp; password given to you by the owner. The owner
+            panel is at <code className="rounded bg-muted px-1 py-0.5">/owner</code>;
+            admins are created by the owner in Members.
           </p>
         </div>
       </div>

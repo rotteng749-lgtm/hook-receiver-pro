@@ -27,8 +27,7 @@ user agent, result).
 environment variables). The account is created automatically the first time
 the sign-in page loads — no email or sign-up needed. Admins and other members
 are created by the owner in **Members → Add member** (username, password,
-role, starting balance). Guests ("Continue as Guest") get a session but no
-panel rights.
+role, starting balance).
 
 ## Balance
 
@@ -72,10 +71,6 @@ bun dev                    # terminal 2 — runs the panel UI
 
 `VITE_CONVEX_URL` points the app at the Convex backend; the `/connect` endpoint
 is served at the same URL (`.convex.site`).
-
-**Demo mode:** on the sign-in page, click **"Continue as Guest"**. Guests get a
-session but no panel rights — they land on `/dashboard` and can't generate
-keys or manage servers.
 
 ## Environment variables
 

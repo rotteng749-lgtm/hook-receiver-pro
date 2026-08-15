@@ -2,11 +2,11 @@
 
 import { convexAuth } from "@convex-dev/auth/server";
 import { Password } from "@convex-dev/auth/providers/Password";
-import { Anonymous } from "@convex-dev/auth/providers/Anonymous";
 
-// Username + password login (no email). The Password provider's account
-// identifier is the username: the profile maps `username` → the account's
-// "email" slot, so sign in with `signIn("password", { username, password, flow: "signIn" })`.
+// Username + password login only (no email, no guest accounts). The Password
+// provider's account identifier is the username: the profile maps `username`
+// → the account's "email" slot, so sign in with
+// `signIn("password", { username, password, flow: "signIn" })`.
 const passwordProvider = Password({
   profile: (params) => ({
     email: typeof params.username === "string" ? params.username : "",
@@ -15,5 +15,5 @@ const passwordProvider = Password({
 });
 
 export const { auth, signIn, signOut, store, isAuthenticated } = convexAuth({
-  providers: [passwordProvider, Anonymous],
+  providers: [passwordProvider],
 });

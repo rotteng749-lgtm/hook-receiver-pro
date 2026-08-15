@@ -40,7 +40,7 @@ export default function UserHome() {
             </div>
             <CardTitle className="mt-3 text-xl">Your account</CardTitle>
             <CardDescription>
-              {user.email ?? "anonymous session"}
+              {user.email ?? "no email"}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
