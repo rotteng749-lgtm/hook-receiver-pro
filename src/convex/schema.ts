@@ -32,41 +32,38 @@ const schema = defineSchema(
       role: v.optional(roleValidator), // role of the user. do not remove
     }).index("email", ["email"]), // index for the email. do not remove or modify
 
-    // Webhook endpoints the user creates. Each one exposes a public URL at
-    // /api/hook/<path> (served by the HTTP action in convex/http.ts) and
-    // returns a configurable response. All incoming requests are logged.
-    hooks: defineTable({
-      name: v.string(), // display name
-      path: v.string(), // custom URL segment, unique across all hooks
-      methods: v.array(v.string()), // allowed methods, e.g. ["GET", "POST"]
-      token: v.string(), // secret token used to validate incoming requests
-      requireToken: v.boolean(), // whether the token must be supplied
-      enabled: v.boolean(), // disabled hooks answer 403
-      responseStatus: v.number(), // status code returned to the caller
-      responseContentType: v.string(), // Content-Type of the response
-      responseBody: v.string(), // literal response body returned to the caller
-      ownerId: v.id("users"), // which user created this hook
-    })
-      .index("by_path", ["path"])
-      .index("by_owner", ["ownerId"]),
+    // Every uploaded file. The bytes live in Convex object storage (S3-backed);
+    // this table holds the metadata: display name, version, note, size,
+    // SHA-256 checksum, content type, and download counter. Public download
+    // URLs are served from convex/http.ts at GET /files/:id.
+    files: defineTable({
+      name: v.string(), // sanitized display name (original upload name)
+      extension: v.string(), // ".apk", ".zip", … ("" when the name has none)
+      version: v.optional(v.string()), // version label shown in the panel
+      note: v.optional(v.string()), // free-text note
+      size: v.number(), // bytes (verified when the checksum is computed)
+      sha256: v.string(), // hex digest, "" until computeSha256 finishes
+      contentType: v.string(), // mapped from the file extension
+      storageId: v.id("_storage"), // the blob in Convex storage
+      downloadCount: v.number(), // increments on every public download
+      ownerId: v.optional(v.id("users")), // who uploaded it (informational)
+    }),
 
-    // Every request that hits a hook endpoint, captured for the admin panel.
-    requests: defineTable({
-      hookId: v.id("hooks"),
-      ownerId: v.id("users"),
-      method: v.string(),
-      url: v.string(), // full request URL
-      headers: v.optional(v.record(v.string(), v.string())),
-      query: v.optional(v.record(v.string(), v.string())),
-      body: v.optional(v.string()), // parsed/serialized body, truncated
-      bodyType: v.optional(v.string()), // json | form | multipart | text | none | error
-      ip: v.optional(v.string()),
-      status: v.number(), // status code we answered with
-      authenticated: v.boolean(), // token check passed (or not required)
-      error: v.optional(v.string()), // rejection reason, e.g. "invalid token"
-    })
-      .index("by_hook", ["hookId"])
-      .index("by_owner", ["ownerId"]),
+    // API access tokens for the REST API (POST /api/login or the panel's API
+    // page). Only the sha256 hash is stored; the plaintext is shown once.
+    apiTokens: defineTable({
+      tokenHash: v.string(), // sha256 hex of the token — never the raw token
+      label: v.string(), // e.g. "api-login" or a user-chosen name
+      createdAt: v.number(),
+      expiresAt: v.number(), // epoch ms
+    }).index("by_hash", ["tokenHash"]),
+
+    // Failed login attempts, used for per-IP rate limiting (5/min).
+    loginAttempts: defineTable({
+      ip: v.string(),
+      time: v.number(), // epoch ms
+    }).index("by_ip", ["ip", "time"]),
+
   },
   {
     schemaValidation: false,

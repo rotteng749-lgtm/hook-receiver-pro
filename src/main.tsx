@@ -14,9 +14,8 @@ const Landing = lazy(() => import("./pages/Landing.tsx"));
 const AuthPage = lazy(() => import("./pages/Auth.tsx"));
 const Dashboard = lazy(() => import("./pages/Dashboard.tsx"));
 const Overview = lazy(() => import("./pages/Overview.tsx"));
-const Hooks = lazy(() => import("./pages/Hooks.tsx"));
-const HookDetail = lazy(() => import("./pages/HookDetail.tsx"));
-const Requests = lazy(() => import("./pages/Requests.tsx"));
+const Files = lazy(() => import("./pages/Files.tsx"));
+const ApiDocs = lazy(() => import("./pages/ApiDocs.tsx"));
 const NotFound = lazy(() => import("./pages/NotFound.tsx"));
 
 // Simple loading fallback for route transitions
@@ -137,9 +136,8 @@ createRoot(document.getElementById("root")!).render(
                 }
               >
                 <Route index element={<Overview />} />
-                <Route path="hooks" element={<Hooks />} />
-                <Route path="hooks/:id" element={<HookDetail />} />
-                <Route path="requests" element={<Requests />} />
+                <Route path="files" element={<Files />} />
+                <Route path="api" element={<ApiDocs />} />
               </Route>
               <Route path="*" element={<NotFound />} />
             </Routes>

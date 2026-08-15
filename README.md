@@ -1,173 +1,189 @@
-# Hooklog — Webhook Receiver Admin Panel
+# Stash — internal file server
 
-A dead-simple webhook receiver + admin panel. Create hook URLs with one click,
-point your cheat/script at them, get the exact response you configured, and see
-every request (method, headers, query, body) logged in the dashboard.
+A file server / download server that uploads, stores, and distributes files of
+any type (`.apk`, `.sh`, `.dll`, `.so`, `.zip`, `.txt`, …) with:
 
-**Stack:** Vite · React 19 · TypeScript · Tailwind v4 · shadcn/ui · Convex
-(backend + database) · Convex Auth
+- **Admin panel** — upload & manage files (sign-in required), each file gets a
+  public download link, a QR code, and full metadata (name, version, size,
+  SHA-256, created date, download count).
+- **Public downloads** — `GET /files/:id` needs no auth. Small files stream
+  with `Content-Disposition: attachment` and `X-Checksum-Sha256`; larger files
+  redirect (302) to a signed storage URL.
+- **REST API** — `login` → Bearer token → `upload / list / delete` for scripts
+  and CI, plus a public `/health`.
+- **Admin auth** — panel sign-in (email OTP, or one-click guest/demo mode),
+  plus username/password login for the API with a rate-limited (5/min/IP)
+  token issuance.
 
-> **About the stack:** this project runs on React + Vite with Convex instead of
-> Next.js. Convex is the backend: the webhook endpoints are Convex HTTP actions
-> (live at `https://<project>.convex.site/api/hook/...`) and all data lives in
-> the Convex database. The admin UI is a static Vite app that deploys to Vercel
-> in minutes. No Next.js API routes, no Postgres, no SQLite to manage — and no
-> `DATABASE_URL` / `NEXTAUTH_SECRET` needed.
+**Spec:** "File server / download server v1" · **Date:** 2026-08-15
 
 ---
 
-## What you get
+## Architecture (spec section 4 & 8)
 
-| Feature | Where |
-| --- | --- |
-| Public hook endpoint `POST`/`GET` `/api/hook/<path>` or `/api/hook?key=<path>` | `src/convex/http.ts` |
-| Parses `application/json`, `x-www-form-urlencoded`, `multipart/form-data`, raw text | `src/convex/http.ts` |
-| Configurable response per hook (status 100–599 + body + content type) | Admin → hook settings |
-| Secret token per hook, generated automatically (rotate anytime) | Admin → hook settings |
-| Every request logged (method, URL, headers, query, body, IP, status) | `src/convex/requests.ts` |
-| Dashboard, hooks list, per-hook settings, request history | `src/pages/*` |
-| Auth: email OTP **or demo mode** (anonymous "Continue as Guest") | `src/pages/Auth.tsx` |
+This implementation follows the **"Vercel + object storage"** architecture from
+the spec — there is no persistent filesystem anywhere:
 
-## Quick start (local)
+| Spec requirement            | Here                          |
+| --------------------------- | ----------------------------- |
+| Serverless HTTP functions   | Convex HTTP actions           |
+| Object storage for bytes    | Convex file storage (S3-backed) |
+| Metadata DB (KV/Postgres)   | Convex database               |
+| Admin UI                    | Vite + React admin panel      |
+
+Because Convex HTTP actions cap requests/responses at **20 MB**:
+
+- **API uploads** (`POST /api/files`) are limited to **15 MB**.
+- **Panel uploads** use presigned upload URLs (client → object storage
+  directly), so they support up to `MAX_UPLOAD_MB` (default **512 MB**).
+- **Downloads** ≤ 15 MB are proxied through the function (200 + attachment
+  headers); larger files get a 302 redirect to the signed URL.
+
+There is no self-hosted/VPS mode in this codebase — everything runs on Convex.
+
+---
+
+## Local development
 
 ```bash
 bun install
-bun convex dev          # runs the local Convex backend (keep this open)
-bun run dev             # Vite dev server
+bunx convex dev            # terminal 1 — runs the backend (starts codegen)
+bun dev                    # terminal 2 — runs the admin UI
 ```
 
-Open the app, sign in (email OTP or "Continue as Guest"), and create a hook.
+The public API is served by the Convex dev process. In the UI, `VITE_CONVEX_URL`
+points the app at the backend; public download links are derived from it
+(`.convex.cloud` → `.convex.site`), or override with `VITE_SITE_URL`.
 
-### Demo mode (no login)
+Default admin credentials (development only — change in production):
+`admin` / `admin123`.
 
-The template ships with anonymous auth. On the sign-in page, click
-**Continue as Guest** — you get a working session with no email, no password.
-Anyone on your deployment can do this, so only use it internally. To disable it,
-remove `Anonymous` from the providers in `src/convex/auth.ts` (see
-`@convex-dev/auth` docs).
+**Demo mode:** on the sign-in page, click **"Continue as Guest"** — no email
+provider or configuration needed. Production sign-in uses email OTP (handled
+by the template's provider).
 
-## Using a hook
-
-Every hook gets a public URL (no login, no Vercel protection applies — see
-[Security](#security)):
-
-```
-https://<project>.convex.site/api/hook/<path>
-```
-
-Send the token any of these ways (the token is shown in the hook settings):
-
-```bash
-# header
-curl -X POST "https://<project>.convex.site/api/hook/license-check" \
-  -H "Content-Type: application/json" \
-  -H "x-hook-token: <TOKEN>" \
-  -d '{"hwid":"AB12-CD34"}'
-
-# Authorization bearer
-curl -X POST "https://<project>.convex.site/api/hook/license-check" \
-  -H "Authorization: Bearer <TOKEN>" \
-  -d 'hwid=AB12-CD34'
-
-# query param (?token= or ?bypass=)
-curl "https://<project>.convex.site/api/hook/license-check?bypass=<TOKEN>&hwid=AB12-CD34"
-```
-
-Behaviour:
-
-- Unknown path → `404 {"error":"hook not found"}`
-- Disabled hook → `403 {"error":"hook disabled"}`
-- Method not allowed → `405 {"error":"method not allowed","allowed":[...]}`
-- Missing/wrong token → `403 {"error":"unauthorized",...}`
-- All good → your configured status + body (default `200 {"ok":true}`)
-- CORS is wide open (`*`) so browser scripts work too; `OPTIONS` preflight returns `204`.
+---
 
 ## Environment variables
 
-The Convex project and auth keys are already configured in this workspace. If
-you deploy a fresh clone:
+**Frontend (`.env.local` / Vercel):**
 
-| Variable | Where | Required |
-| --- | --- | --- |
-| `VITE_CONVEX_URL` | Vercel (frontend) | ✅ — `https://<project>.convex.cloud` from your Convex project |
-| `VITE_WEBHOOK_BASE_URL` | Vercel (frontend, optional) | Only if your webhook host isn't `<project>.convex.site` |
-| `CONVEX_DEPLOYMENT` | Convex dashboard (Deployments → Environment Variables) | ✅ for `convex deploy` |
-| `SITE_URL` | Convex dashboard | ✅ for auth |
-| `JWKS`, `JWT_PRIVATE_KEY` | Convex dashboard (already set in this workspace) | for Convex Auth |
-| `VLY_APP_NAME` | Convex dashboard (optional) | shows your app name in OTP emails |
+| Variable            | Required | Description |
+| ------------------- | -------- | ----------- |
+| `VITE_CONVEX_URL`   | ✅        | Convex deployment URL (from Convex dashboard → Settings) |
+| `VITE_SITE_URL`     | –        | Optional override for the public download base URL |
 
-There is **no** `DATABASE_URL`/`NEXTAUTH_SECRET`/`ADMIN_PASSWORD` — Convex is the
-database and Convex Auth handles authentication.
+**Backend (Convex dashboard → Settings → Environment Variables):**
 
-## Deploying to Vercel (under 10 minutes)
+| Variable            | Default     | Description |
+| ------------------- | ----------- | ----------- |
+| `ADMIN_USERNAME`    | `admin`     | Username for `POST /api/login` |
+| `ADMIN_PASSWORD`    | `admin123`  | Password for `POST /api/login` (set a strong one in production) |
+| `MAX_UPLOAD_MB`     | `512`       | Max upload size in MB (panel uploads) |
 
-1. **Push to GitHub** — create a repo and push this folder.
-2. **Convex project** (one-time): create a project at
-   [dashboard.convex.dev](https://dashboard.convex.dev) linked to the same repo,
-   or run `npx convex deploy` locally after `npx convex login`.
-   Copy the **production URL** (`https://<project>.convex.cloud`) and the site
-   URL (`https://<project>.convex.site`).
-3. **Vercel**: import the GitHub repo → framework preset **Vite** →
-   Build command `bun run build` (or `npm run build`) → Output `dist`.
-4. **Env vars in Vercel** (Project → Settings → Environment Variables):
-   - `VITE_CONVEX_URL=https://<project>.convex.cloud`
-   - (only if custom host) `VITE_WEBHOOK_BASE_URL=https://<your-domain>`
-5. **Env vars in Convex dashboard** (Deployments → your deployment →
-   Environment Variables): `SITE_URL=https://<your-vercel-domain>` (plus the auth
-   keys the template ships with).
-6. **Deploy** — done. Your admin panel is at the Vercel URL; your hooks are at
-   `https://<project>.convex.site/api/hook/<path>`.
+---
 
-> Keep `convex/http.ts` deployed on the same Convex project as the frontend —
-> `VITE_CONVEX_URL` and the site URL share the project.
+## Deployment
 
-## Security
-
-- **Vercel Deployment Protection:** it does *not* apply to the webhook
-  endpoints, because those run on `*.convex.site`, not on Vercel functions. No
-  `x-vercel-protection-bypass` header is needed. For compatibility, the endpoint
-  *also* accepts `x-vercel-protection-bypass` and `?bypass=` as aliases for your
-  hook token, so a caller can authenticate the same way everywhere.
-- **Admin panel:** all `/dashboard/*` routes are behind `RequireAuth` and every
-  query/mutation checks the signed-in user.
-- **Hooks:** protect them with the per-hook token (`requireToken`, on by
-  default). Tokens are compared in constant time. Disable a hook anytime.
-- **Logging:** bodies/headers are truncated (100 KB) before storage.
-
-## Project structure
-
-```
-src/
-├── convex/
-│   ├── schema.ts        # hooks + requests tables
-│   ├── hooks.ts         # CRUD, token generation, path lookup
-│   ├── requests.ts      # request history queries + logging
-│   └── http.ts          # the public webhook endpoint (/api/hook/...)
-├── pages/
-│   ├── Landing.tsx      # marketing landing page
-│   ├── Auth.tsx         # sign-in (email OTP / guest demo)
-│   ├── Dashboard.tsx    # admin shell (sidebar + mobile drawer)
-│   ├── Overview.tsx     # stats + recent requests
-│   ├── Hooks.tsx        # hook list + create/edit/delete
-│   ├── HookDetail.tsx   # per-hook settings, token, URL, history
-│   └── Requests.tsx     # all captured requests, filterable
-├── components/panel/    # PageHeader, StatCard, RequestTable, dialogs, badges
-└── lib/webhook.ts       # webhook URL/curl helpers
-```
-
-## Testing
+### 1. Backend (Convex — the "server")
 
 ```bash
-bunx convex dev --once && bunx tsc -b --noEmit   # backend + typecheck
-bun run dev                                       # frontend
+bunx convex deploy
 ```
 
-Create a hook, then:
+1. Set `ADMIN_USERNAME`, `ADMIN_PASSWORD`, `MAX_UPLOAD_MB` in
+   **Settings → Environment Variables** on the Convex dashboard.
+2. Note the **site URL** (`https://<deployment>.convex.site`) — this is where
+   the REST API and public downloads live.
+
+### 2. Frontend (Vercel)
+
+1. Push the repo to GitHub and import it in Vercel.
+2. Framework preset: **Vite** · Build: `bun run build` · Output: `dist`.
+3. Add the env var `VITE_CONVEX_URL` = `https://<deployment>.convex.cloud`.
+4. Deploy. The admin panel is at your Vercel URL; the API/downloads are on the
+   Convex site URL.
+
+> No Vercel Protection Bypass header is needed: downloads go through the
+> Convex site (public by design) and the admin panel is protected by Convex
+> Auth. If you enable Vercel Deployment Protection on the dashboard itself,
+> use Vercel's built-in "Protection Bypass for Automation" for CI access.
+
+### 3. Smoke test after deploy
 
 ```bash
-curl -X POST "https://<project>.convex.site/api/hook/<path>" \
+curl https://<deployment>.convex.site/health
+# {"status":"ok"}
+```
+
+---
+
+## REST API
+
+Base URL: `https://<deployment>.convex.site`
+
+| Method | Path            | Auth         | Description |
+| ------ | --------------- | ------------ | ----------- |
+| POST   | `/api/login`    | public       | `{username, password}` → `{token, expiresAt}` (24 h) |
+| POST   | `/api/files`    | Bearer token | multipart upload (`file`, `name`?, `version`?, `note`?) |
+| GET    | `/api/files`    | Bearer token | list files with metadata |
+| DELETE | `/api/files/:id`| Bearer token | delete file + bytes |
+| GET    | `/files/:id`    | public       | download (stream ≤15 MB, else 302) |
+| GET    | `/health`       | public       | `{"status":"ok"}` |
+
+```bash
+# login
+TOKEN=$(curl -s -X POST https://<site>.convex.site/api/login \
   -H "Content-Type: application/json" \
-  -H "x-hook-token: <TOKEN>" -d '{"hello":"world"}'
+  -d '{"username":"admin","password":"your-password"}' | jq -r .token)
+
+# upload
+curl -X POST https://<site>.convex.site/api/files \
+  -H "Authorization: Bearer $TOKEN" \
+  -F "file=@build.apk" -F "version=1.0.3"
+
+# list
+curl https://<site>.convex.site/api/files -H "Authorization: Bearer $TOKEN"
+
+# download (public)
+curl -L -O https://<site>.convex.site/files/<id>
 ```
 
-The request appears in **Overview → Recent requests** immediately.
+Response for uploads: `{id, name, version, note, size, sha256, contentType, url}`.
+
+---
+
+## Security notes (spec section 5 & 9)
+
+- Uploaded bytes are **never executed or parsed** — the server only stores and
+  serves them.
+- Stored filenames are server-generated ids; user input is only ever used for
+  the `Content-Disposition` display name (sanitized). Path traversal is
+  impossible.
+- Every upload is **SHA-256 hashed server-side** and served via the
+  `X-Checksum-Sha256` header.
+- API tokens are stored as **hashes**, expire, and can be revoked from the
+  panel. `POST /api/login` is rate-limited to 5 failed attempts/min/IP.
+- Responses include `X-Content-Type-Options: nosniff`-equivalent safety via
+  explicit `Content-Type` mapping; no auth bypass mechanisms are implemented.
+
+---
+
+## Acceptance tests (spec section 6)
+
+Run against the deployed site (`BASE=https://<deployment>.convex.site`):
+
+1. **Upload .apk** → response contains `id` and `sha256`; download via
+   `GET /files/:id` returns the same bytes (`cmp` clean).
+2. **Public download** → `curl -L $BASE/files/<id>` → 200 without auth;
+   `POST /api/files` without a token → `401`.
+3. **Login** → wrong credentials → `401` (5 fails/min → `429`); correct
+   credentials → token works on all admin endpoints.
+4. **Content types** → upload `.sh` and `.dll`; their downloads return
+   `text/x-shellscript` and `application/octet-stream`.
+5. **No overwrite** → two uploads get distinct ids; deleting one leaves the
+   other downloadable.
+6. **Path traversal** → any id that isn't a real file id → `404`; user input is
+   never used as a path.
+7. **Persistence** → restart/redeploy → files and metadata remain (Convex DB +
+   object storage).

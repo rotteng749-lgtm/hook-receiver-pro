@@ -2,12 +2,12 @@ import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/use-auth";
 import logo from "@/assets/logo.svg";
 import {
-  Inbox,
+  Braces,
+  FileArchive,
   LayoutDashboard,
   LogOut,
   Menu,
   Plus,
-  Webhook,
   X,
 } from "lucide-react";
 import { useState } from "react";
@@ -16,8 +16,8 @@ import { cn } from "@/lib/utils";
 
 const navItems = [
   { to: "/dashboard", label: "Overview", icon: LayoutDashboard, end: true },
-  { to: "/dashboard/hooks", label: "Hooks", icon: Webhook, end: false },
-  { to: "/dashboard/requests", label: "Requests", icon: Inbox, end: false },
+  { to: "/dashboard/files", label: "Files", icon: FileArchive, end: false },
+  { to: "/dashboard/api", label: "REST API", icon: Braces, end: false },
 ];
 
 function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
@@ -41,8 +41,8 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
         onClick={onNavigate}
         className="flex items-center gap-2.5 px-5 pt-6 pb-5"
       >
-        <img src={logo} alt="Hooklog" width={28} height={28} className="rounded-md" />
-        <span className="text-[15px] font-bold tracking-tight">Hooklog</span>
+        <img src={logo} alt="Stash" width={28} height={28} className="rounded-md" />
+        <span className="text-[15px] font-bold tracking-tight">Stash</span>
         <span className="ml-auto hidden items-center rounded-md border border-border px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground sm:inline-flex">
           admin
         </span>
@@ -76,9 +76,9 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
             className="w-full cursor-pointer"
             onClick={onNavigate}
           >
-            <NavLink to="/dashboard/hooks?new=1">
+            <NavLink to="/dashboard/files?upload=1">
               <Plus className="size-4" />
-              New hook
+              New file
             </NavLink>
           </Button>
         </div>
@@ -154,8 +154,8 @@ export default function DashboardLayout() {
             <Menu className="size-5" />
           </button>
           <NavLink to="/dashboard" className="flex items-center gap-2">
-            <img src={logo} alt="Hooklog" width={24} height={24} className="rounded" />
-            <span className="text-sm font-bold tracking-tight">Hooklog</span>
+            <img src={logo} alt="Stash" width={24} height={24} className="rounded" />
+            <span className="text-sm font-bold tracking-tight">Stash</span>
           </NavLink>
         </header>
 
