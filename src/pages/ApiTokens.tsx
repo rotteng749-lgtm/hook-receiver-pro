@@ -219,7 +219,7 @@ const endpoints = [
     method: "POST",
     path: "/connect",
     auth: "public",
-    desc: "Validate a license key. Body: {\"license\": \"LIC-…\", \"device\": \"device-abc\"} — server is optional, detected from the key. Add \"action\": \"reset\" (from the bound device) to unbind it",
+    desc: "Validate a license key. JSON body {\"license\": \"LIC-…\", \"device\": …} — or the Havest-style form (game, version, user_key, serial, resource) which answers {\"status\", \"message\"}. Add \"action\": \"reset\" to unbind the device",
     methodClass: "bg-emerald-600/90 text-white",
   },
   {

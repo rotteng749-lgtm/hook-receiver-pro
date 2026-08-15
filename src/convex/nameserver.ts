@@ -707,6 +707,10 @@ export const recordConnect = internalMutation({
     deviceId: v.optional(v.string()),
     ok: v.boolean(),
     reason: v.optional(v.string()),
+    // Optional client metadata (Havest-style form protocol).
+    game: v.optional(v.string()),
+    version: v.optional(v.string()),
+    resource: v.optional(v.string()),
     // Bind the key to this device on the first successful connect.
     bindDevice: v.optional(v.boolean()),
     // Set false for informational log entries (e.g. a device reset) that
@@ -721,6 +725,9 @@ export const recordConnect = internalMutation({
       ip: args.ip.slice(0, 64),
       userAgent: args.userAgent?.slice(0, 200) || undefined,
       deviceId: args.deviceId?.slice(0, 128) || undefined,
+      game: args.game?.slice(0, 32) || undefined,
+      version: args.version?.slice(0, 32) || undefined,
+      resource: args.resource?.slice(0, 128) || undefined,
       ok: args.ok,
       reason: args.reason,
     });

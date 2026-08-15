@@ -353,19 +353,23 @@ const deleteFile = httpAction(async (ctx, request) => {
  * a license key and gets validated. The app just asks the user for their
  * license key — the server is optional and inferred from the key.
  *
- *   POST /connect  body { license, server?, device?, action? }   (JSON)
- *                  `key` / `licenseKey` / `license_key` are accepted as aliases.
- *                  `action: "reset"` unbinds the key from its device (only
- *                  the currently-bound device can reset — send the same
- *                  `device` id it was bound with).
- *   GET  /connect?license=LIC-…&server=<code>&device=<id>[&action=reset]
+ * Accepted request styles — the response shape follows the request style:
  *
- * `device` is optional but recommended: each key is bound to the FIRST device
- * that connects (1 key = 1 device) — a second, different device is rejected.
+ *   JSON body (key/license/device/action):
+ *     POST /connect  { "license": "NS-…", "device": "device-abc" }
+ *     → { ok: true, server: {name, code}, key: {…}, message } | { ok: false, error }
  *
- * Responses are always JSON:
- *   { ok: true,  server: {name, code}, key: {expiresAt, uses, maxUses}, message }
- *   { ok: false, error }  (400 / 401 / 403 / 404 / 503)
+ *   Havest-style form (game/version/user_key/serial/resource):
+ *     POST /connect  application/x-www-form-urlencoded
+ *     game=MLBB&version=1.0&user_key=NS-…&serial=device-abc&resource=menu
+ *     → { status: true, message, data: {server, key} } | { status: false, message }
+ *     (same shape as the original connect.php — tools only need the URL swap)
+ *
+ *   GET /connect?license=…&device=…[&action=reset]  (JSON shape)
+ *
+ * `device` (or `serial`) is optional but recommended: each key is bound to
+ * the FIRST device that connects (1 key = 1 device). `action: "reset"`
+ * unbinds the key from its device (only the bound device can reset).
  * Every attempt is logged (IP, user agent, device, result).
  */
 const connect = httpAction(async (ctx, request) => {
@@ -374,49 +378,107 @@ const connect = httpAction(async (ctx, request) => {
   let serverRef = "";
   let device = "";
   let wantsReset = false;
+  let isForm = false;
+  let game = "";
+  let version = "";
+  let resource = "";
 
   if (request.method === "POST") {
-    let body: unknown;
-    try {
-      body = await request.json();
-    } catch {
-      return json({ ok: false, error: "expected a JSON body with a key" }, 400);
+    const contentType = (request.headers.get("content-type") || "").toLowerCase();
+    if (contentType.includes("application/x-www-form-urlencoded")) {
+      // Havest-style: game=MLBB&version=1.0&user_key=…&serial=…&resource=…
+      isForm = true;
+      const params = new URLSearchParams(await request.text());
+      key = (
+        params.get("user_key") ??
+        params.get("key") ??
+        params.get("license") ??
+        ""
+      ).trim();
+      serverRef = (params.get("server") ?? "").trim();
+      device = (params.get("serial") ?? params.get("device") ?? "")
+        .trim()
+        .slice(0, 128);
+      wantsReset =
+        params.get("action") === "reset" ||
+        params.get("reset") === "true" ||
+        params.get("reset") === "1";
+      game = (params.get("game") ?? "").trim().slice(0, 32);
+      version = (params.get("version") ?? "").trim().slice(0, 32);
+      resource = (params.get("resource") ?? "").trim().slice(0, 128);
+    } else {
+      // JSON body — key / license / licenseKey / license_key aliases.
+      let body: unknown;
+      try {
+        body = JSON.parse(await request.text());
+      } catch {
+        return json({ ok: false, error: "expected a JSON body with a key" }, 400);
+      }
+      const obj = body as Record<string, unknown>;
+      const rawKey =
+        typeof obj.key === "string"
+          ? obj.key
+          : typeof obj.license === "string"
+            ? obj.license
+            : typeof obj.licenseKey === "string"
+              ? obj.licenseKey
+              : typeof obj.license_key === "string"
+                ? obj.license_key
+                : "";
+      key = rawKey.trim();
+      serverRef = typeof obj.server === "string" ? obj.server.trim() : "";
+      device = typeof obj.device === "string" ? obj.device.trim().slice(0, 128) : "";
+      wantsReset =
+        (typeof obj.action === "string" && obj.action.trim() === "reset") ||
+        obj.reset === true ||
+        obj.reset === "true";
+      game = typeof obj.game === "string" ? obj.game.trim().slice(0, 32) : "";
+      version = typeof obj.version === "string" ? obj.version.trim().slice(0, 32) : "";
+      resource = typeof obj.resource === "string" ? obj.resource.trim().slice(0, 128) : "";
     }
-    const obj = body as Record<string, unknown>;
-    const rawKey =
-      typeof obj.key === "string"
-        ? obj.key
-        : typeof obj.license === "string"
-          ? obj.license
-          : typeof obj.licenseKey === "string"
-            ? obj.licenseKey
-            : typeof obj.license_key === "string"
-              ? obj.license_key
-              : "";
-    key = rawKey.trim();
-    serverRef = typeof obj.server === "string" ? obj.server.trim() : "";
-    device = typeof obj.device === "string" ? obj.device.trim().slice(0, 128) : "";
-    wantsReset =
-      (typeof obj.action === "string" && obj.action.trim() === "reset") ||
-      obj.reset === true ||
-      obj.reset === "true";
   } else {
     key = (
       url.searchParams.get("key") ??
       url.searchParams.get("license") ??
       url.searchParams.get("license_key") ??
+      url.searchParams.get("user_key") ??
       ""
     ).trim();
     serverRef = (url.searchParams.get("server") ?? "").trim();
-    device = (url.searchParams.get("device") ?? "").trim().slice(0, 128);
+    device = (url.searchParams.get("device") ?? url.searchParams.get("serial") ?? "")
+      .trim()
+      .slice(0, 128);
     wantsReset =
       url.searchParams.get("action") === "reset" ||
       url.searchParams.get("reset") === "true" ||
       url.searchParams.get("reset") === "1";
+    game = (url.searchParams.get("game") ?? "").trim().slice(0, 32);
+    version = (url.searchParams.get("version") ?? "").trim().slice(0, 32);
+    resource = (url.searchParams.get("resource") ?? "").trim().slice(0, 128);
   }
 
+  // Response formatter: Havest-style calls get {status, message}; JSON calls
+  // keep the existing { ok, error } shape.
+  const send = (body: Record<string, unknown>, status = 200) => {
+    if (!isForm) return json(body, status);
+    if (body.ok === true) {
+      return json(
+        {
+          status: true,
+          message: body.message ?? "Connected",
+          data:
+            body.server !== undefined
+              ? { server: body.server, key: body.key }
+              : undefined,
+        },
+        status,
+      );
+    }
+    return json({ status: false, message: body.error ?? "error" }, status);
+  };
+
   if (key.length === 0) {
-    return json({ ok: false, error: "missing key" }, 400);
+    return send({ ok: false, error: "missing key" }, 400);
   }
 
   const ip = clientIp(request);
@@ -434,11 +496,14 @@ const connect = httpAction(async (ctx, request) => {
         ip,
         userAgent: ua,
         deviceId: device || undefined,
+        game,
+        version,
+        resource,
         ok: false,
         reason: "server_not_found",
       });
       accessLog(request, 404, "-");
-      return json({ ok: false, error: "server not found" }, 404);
+      return send({ ok: false, error: "server not found" }, 404);
     }
   }
 
@@ -450,11 +515,14 @@ const connect = httpAction(async (ctx, request) => {
       ip,
       userAgent: ua,
       deviceId: device || undefined,
+      game,
+      version,
+      resource,
       ok: false,
       reason: "maintenance",
     });
     accessLog(request, 503, "-");
-    return json(
+    return send(
       { ok: false, error: settings.downMessage || "server under maintenance" },
       503,
     );
@@ -466,11 +534,14 @@ const connect = httpAction(async (ctx, request) => {
       ip,
       userAgent: ua,
       deviceId: device || undefined,
+      game,
+      version,
+      resource,
       ok: false,
       reason: "offline",
     });
     accessLog(request, 403, "-");
-    return json({ ok: false, error: "server is offline" }, 403);
+    return send({ ok: false, error: "server is offline" }, 403);
   }
 
   const keyDoc = await ctx.runQuery(internal.nameserver.getKeyByValue, { key });
@@ -481,11 +552,14 @@ const connect = httpAction(async (ctx, request) => {
       ip,
       userAgent: ua,
       deviceId: device || undefined,
+      game,
+      version,
+      resource,
       ok: false,
       reason,
     });
     accessLog(request, status, "-");
-    return json({ ok: false, error }, status);
+    return send({ ok: false, error }, status);
   };
 
   if (keyDoc === null) return await fail(401, "invalid_key", "invalid key");
@@ -528,12 +602,15 @@ const connect = httpAction(async (ctx, request) => {
         ip,
         userAgent: ua,
         deviceId: device || undefined,
+        game,
+        version,
+        resource,
         ok: true,
         reason: "reset_already_unbound",
         countUse: false,
       });
       accessLog(request, 200, "-");
-      return json({
+      return send({
         ok: true,
         action: "reset",
         message: "key is not bound to a device",
@@ -559,12 +636,15 @@ const connect = httpAction(async (ctx, request) => {
       ip,
       userAgent: ua,
       deviceId: device,
+      game,
+      version,
+      resource,
       ok: true,
       reason: "device_reset",
       countUse: false,
     });
     accessLog(request, 200, "-");
-    return json({
+    return send({
       ok: true,
       action: "reset",
       message: "device unbound — the key can now connect from a new device",
@@ -583,11 +663,14 @@ const connect = httpAction(async (ctx, request) => {
     ip,
     userAgent: ua,
     deviceId: device || undefined,
+    game,
+    version,
+    resource,
     ok: true,
     bindDevice: true,
   });
   accessLog(request, 200, "-");
-  return json({
+  return send({
     ok: true,
     server: { name: server.name, code: server.code },
     key: {

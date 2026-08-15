@@ -118,6 +118,11 @@ const schema = defineSchema(
       deviceId: v.optional(v.string()), // device id presented by the client
       ok: v.boolean(), // did the validation succeed?
       reason: v.optional(v.string()),
+      // Optional client metadata (Havest-style form protocol):
+      // game=MLBB&version=1.0&user_key=…&serial=…&resource=…
+      game: v.optional(v.string()),
+      version: v.optional(v.string()),
+      resource: v.optional(v.string()),
     })
       .index("by_server", ["serverId"])
       .index("by_key", ["keyId"]),

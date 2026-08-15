@@ -93,6 +93,22 @@ curl -X POST https://<deployment>.convex.site/connect \
 # 404 → {"ok":false,"error":"server not found"}
 ```
 
+### Havest-style form protocol
+
+Clients that speak the original `connect.php` form protocol work unchanged —
+just swap the URL. POST the same form fields to `/connect`:
+
+```
+POST /connect   (Content-Type: application/x-www-form-urlencoded)
+game=MLBB&version=1.0&user_key=NS-…&serial=device-abc&resource=menu
+```
+
+- `user_key` → the license key · `serial` → device id (1 key = 1 device)
+- `game` / `version` / `resource` are logged with the connect
+- Responses match the original shape, so the validator's parser needs no
+  changes: `{"status":true,"message":"…","data":{…}}` or
+  `{"status":false,"message":"…"}`
+
 ## Local development
 
 ```bash

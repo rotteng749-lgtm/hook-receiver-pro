@@ -95,6 +95,13 @@ export default function Connections() {
                     ) : (
                       <span className="text-xs text-muted-foreground">—</span>
                     )}
+                    {(conn.resource || conn.game) && (
+                      <p className="mt-0.5 truncate text-[11px] text-muted-foreground/80">
+                        {conn.resource}
+                        {conn.game &&
+                          ` · ${conn.game}${conn.version ? ` v${conn.version}` : ""}`}
+                      </p>
+                    )}
                   </td>
                   <td className="px-4 py-3 font-mono text-xs text-muted-foreground">
                     {conn.ip}
