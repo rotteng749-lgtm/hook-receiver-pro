@@ -30,9 +30,9 @@ const http = httpRouter();
 auth.addHttpRoutes(http);
 
 /** Admin credentials — set ADMIN_USERNAME / ADMIN_PASSWORD in the Convex
- *  dashboard. Defaults are for local development only. */
-const ADMIN_USERNAME = process.env.ADMIN_USERNAME ?? "admin";
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD ?? "admin123";
+ *  dashboard to override. The defaults below are the owner login. */
+const ADMIN_USERNAME = process.env.ADMIN_USERNAME ?? "Panxcz";
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD ?? "Panxxcz";
 
 /** API uploads go through an HTTP action → capped by Convex's 20 MB limit.
  *  Keep a safety margin. */

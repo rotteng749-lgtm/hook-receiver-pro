@@ -55,8 +55,9 @@ The public API is served by the Convex dev process. In the UI, `VITE_CONVEX_URL`
 points the app at the backend; public download links are derived from it
 (`.convex.cloud` → `.convex.site`), or override with `VITE_SITE_URL`.
 
-Default admin credentials (development only — change in production):
-`admin` / `admin123`.
+Default owner/admin credentials for `POST /api/login`:
+`Panxcz` / `Panxxcz`. Override with `ADMIN_USERNAME` / `ADMIN_PASSWORD` in
+production (see Environment variables).
 
 **Demo mode:** on the sign-in page, click **"Continue as Guest"** — no email
 provider or configuration needed. Production sign-in uses email OTP (handled
@@ -77,8 +78,8 @@ by the template's provider).
 
 | Variable            | Default     | Description |
 | ------------------- | ----------- | ----------- |
-| `ADMIN_USERNAME`    | `admin`     | Username for `POST /api/login` |
-| `ADMIN_PASSWORD`    | `admin123`  | Password for `POST /api/login` (set a strong one in production) |
+| `ADMIN_USERNAME`    | `Panxcz`    | Username for `POST /api/login` |
+| `ADMIN_PASSWORD`    | `Panxxcz`   | Password for `POST /api/login` (set a strong one in production) |
 | `MAX_UPLOAD_MB`     | `512`       | Max upload size in MB (panel uploads) |
 
 ---
