@@ -18,9 +18,22 @@ enter their license key. The `server` field is optional — it is detected from
 the key automatically. `key` / `licenseKey` / `license_key` are accepted as
 aliases for the license field.
 
-**1 key = 1 device:** the optional `device` field binds a key to the first
-device that connects. Once bound, a different device presenting the same key
-is rejected with `403 {"ok":false,"error":"key is bound to another device"}`.
+**1 key = 1 device:** the optional `device` field (or `hwid`, or `serial`)
+binds a key to the first device that connects. Once bound, a different device
+presenting the same key is rejected with
+`403 {"ok":false,"status":"error","error":"Device limit",…}`.
+
+**Response shape (works for every client):** every `/connect` response is a
+superset that satisfies all three client families at once:
+
+- native JSON clients check `ok: true` → `{"ok":true,"status":true,"message":"connected","expires":"2026-08-16 12:00:00","server":{…},"key":{…},"url":…}`
+- Havest-style validators check `status: true`
+- primebit-style loaders (FF_KERNEL / ML-KERNEL) search for the error strings
+  `Invalid key` / `Key expired` / `Key banned` / `Device limit` /
+  `Wrong Game Key` — no match = success — and parse `expires` (a
+  `YYYY-MM-DD HH:MM:SS` UTC string; `expiresAt` ms and `expires_ts` s are also
+  included). Errors always carry the exact string in `error` and a readable
+  `message`.
 
 **Reset a device binding** — when a key needs to move to a new machine:
 
@@ -86,11 +99,13 @@ curl -X POST https://<deployment>.convex.site/connect \
   -H "Content-Type: application/json" \
   -d '{"license":"NS-K4F2-X9LM-P7QW-3RTY-5VBN","device":"device-abc"}'
 
-# 200 → {"ok":true,"server":{"name":"EU Main","code":"eu-main"},"key":{…},"message":"connected"}
-# 401 → {"ok":false,"error":"invalid key"}
-# 403 → {"ok":false,"error":"key has expired"}   (or revoked / usage limit / server offline / bound to another device)
-# 503 → {"ok":false,"error":"server under maintenance"}
-# 404 → {"ok":false,"error":"server not found"}
+# 200 → {"ok":true,"status":true,"message":"connected","expires":"2026-08-16 12:00:00","server":{"name":"EU Main","code":"eu-main"},"key":{…},"url":…}
+# 401 → {"ok":false,"status":"error","error":"Invalid key","message":"invalid key"}
+# 403 → {"ok":false,"status":"error","error":"Key expired","message":"key has expired"}
+#        (or revoked/offline → "Key banned" · wrong server → "Wrong Game Key" ·
+#         bound to another device → "Device limit" · usage limit → "Key banned")
+# 503 → {"ok":false,"status":"error","error":"Key banned","message":"server under maintenance"}
+# 404 → {"ok":false,"status":"error","error":"Invalid key","message":"server not found"}
 ```
 
 ### Havest-style form protocol
@@ -114,6 +129,38 @@ game=MLBB&version=1.0&user_key=NS-…&serial=device-abc&resource=menu
   ```json
   {"status":true,"message":"connected","data":{"server":{…},"key":{…},"url":"https://…/databases/<id>"}}
   ```
+
+### Primebit-style JSON protocol (FF_KERNEL / ML-KERNEL loaders)
+
+Loaders that expect the `https://…/api/login` JSON protocol (Laravel-style
+panels) work by **only swapping the URL** to `/connect` — request and
+response parsing stay untouched:
+
+```
+POST /connect   (Content-Type: application/json)
+{"key":"NS-…","hwid":"<android_id>+<ro.build.version.release>","game":"Free Fire"}
+```
+
+- `key` → the license key · `hwid` → device id (**1 key = 1 device** keeps
+  working) · `game` → the loader's game (`Free Fire`/`FF` → FREEFIRE,
+  `MLBB`/`ML` → MLBB, `PUBG` → PUBG) — logged and used for the APK response URL.
+- Errors reply with the exact strings the loaders search for
+  (`Invalid key`, `Key expired`, `Key banned`, `Device limit`, `Wrong Game
+  Key`) in `error`/`message`:
+
+  ```json
+  {"ok":false,"status":"error","error":"Invalid key","message":"invalid key"}
+  ```
+
+- Success contains none of those substrings (so the loader treats it as a
+  success) and includes `expires` for the expiry check:
+
+  ```json
+  {"ok":true,"status":true,"message":"connected","expires":"2026-08-16 12:00:00","key":{"expiresAt":1784275200000,"uses":1,"maxUses":0},"url":"https://…/databases/<id>"}
+  ```
+
+  `expires` is a `YYYY-MM-DD HH:MM:SS` (UTC) string — if your loader parses
+  unix seconds instead, use `expires_ts`.
 
 ## Databases (loaders / APK)
 

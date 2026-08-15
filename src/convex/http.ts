@@ -365,24 +365,24 @@ const deleteFile = httpAction(async (ctx, request) => {
  * a license key and gets validated. The app just asks the user for their
  * license key — the server is optional and inferred from the key.
  *
- * Accepted request styles — the response shape follows the request style:
+ * Accepted request styles — the response satisfies every client family at
+ * once (see the `send` formatter below):
  *
- *   JSON body (key/license/device/action):
+ *   JSON body (key/license/device/hwid/action):
  *     POST /connect  { "license": "NS-…", "device": "device-abc" }
- *     → { ok: true, server: {name, code}, key: {…}, message } | { ok: false, error }
+ *     POST /connect  { "key": "NS-…", "hwid": "android-id", "game": "Free Fire" }
+ *       (primebit-style FF_KERNEL / ML-KERNEL loaders — `hwid` binds 1 key = 1 device)
  *
  *   Havest-style form (game/version/user_key/serial/resource):
  *     POST /connect  application/x-www-form-urlencoded
  *     game=MLBB&version=1.0&user_key=NS-…&serial=device-abc&resource=menu
- *     → { status: true, message, data: {server, key} } | { status: false, message }
- *     (same shape as the original connect.php — tools only need the URL swap)
  *
  *   GET /connect?license=…&device=…[&action=reset]  (JSON shape)
  *
- * `device` (or `serial`) is optional but recommended: each key is bound to
- * the FIRST device that connects (1 key = 1 device). `action: "reset"`
- * unbinds the key from its device (only the bound device can reset).
- * Every attempt is logged (IP, user agent, device, result).
+ * `device` / `hwid` / `serial` is optional but recommended: each key is
+ * bound to the FIRST device that connects (1 key = 1 device). `action:
+ * "reset"` unbinds the key from its device (only the bound device can
+ * reset). Every attempt is logged (IP, user agent, device, result).
  */
 const connect = httpAction(async (ctx, request) => {
   const url = new URL(request.url);
@@ -390,7 +390,6 @@ const connect = httpAction(async (ctx, request) => {
   let serverRef = "";
   let device = "";
   let wantsReset = false;
-  let isForm = false;
   let game = "";
   let version = "";
   let resource = "";
@@ -399,7 +398,6 @@ const connect = httpAction(async (ctx, request) => {
     const contentType = (request.headers.get("content-type") || "").toLowerCase();
     if (contentType.includes("application/x-www-form-urlencoded")) {
       // Havest-style: game=MLBB&version=1.0&user_key=…&serial=…&resource=…
-      isForm = true;
       const params = new URLSearchParams(await request.text());
       key = (
         params.get("user_key") ??
@@ -408,7 +406,12 @@ const connect = httpAction(async (ctx, request) => {
         ""
       ).trim();
       serverRef = (params.get("server") ?? "").trim();
-      device = (params.get("serial") ?? params.get("device") ?? "")
+      device = (
+        params.get("serial") ??
+        params.get("hwid") ??
+        params.get("device") ??
+        ""
+      )
         .trim()
         .slice(0, 128);
       wantsReset =
@@ -439,7 +442,15 @@ const connect = httpAction(async (ctx, request) => {
                 : "";
       key = rawKey.trim();
       serverRef = typeof obj.server === "string" ? obj.server.trim() : "";
-      device = typeof obj.device === "string" ? obj.device.trim().slice(0, 128) : "";
+      device = (
+        typeof obj.hwid === "string"
+          ? obj.hwid
+          : typeof obj.device === "string"
+            ? obj.device
+            : ""
+      )
+        .trim()
+        .slice(0, 128);
       wantsReset =
         (typeof obj.action === "string" && obj.action.trim() === "reset") ||
         obj.reset === true ||
@@ -457,7 +468,12 @@ const connect = httpAction(async (ctx, request) => {
       ""
     ).trim();
     serverRef = (url.searchParams.get("server") ?? "").trim();
-    device = (url.searchParams.get("device") ?? url.searchParams.get("serial") ?? "")
+    device = (
+      url.searchParams.get("device") ??
+      url.searchParams.get("hwid") ??
+      url.searchParams.get("serial") ??
+      ""
+    )
       .trim()
       .slice(0, 128);
     wantsReset =
@@ -469,28 +485,82 @@ const connect = httpAction(async (ctx, request) => {
     resource = (url.searchParams.get("resource") ?? "").trim().slice(0, 128);
   }
 
-  // Response formatter: Havest-style calls get {status, message}; JSON calls
-  // keep the existing { ok, error } shape.
+  // Response formatter — ONE superset shape that satisfies every client
+  // family at the same time:
+  //   • native JSON clients        check `ok: true`
+  //   • Havest-style validators    check `status: true`
+  //   • primebit-style loaders (FF_KERNEL / ML-KERNEL) search the response
+  //     for the exact error substrings below; when none match it's a success,
+  //     and they parse `expires` for the expiry datetime.
+  const PRIMEBIT_ERRORS: Record<string, string> = {
+    invalid_key: "Invalid key",
+    wrong_server: "Wrong Game Key",
+    server_missing: "Invalid key",
+    offline: "Key banned",
+    revoked: "Key banned",
+    expired: "Key expired",
+    usage_limit: "Key banned",
+    device_mismatch: "Device limit",
+    missing_device: "Device limit",
+  };
+  const primebitError = (reason: string) =>
+    PRIMEBIT_ERRORS[reason] ?? "Invalid key";
+  const NEVER_EXPIRES = "2099-12-31 23:59:59";
+  const formatDate = (ms: number) => {
+    const d = new Date(ms);
+    const p = (n: number) => String(n).padStart(2, "0");
+    return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(
+      d.getUTCDate(),
+    )} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}`;
+  };
   const send = (body: Record<string, unknown>, status = 200) => {
-    if (!isForm) return json(body, status);
     if (body.ok === true) {
+      const server = body.server as Record<string, unknown> | undefined;
+      const key = body.key as Record<string, unknown> | undefined;
+      const url = typeof body.url === "string" ? body.url : undefined;
+      const expiresAt =
+        key !== undefined && typeof key.expiresAt === "number"
+          ? key.expiresAt
+          : 0;
       return json(
         {
+          ok: true,
           status: true,
-          message: body.message ?? "Connected",
+          message: body.message ?? "success",
+          expires: expiresAt > 0 ? formatDate(expiresAt) : NEVER_EXPIRES,
+          expiresAt,
+          expires_ts: expiresAt > 0 ? Math.floor(expiresAt / 1000) : 4102444800,
           data:
-            body.server !== undefined
-              ? { server: body.server, key: body.key, url: body.url }
+            server !== undefined
+              ? { server, key, url: url ?? null }
               : undefined,
+          server,
+          key,
+          url: url ?? null,
         },
         status,
       );
     }
-    return json({ status: false, message: body.error ?? "error" }, status);
+    const error =
+      typeof body.error === "string" && body.error.length > 0
+        ? body.error
+        : "Invalid key";
+    return json(
+      {
+        ok: false,
+        status: "error",
+        error,
+        message:
+          typeof body.message === "string" && body.message.length > 0
+            ? body.message
+            : error,
+      },
+      status,
+    );
   };
 
   if (key.length === 0) {
-    return send({ ok: false, error: "missing key" }, 400);
+    return send({ ok: false, error: "Invalid key", message: "missing key" }, 400);
   }
 
   const ip = clientIp(request);
@@ -515,7 +585,10 @@ const connect = httpAction(async (ctx, request) => {
         reason: "server_not_found",
       });
       accessLog(request, 404, "-");
-      return send({ ok: false, error: "server not found" }, 404);
+      return send(
+        { ok: false, error: "Invalid key", message: "server not found" },
+        404,
+      );
     }
   }
 
@@ -535,7 +608,11 @@ const connect = httpAction(async (ctx, request) => {
     });
     accessLog(request, 503, "-");
     return send(
-      { ok: false, error: settings.downMessage || "server under maintenance" },
+      {
+        ok: false,
+        error: "Key banned",
+        message: settings.downMessage || "server under maintenance",
+      },
       503,
     );
   }
@@ -553,7 +630,10 @@ const connect = httpAction(async (ctx, request) => {
       reason: "offline",
     });
     accessLog(request, 403, "-");
-    return send({ ok: false, error: "server is offline" }, 403);
+    return send(
+      { ok: false, error: "Key banned", message: "server is offline" },
+      403,
+    );
   }
 
   const keyDoc = await ctx.runQuery(internal.nameserver.getKeyByValue, { key });
@@ -571,7 +651,10 @@ const connect = httpAction(async (ctx, request) => {
       reason,
     });
     accessLog(request, status, "-");
-    return send({ ok: false, error }, status);
+    return send(
+      { ok: false, error: primebitError(reason), message: error },
+      status,
+    );
   };
 
   if (keyDoc === null) return await fail(401, "invalid_key", "invalid key");
