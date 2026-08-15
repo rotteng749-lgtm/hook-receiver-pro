@@ -32,6 +32,12 @@ const BOT_TOKEN =
   "8613736980:AAH2bo-FA-GzsNngMNeLGRwkUKIF5HseUZA";
 const TELEGRAM_API = `https://api.telegram.org/bot${BOT_TOKEN}`;
 
+// Telegram's setWebhook `secret_token` only allows A-Z a-z 0-9 _ and -
+// (the bot token itself contains a colon, which is rejected). Strip
+// everything else — the result is still derived from the secret token, and
+// the webhook handler checks the same value.
+const WEBHOOK_SECRET = BOT_TOKEN.replace(/[^A-Za-z0-9_-]/g, "");
+
 const HELP_OWNER = [
   "Owner commands:",
   "- /stats — panel overview",
@@ -165,7 +171,7 @@ export const enable = action({
     if (site.length > 0) {
       const r = await tgFetch("setWebhook", {
         url: `${site}/telegram/webhook`,
-        secret_token: BOT_TOKEN,
+        secret_token: WEBHOOK_SECRET,
         allowed_updates: ["message"],
       });
       if (!r.ok) {
@@ -219,7 +225,7 @@ export const upsertSettingsInternal = internalMutation({
 });
 
 const webhook = httpAction(async (ctx, request) => {
-  if (request.headers.get("x-telegram-bot-api-secret-token") !== BOT_TOKEN) {
+  if (request.headers.get("x-telegram-bot-api-secret-token") !== WEBHOOK_SECRET) {
     return new Response("unauthorized", { status: 401 });
   }
   let update: {
