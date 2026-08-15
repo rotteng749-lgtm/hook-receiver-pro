@@ -1,26 +1,30 @@
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/use-auth";
 import logo from "@/assets/logo.svg";
-import {
-  Braces,
-  FileArchive,
-  LayoutDashboard,
-  LogOut,
-  Menu,
-  Plus,
-  X,
-} from "lucide-react";
+import { Coins, LogOut, Menu, X } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { useState } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router";
 import { cn } from "@/lib/utils";
 
-const navItems = [
-  { to: "/dashboard", label: "Overview", icon: LayoutDashboard, end: true },
-  { to: "/dashboard/files", label: "Files", icon: FileArchive, end: false },
-  { to: "/dashboard/api", label: "REST API", icon: Braces, end: false },
-];
+export interface PanelNavItem {
+  to: string;
+  label: string;
+  icon: LucideIcon;
+  end?: boolean;
+}
 
-function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
+function SidebarContent({
+  navItems,
+  balance,
+  roleLabel,
+  onNavigate,
+}: {
+  navItems: PanelNavItem[];
+  balance?: number | null;
+  roleLabel: string;
+  onNavigate?: () => void;
+}) {
   const { user, signOut } = useAuth();
   const navigate = useNavigate();
 
@@ -37,14 +41,14 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   return (
     <div className="flex h-full flex-col">
       <NavLink
-        to="/dashboard"
+        to="/"
         onClick={onNavigate}
         className="flex items-center gap-2.5 px-5 pt-6 pb-5"
       >
-        <img src={logo} alt="Stash" width={28} height={28} className="rounded-md" />
-        <span className="text-[15px] font-bold tracking-tight">Stash</span>
-        <span className="ml-auto hidden items-center rounded-md border border-border px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground sm:inline-flex">
-          admin
+        <img src={logo} alt="nameserver" width={28} height={28} className="rounded-md" />
+        <span className="text-[15px] font-bold tracking-tight">nameserver</span>
+        <span className="ml-auto inline-flex items-center rounded-md border border-border px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+          {roleLabel}
         </span>
       </NavLink>
 
@@ -68,29 +72,26 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
             {item.label}
           </NavLink>
         ))}
-
-        <div className="pt-3">
-          <Button
-            asChild
-            size="sm"
-            className="w-full cursor-pointer"
-            onClick={onNavigate}
-          >
-            <NavLink to="/dashboard/files?upload=1">
-              <Plus className="size-4" />
-              New file
-            </NavLink>
-          </Button>
-        </div>
       </nav>
 
       <div className="border-t border-border/70 p-3">
+        {typeof balance === "number" && (
+          <div className="mb-2 flex items-center gap-2 rounded-lg border border-border/70 bg-card px-3 py-2">
+            <Coins className="size-4 text-primary" />
+            <span className="text-xs text-muted-foreground">Balance</span>
+            <span className="ml-auto text-sm font-bold tabular-nums">
+              {balance.toLocaleString()}
+            </span>
+          </div>
+        )}
         <div className="flex items-center gap-2.5 rounded-lg px-2 py-2">
           <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-accent text-xs font-bold text-accent-foreground">
             {initials}
           </div>
           <div className="min-w-0 flex-1">
-            <p className="truncate text-[13px] font-medium">{user?.name ?? "Guest user"}</p>
+            <p className="truncate text-[13px] font-medium">
+              {user?.name ?? "Guest user"}
+            </p>
             <p className="truncate text-xs text-muted-foreground">
               {user?.email ?? "anonymous session"}
             </p>
@@ -111,14 +112,26 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   );
 }
 
-export default function DashboardLayout() {
+export function PanelShell({
+  navItems,
+  balance,
+  roleLabel,
+}: {
+  navItems: PanelNavItem[];
+  balance?: number | null;
+  roleLabel: string;
+}) {
   const [mobileOpen, setMobileOpen] = useState(false);
 
   return (
     <div className="flex min-h-screen bg-background text-foreground">
       {/* Desktop sidebar */}
       <aside className="fixed inset-y-0 left-0 z-30 hidden w-60 border-r border-border/70 bg-sidebar lg:block">
-        <SidebarContent />
+        <SidebarContent
+          navItems={navItems}
+          balance={balance}
+          roleLabel={roleLabel}
+        />
       </aside>
 
       {/* Mobile drawer */}
@@ -137,7 +150,12 @@ export default function DashboardLayout() {
             >
               <X className="size-4" />
             </button>
-            <SidebarContent onNavigate={() => setMobileOpen(false)} />
+            <SidebarContent
+              navItems={navItems}
+              balance={balance}
+              roleLabel={roleLabel}
+              onNavigate={() => setMobileOpen(false)}
+            />
           </aside>
         </div>
       )}
@@ -153,9 +171,9 @@ export default function DashboardLayout() {
           >
             <Menu className="size-5" />
           </button>
-          <NavLink to="/dashboard" className="flex items-center gap-2">
-            <img src={logo} alt="Stash" width={24} height={24} className="rounded" />
-            <span className="text-sm font-bold tracking-tight">Stash</span>
+          <NavLink to="/" className="flex items-center gap-2">
+            <img src={logo} alt="nameserver" width={24} height={24} className="rounded" />
+            <span className="text-sm font-bold tracking-tight">nameserver</span>
           </NavLink>
         </header>
 

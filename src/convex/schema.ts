@@ -4,12 +4,14 @@ import { Infer, v } from "convex/values";
 
 // default user roles. can add / remove based on the project as needed
 export const ROLES = {
+  OWNER: "owner",
   ADMIN: "admin",
   USER: "user",
   MEMBER: "member",
 } as const;
 
 export const roleValidator = v.union(
+  v.literal(ROLES.OWNER),
   v.literal(ROLES.ADMIN),
   v.literal(ROLES.USER),
   v.literal(ROLES.MEMBER),
@@ -30,6 +32,7 @@ const schema = defineSchema(
       isAnonymous: v.optional(v.boolean()), // is the user anonymous. do not remove
 
       role: v.optional(roleValidator), // role of the user. do not remove
+      balance: v.optional(v.number()), // wallet balance — generating keys deducts this
     }).index("email", ["email"]), // index for the email. do not remove or modify
 
     // Every uploaded file. The bytes live in Convex object storage (S3-backed);
@@ -63,6 +66,64 @@ const schema = defineSchema(
       ip: v.string(),
       time: v.number(), // epoch ms
     }).index("by_ip", ["ip", "time"]),
+
+    // A "nameserver": a connect server the panel exposes. Clients (apps,
+    // .sh scripts, .dll loaders…) connect to it by presenting a key at
+    // POST /connect with the server's `code`.
+    servers: defineTable({
+      name: v.string(), // display name, e.g. "EU Main"
+      code: v.string(), // unique lowercase slug used by clients: /connect?server=<code>
+      description: v.optional(v.string()),
+      status: v.union(v.literal("active"), v.literal("off")),
+      createdBy: v.id("users"),
+    }).index("by_code", ["code"]),
+
+    // Generated connect keys. Generating one deducts `cost` from the
+    // creator's balance (see users.balance). Clients present the raw key
+    // to /connect; only the raw value is stored (hashed would prevent
+    // copyback, and these are per-client tokens, not credentials).
+    connectKeys: defineTable({
+      key: v.string(), // the raw key, e.g. NS-XXXX-…
+      serverId: v.id("servers"),
+      createdBy: v.id("users"), // the admin/owner who generated it
+      status: v.union(
+        v.literal("active"),
+        v.literal("used"), // reached maxUses
+        v.literal("expired"),
+        v.literal("revoked"),
+      ),
+      maxUses: v.number(), // 0 = unlimited
+      uses: v.number(), // successful connects so far
+      expiresAt: v.number(), // epoch ms; 0 = never expires
+      cost: v.number(), // balance that was deducted
+      note: v.optional(v.string()),
+    })
+      .index("by_key", ["key"])
+      .index("by_server", ["serverId"])
+      .index("by_creator", ["createdBy"]),
+
+    // Every /connect attempt (success or failure) — the request log.
+    connections: defineTable({
+      keyId: v.optional(v.id("connectKeys")),
+      key: v.string(),
+      serverId: v.id("servers"),
+      ip: v.string(),
+      userAgent: v.optional(v.string()),
+      ok: v.boolean(), // did the validation succeed?
+      reason: v.optional(v.string()),
+    })
+      .index("by_server", ["serverId"])
+      .index("by_key", ["keyId"]),
+
+    // Global owner settings (single doc, scope = "global").
+    settings: defineTable({
+      scope: v.string(),
+      keyPrice: v.number(), // balance deducted per generated key
+      defaultKeyUses: v.number(), // 0 = unlimited
+      defaultKeyHours: v.number(), // 0 = never expires
+      maintenance: v.boolean(), // blocks all /connect calls
+      downMessage: v.optional(v.string()), // shown to clients during maintenance
+    }).index("by_scope", ["scope"]),
 
   },
   {

@@ -1,6 +1,8 @@
 import '@vly-ai/integrations';
 import { Toaster } from "@/components/ui/sonner";
 import { RequireAuth } from "@/components/RequireAuth";
+import { RequireRole } from "@/components/RequireRole";
+import { BootstrapRole } from "@/components/BootstrapRole";
 import { VlyToolbar } from "../vly-toolbar-readonly.tsx";
 import { ConvexAuthProvider } from "@convex-dev/auth/react";
 import { ConvexReactClient } from "convex/react";
@@ -12,10 +14,17 @@ import "./index.css";
 // Lazy load route components for better code splitting
 const Landing = lazy(() => import("./pages/Landing.tsx"));
 const AuthPage = lazy(() => import("./pages/Auth.tsx"));
-const Dashboard = lazy(() => import("./pages/Dashboard.tsx"));
-const Overview = lazy(() => import("./pages/Overview.tsx"));
-const Files = lazy(() => import("./pages/Files.tsx"));
-const ApiDocs = lazy(() => import("./pages/ApiDocs.tsx"));
+const UserHome = lazy(() => import("./pages/UserHome.tsx"));
+const OwnerPanel = lazy(() => import("./pages/owner/OwnerPanel.tsx"));
+const OwnerOverview = lazy(() => import("./pages/owner/Overview.tsx"));
+const OwnerKeys = lazy(() => import("./pages/owner/Keys.tsx"));
+const OwnerMembers = lazy(() => import("./pages/owner/Members.tsx"));
+const OwnerSettings = lazy(() => import("./pages/owner/Settings.tsx"));
+const AdminPanel = lazy(() => import("./pages/admin/AdminPanel.tsx"));
+const AdminOverview = lazy(() => import("./pages/admin/Overview.tsx"));
+const AdminKeys = lazy(() => import("./pages/admin/Keys.tsx"));
+const Servers = lazy(() => import("./pages/Servers.tsx"));
+const Connections = lazy(() => import("./pages/Connections.tsx"));
 const NotFound = lazy(() => import("./pages/NotFound.tsx"));
 
 // Simple loading fallback for route transitions
@@ -115,27 +124,60 @@ createRoot(document.getElementById("root")!).render(
         <VlyToolbar />
       </ToolbarErrorBoundary>
       <ConvexAuthProvider client={convex}>
+        <BootstrapRole />
         <BrowserRouter>
           <RouteSyncer />
           <Suspense fallback={<RouteLoading />}>
             <Routes>
               <Route path="/" element={<Landing />} />
+              <Route path="/auth" element={<AuthPage />} />
+
+              {/* Owner panel — full control */}
               <Route
-                path="/auth"
-                element={<AuthPage redirectAfterAuth="/dashboard" />}
-              />
+                path="/owner"
+                element={
+                  <RequireAuth>
+                    <RequireRole roles={["owner"]}>
+                      <OwnerPanel />
+                    </RequireRole>
+                  </RequireAuth>
+                }
+              >
+                <Route index element={<OwnerOverview />} />
+                <Route path="servers" element={<Servers />} />
+                <Route path="keys" element={<OwnerKeys />} />
+                <Route path="connections" element={<Connections />} />
+                <Route path="members" element={<OwnerMembers />} />
+                <Route path="settings" element={<OwnerSettings />} />
+              </Route>
+
+              {/* Admin panel — create servers, generate keys (balance) */}
+              <Route
+                path="/admin"
+                element={
+                  <RequireAuth>
+                    <RequireRole roles={["owner", "admin"]}>
+                      <AdminPanel />
+                    </RequireRole>
+                  </RequireAuth>
+                }
+              >
+                <Route index element={<AdminOverview />} />
+                <Route path="servers" element={<Servers />} />
+                <Route path="keys" element={<AdminKeys />} />
+                <Route path="connections" element={<Connections />} />
+              </Route>
+
+              {/* Regular accounts */}
               <Route
                 path="/dashboard"
                 element={
                   <RequireAuth>
-                    <Dashboard />
+                    <UserHome />
                   </RequireAuth>
                 }
-              >
-                <Route index element={<Overview />} />
-                <Route path="files" element={<Files />} />
-                <Route path="api" element={<ApiDocs />} />
-              </Route>
+              />
+
               <Route path="*" element={<NotFound />} />
             </Routes>
           </Suspense>

@@ -1,16 +1,18 @@
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/use-auth";
+import { roleHome } from "@/lib/roles";
 import logo from "@/assets/logo.svg";
 import { motion } from "framer-motion";
 import {
+  Activity,
   ArrowRight,
-  FileArchive,
-  Fingerprint,
-  Link2,
-  QrCode,
+  Coins,
+  KeyRound,
+  Network,
+  Server,
   ShieldCheck,
   TerminalSquare,
-  UploadCloud,
+  Users,
 } from "lucide-react";
 import { Link } from "react-router";
 
@@ -25,51 +27,68 @@ const fadeUp = {
 
 const features = [
   {
-    icon: FileArchive,
-    title: "Any file type",
-    body: "APKs, shell scripts, DLLs, shared objects, zips, docs — nothing is filtered. Bytes in, bytes out, with the right Content-Type on the way.",
+    icon: KeyRound,
+    title: "Key-gated connect",
+    body: "Every client presents a generated key at /connect. Invalid, revoked, expired, or exhausted keys are rejected — every attempt is logged with its IP and result.",
   },
   {
-    icon: Fingerprint,
-    title: "SHA-256 verified",
-    body: "Every upload is hashed server-side and served with an X-Checksum-Sha256 header, so your team can verify what they downloaded.",
+    icon: Coins,
+    title: "Balance system",
+    body: "Generating a key costs balance from the admin's wallet. The owner sets the price and tops up members — key generation is always paid for.",
   },
   {
-    icon: Link2,
-    title: "Public links & QR",
-    body: "Each file gets a stable public URL that needs no login — copy the link or scan a QR straight from the admin panel.",
+    icon: Server,
+    title: "Your servers",
+    body: "Create any number of nameservers with their own code and status. Turn one off and its clients instantly get rejected, no code changes needed.",
   },
   {
-    icon: ShieldCheck,
-    title: "Admin-protected",
-    body: "Uploading, deleting, and managing files requires sign-in; the REST API uses time-limited Bearer tokens with a rate-limited login.",
+    icon: Activity,
+    title: "Live connection log",
+    body: "Every connect attempt lands in the panel: which server, which key, which IP, success or the exact rejection reason.",
   },
 ];
 
 const steps = [
   {
     num: "01",
-    title: "Upload",
-    body: "Drag a build into the admin panel — .apk, .sh, .dll, .zip, anything up to 512 MB. Add a version and a note.",
+    title: "Create a server",
+    body: "Name it, give it a code (e.g. eu-main), and share the connect URL with your clients.",
   },
   {
     num: "02",
-    title: "Checksum & link",
-    body: "The server hashes the file and hands you a stable public download URL with metadata: size, version, SHA-256.",
+    title: "Generate keys",
+    body: "Admins generate keys for the server — each one costs balance, with optional usage limits and a lifetime.",
   },
   {
     num: "03",
-    title: "Share & track",
-    body: "Send the link or QR code to your team. Public downloads need no auth; the panel tracks how many times each file was pulled.",
+    title: "Clients connect",
+    body: "Your app, .sh script, or .dll loader calls /connect with the key. Valid keys get a green light, everything else is logged.",
+  },
+];
+
+const roles = [
+  {
+    icon: ShieldCheck,
+    title: "Owner",
+    body: "Everything: all servers, every key, member roles, balances, and global settings. Log in at /owner.",
+  },
+  {
+    icon: Users,
+    title: "Admin",
+    body: "Creates servers, generates keys from their balance, and watches their keys' connections. Log in at /admin.",
+  },
+  {
+    icon: TerminalSquare,
+    title: "Client",
+    body: "No panel needed — just calls /connect with a key and a server code to get validated.",
   },
 ];
 
 export default function Landing() {
-  const { isAuthenticated, isLoading } = useAuth();
-  const dashboardHref = isAuthenticated
-    ? "/dashboard"
-    : "/auth?returnTo=%2Fdashboard";
-  const signInHref = isAuthenticated ? "/dashboard" : "/auth";
+  const { isAuthenticated, isLoading, user } = useAuth();
+  const home = roleHome(user?.role);
+  const ctaHref = isAuthenticated ? home : "/auth?returnTo=%2Fdashboard";
+  const signInHref = isAuthenticated ? home : "/auth";
 
   return (
     <div className="min-h-screen bg-background text-foreground">
@@ -77,14 +96,14 @@ export default function Landing() {
       <header className="sticky top-0 z-40 border-b border-border/70 bg-background/80 backdrop-blur-md">
         <div className="mx-auto flex h-16 w-full max-w-6xl items-center justify-between px-4 sm:px-6">
           <Link to="/" className="flex items-center gap-2.5">
-            <img src={logo} alt="Stash" width={30} height={30} className="rounded-md" />
-            <span className="text-[15px] font-bold tracking-tight">Stash</span>
+            <img src={logo} alt="nameserver" width={30} height={30} className="rounded-md" />
+            <span className="text-[15px] font-bold tracking-tight">nameserver</span>
           </Link>
           <nav className="flex items-center gap-2">
             {isAuthenticated ? (
               <Button asChild size="sm" className="cursor-pointer">
-                <Link to="/dashboard">
-                  Open dashboard <ArrowRight className="size-4" />
+                <Link to={home}>
+                  Open panel <ArrowRight className="size-4" />
                 </Link>
               </Button>
             ) : (
@@ -116,31 +135,31 @@ export default function Landing() {
           >
             <span className="inline-flex items-center gap-2 rounded-full border border-border bg-card px-3 py-1 text-xs font-medium text-muted-foreground">
               <span className="size-1.5 rounded-full bg-primary" />
-              File server for internal teams
+              Key-gated connect server for your apps & scripts
             </span>
             <h1 className="mt-6 text-4xl font-bold leading-[1.08] tracking-tight sm:text-6xl">
-              Upload once.
+              One endpoint.
               <br />
-              <span className="text-primary">Share any file.</span>
+              <span className="text-primary">Every client, gated by key.</span>
             </h1>
             <p className="mx-auto mt-5 max-w-xl text-pretty text-base leading-relaxed text-muted-foreground sm:text-lg">
-              A dead-simple download server for APKs, scripts, libraries, and
-              builds. Every file gets a public link, a verified SHA-256, and a
-              QR code — with an admin panel and REST API for your pipeline.
+              A nameserver panel: create servers, generate connect keys that
+              cost balance, and let your apps, .sh scripts, and .dll loaders
+              authenticate through a single <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-[0.9em]">/connect</code> endpoint.
             </p>
             <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
               <Button asChild size="lg" className="w-full cursor-pointer sm:w-auto">
-                <Link to={dashboardHref}>
-                  {isLoading ? "Loading…" : isAuthenticated ? "Open dashboard" : "Start hosting files"}
+                <Link to={ctaHref}>
+                  {isLoading ? "Loading…" : isAuthenticated ? "Open panel" : "Start hosting keys"}
                   <ArrowRight className="size-4" />
                 </Link>
               </Button>
               <Button asChild variant="outline" size="lg" className="w-full cursor-pointer sm:w-auto">
-                <Link to="/dashboard/files">Browse files</Link>
+                <Link to="/auth?returnTo=%2Fowner">Owner sign in</Link>
               </Button>
             </div>
             <p className="mt-4 text-xs text-muted-foreground">
-              No credit card · deployed and ready in minutes
+              First account to sign up becomes the owner · no credit card
             </p>
           </motion.div>
 
@@ -158,29 +177,38 @@ export default function Landing() {
                 <span className="size-2.5 rounded-full bg-amber-400/80" />
                 <span className="size-2.5 rounded-full bg-emerald-400/80" />
                 <span className="ml-3 font-mono text-[11px] text-zinc-400">
-                  team build —→ GET /files/7hK3m…9
+                  loader.sh —→ POST /connect
                 </span>
               </div>
               <div className="space-y-2.5 p-5 font-mono text-[12.5px] leading-relaxed sm:text-[13px]">
                 <p className="text-zinc-500">
-                  <span className="text-zinc-300">$</span> curl -L -O{" "}
-                  <span className="text-teal-300">https://stash.example/files/7hK3m…9</span>
+                  <span className="text-zinc-300">$</span> curl -X POST{" "}
+                  <span className="text-teal-300">https://ns.example/connect</span> \
+                  <br />
+                  &nbsp;&nbsp;-d '{"{"}"key":"NS-K4F2-X9LM-…","server":"eu-main"{"}"}'
                 </p>
                 <p className="text-zinc-500">
-                  <span className="text-zinc-300">→</span> 200 OK{" "}
+                  <span className="text-zinc-300">→</span>{" "}
+                  <span className="text-emerald-400">200</span>{" "}
                   <span className="text-zinc-500">·</span>{" "}
-                  <span className="text-teal-300">app-v1.0.3.apk</span> (48.2 MB)
-                </p>
-                <p className="text-zinc-500">
-                  <span className="text-zinc-300">✓</span>{" "}
-                  <span className="text-zinc-500">X-Checksum-Sha256:</span>{" "}
-                  <span className="text-teal-300">a1b2c3d4…</span>
+                  <span className="text-teal-300">{"{"}"ok":true,"server":"EU Main"{"}"}</span>
                 </p>
                 <div className="my-3 border-t border-dashed border-zinc-700/70" />
-                <p className="text-zinc-400">
-                  <span className="text-emerald-400">✓</span> saved as{" "}
-                  <span className="text-zinc-300">app-v1.0.3.apk</span> — no auth, no
-                  login, bytes identical
+                <p className="text-zinc-500">
+                  <span className="text-zinc-300">$</span> curl -X POST{" "}
+                  <span className="text-teal-300">https://ns.example/connect</span> \
+                  <br />
+                  &nbsp;&nbsp;-d '{"{"}"key":"NS-EXPIRED-…","server":"eu-main"{"}"}'
+                </p>
+                <p className="text-zinc-500">
+                  <span className="text-zinc-300">→</span>{" "}
+                  <span className="text-red-400">403</span>{" "}
+                  <span className="text-zinc-500">·</span>{" "}
+                  <span className="text-zinc-400">key has expired</span>
+                </p>
+                <p className="text-zinc-500">
+                  <span className="text-zinc-400">✓</span> attempt logged in the
+                  panel — key, IP, reason
                 </p>
               </div>
             </div>
@@ -227,11 +255,11 @@ export default function Landing() {
             className="max-w-2xl"
           >
             <h2 className="text-2xl font-bold tracking-tight sm:text-3xl">
-              From build to download in three steps
+              From server to connected client in three steps
             </h2>
             <p className="mt-3 text-muted-foreground">
-              Built for internal teams that ship artifacts without standing up
-              another service.
+              No client SDK required — any app or script that can send an HTTP
+              request can connect.
             </p>
           </motion.div>
           <div className="mt-10 grid grid-cols-1 gap-10 sm:grid-cols-3">
@@ -254,6 +282,33 @@ export default function Landing() {
         </div>
       </section>
 
+      {/* Roles */}
+      <section className="mx-auto w-full max-w-6xl px-4 py-16 sm:px-6">
+        <motion.div
+          variants={fadeUp}
+          initial="hidden"
+          whileInView="show"
+          viewport={{ once: true, margin: "-60px" }}
+          custom={0}
+          className="grid grid-cols-1 gap-4 lg:grid-cols-3"
+        >
+          {roles.map((role) => (
+            <div
+              key={role.title}
+              className="flex flex-col rounded-xl border border-border bg-card p-6 transition-colors hover:border-primary/30"
+            >
+              <div className="flex items-center gap-3">
+                <div className="flex size-10 items-center justify-center rounded-lg bg-accent text-accent-foreground">
+                  <role.icon className="size-5" />
+                </div>
+                <h3 className="text-base font-semibold tracking-tight">{role.title}</h3>
+              </div>
+              <p className="mt-3 text-sm leading-relaxed text-muted-foreground">{role.body}</p>
+            </div>
+          ))}
+        </motion.div>
+      </section>
+
       {/* CTA */}
       <section className="mx-auto w-full max-w-6xl px-4 py-20 sm:px-6">
         <motion.div
@@ -264,20 +319,17 @@ export default function Landing() {
           custom={0}
           className="flex flex-col items-center rounded-2xl border border-border bg-card px-6 py-14 text-center sm:px-12"
         >
-          <div className="flex items-center gap-3">
-            <UploadCloud className="size-7 text-primary" />
-            <QrCode className="size-7 text-primary" />
-          </div>
+          <Network className="size-8 text-primary" />
           <h2 className="mt-5 max-w-xl text-2xl font-bold tracking-tight sm:text-3xl">
-            Stop emailing builds around.
+            Gate your clients, track every connect.
           </h2>
           <p className="mt-3 max-w-md text-muted-foreground">
-            Upload your first file, copy the link, and let your team pull it —
-            all in under ten minutes.
+            Sign up, become the owner, create your first server, and generate a
+            key — all in under ten minutes.
           </p>
           <Button asChild size="lg" className="mt-7 cursor-pointer">
-            <Link to={dashboardHref}>
-              {isLoading ? "Loading…" : isAuthenticated ? "Open dashboard" : "Get started free"}
+            <Link to={ctaHref}>
+              {isLoading ? "Loading…" : isAuthenticated ? "Open panel" : "Get started free"}
               <ArrowRight className="size-4" />
             </Link>
           </Button>
@@ -288,13 +340,13 @@ export default function Landing() {
       <footer className="border-t border-border/70">
         <div className="mx-auto flex w-full max-w-6xl flex-col items-center justify-between gap-4 px-4 py-8 sm:flex-row sm:px-6">
           <div className="flex items-center gap-2">
-            <img src={logo} alt="Stash" width={22} height={22} className="rounded" />
-            <span className="text-sm font-semibold tracking-tight">Stash</span>
-            <span className="ml-1 text-xs text-muted-foreground">— file server</span>
+            <img src={logo} alt="nameserver" width={22} height={22} className="rounded" />
+            <span className="text-sm font-semibold tracking-tight">nameserver</span>
+            <span className="ml-1 text-xs text-muted-foreground">— connect server</span>
           </div>
           <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
             <TerminalSquare className="size-3.5" />
-            Built on Convex · deploy the admin UI to Vercel
+            POST /connect · built on Convex · deploy the panel anywhere
           </p>
         </div>
       </footer>

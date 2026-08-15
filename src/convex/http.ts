@@ -7,6 +7,8 @@
  *
  * Routes:
  *   GET    /health            → public status
+ *   POST   /connect           → public, validate { key, server } (JSON)
+ *   GET    /connect           → public, validate ?key=…&server=…
  *   POST   /api/login         → public, {username,password} → {token} (24 h)
  *   POST   /api/files         → admin (Bearer), multipart upload
  *   GET    /api/files         → admin (Bearer), list all files
@@ -343,6 +345,133 @@ const deleteFile = httpAction(async (ctx, request) => {
   return json({ deleted: true, id: fileId });
 });
 
+/* ------------------------------ connect ------------------------------ */
+
+/**
+ * Public connect endpoint: a client (app, .sh script, .dll loader…) presents
+ * a generated key for a server and gets validated.
+ *
+ *   POST /connect  body { key, server }   (JSON)
+ *   GET  /connect?key=NS-…&server=<code>
+ *
+ * `server` is the server code (lowercase slug). Responses are always JSON:
+ *   { ok: true,  server: {name, code}, key: {expiresAt, uses, maxUses}, message }
+ *   { ok: false, error }  (400 / 401 / 403 / 404 / 503)
+ * Every attempt is logged (IP, user agent, result).
+ */
+const connect = httpAction(async (ctx, request) => {
+  const url = new URL(request.url);
+  let key = "";
+  let serverRef = "";
+
+  if (request.method === "POST") {
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return json({ ok: false, error: "expected JSON body { key, server }" }, 400);
+    }
+    const obj = body as { key?: unknown; server?: unknown };
+    key = typeof obj.key === "string" ? obj.key.trim() : "";
+    serverRef = typeof obj.server === "string" ? obj.server.trim() : "";
+  } else {
+    key = (url.searchParams.get("key") ?? "").trim();
+    serverRef = (url.searchParams.get("server") ?? "").trim();
+  }
+
+  if (key.length === 0 || serverRef.length === 0) {
+    return json({ ok: false, error: "missing key or server" }, 400);
+  }
+
+  const ip = clientIp(request);
+  const ua = request.headers.get("user-agent") ?? undefined;
+
+  const server = await ctx.runQuery(internal.nameserver.getServerByCode, {
+    code: serverRef.toLowerCase(),
+  });
+  if (server === null) {
+    accessLog(request, 404, "-");
+    return json({ ok: false, error: "server not found" }, 404);
+  }
+
+  const settings = await ctx.runQuery(internal.nameserver.getSettingsInternal, {});
+  if (settings?.maintenance) {
+    await ctx.runMutation(internal.nameserver.recordConnect, {
+      key,
+      serverId: server._id,
+      ip,
+      userAgent: ua,
+      ok: false,
+      reason: "maintenance",
+    });
+    accessLog(request, 503, "-");
+    return json(
+      { ok: false, error: settings.downMessage || "server under maintenance" },
+      503,
+    );
+  }
+  if (server.status === "off") {
+    await ctx.runMutation(internal.nameserver.recordConnect, {
+      key,
+      serverId: server._id,
+      ip,
+      userAgent: ua,
+      ok: false,
+      reason: "offline",
+    });
+    accessLog(request, 403, "-");
+    return json({ ok: false, error: "server is offline" }, 403);
+  }
+
+  const keyDoc = await ctx.runQuery(internal.nameserver.getKeyByValue, { key });
+  const fail = async (status: number, reason: string, error: string) => {
+    await ctx.runMutation(internal.nameserver.recordConnect, {
+      key,
+      serverId: server._id,
+      ip,
+      userAgent: ua,
+      ok: false,
+      reason,
+    });
+    accessLog(request, status, "-");
+    return json({ ok: false, error }, status);
+  };
+
+  if (keyDoc === null) return await fail(401, "invalid_key", "invalid key");
+  if (keyDoc.serverId !== server._id) {
+    return await fail(401, "wrong_server", "key does not belong to this server");
+  }
+  if (keyDoc.status === "revoked") {
+    return await fail(403, "revoked", "key has been revoked");
+  }
+  if (keyDoc.expiresAt > 0 && Date.now() > keyDoc.expiresAt) {
+    return await fail(403, "expired", "key has expired");
+  }
+  if (keyDoc.maxUses > 0 && keyDoc.uses >= keyDoc.maxUses) {
+    return await fail(403, "usage_limit", "key has reached its usage limit");
+  }
+
+  await ctx.runMutation(internal.nameserver.recordConnect, {
+    keyId: keyDoc._id,
+    key,
+    serverId: server._id,
+    ip,
+    userAgent: ua,
+    ok: true,
+  });
+  accessLog(request, 200, "-");
+  return json({
+    ok: true,
+    server: { name: server.name, code: server.code },
+    key: {
+      expiresAt: keyDoc.expiresAt,
+      uses: keyDoc.uses + 1,
+      maxUses: keyDoc.maxUses,
+    },
+    message: "connected",
+  });
+});
+
 /* ------------------------------ CORS ------------------------------ */
 
 const preflight = httpAction(async () => {
@@ -353,6 +482,9 @@ const preflight = httpAction(async () => {
 
 http.route({ path: "/health", method: "GET", handler: health });
 
+http.route({ path: "/connect", method: "POST", handler: connect });
+http.route({ path: "/connect", method: "GET", handler: connect });
+
 http.route({ path: "/api/login", method: "POST", handler: login });
 
 http.route({ path: "/api/files", method: "POST", handler: upload });
@@ -361,6 +493,7 @@ http.route({ pathPrefix: "/api/files/", method: "DELETE", handler: deleteFile })
 
 http.route({ pathPrefix: "/files/", method: "GET", handler: download });
 
+http.route({ path: "/connect", method: "OPTIONS", handler: preflight });
 http.route({ pathPrefix: "/api/", method: "OPTIONS", handler: preflight });
 http.route({ pathPrefix: "/files/", method: "OPTIONS", handler: preflight });
 
