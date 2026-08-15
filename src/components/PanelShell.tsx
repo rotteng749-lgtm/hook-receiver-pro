@@ -1,4 +1,5 @@
 import { Button } from "@/components/ui/button";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import { useAuth } from "@/hooks/use-auth";
 import logo from "@/assets/logo.svg";
 import { Coins, LogOut, Menu, X } from "lucide-react";
@@ -75,6 +76,12 @@ function SidebarContent({
       </nav>
 
       <div className="border-t border-border/70 p-3">
+        <div className="mb-2 flex items-center justify-between px-2">
+          <span className="text-[10px] font-semibold tracking-wider text-muted-foreground/70 uppercase">
+            Theme
+          </span>
+          <ThemeToggle />
+        </div>
         {typeof balance === "number" && (
           <div className="mb-2 flex items-center gap-2 rounded-lg border border-border/70 bg-card px-3 py-2">
             <Coins className="size-4 text-primary" />
@@ -175,6 +182,9 @@ export function PanelShell({
             <img src={logo} alt="nameserver" width={24} height={24} className="rounded" />
             <span className="text-sm font-bold tracking-tight">nameserver</span>
           </NavLink>
+          <div className="ml-auto">
+            <ThemeToggle />
+          </div>
         </header>
 
         <main className="flex-1 px-4 py-6 sm:px-6 lg:px-8">

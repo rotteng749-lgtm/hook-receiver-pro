@@ -6,6 +6,8 @@ import { BootstrapRole } from "@/components/BootstrapRole";
 import { VlyToolbar } from "../vly-toolbar-readonly.tsx";
 import { ConvexAuthProvider } from "@convex-dev/auth/react";
 import { ConvexReactClient } from "convex/react";
+import { ThemeProvider } from "next-themes";
+import { applyStoredAccent } from "@/lib/theme";
 import React, { StrictMode, useEffect, lazy, Suspense } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter, Route, Routes, useLocation } from "react-router";
@@ -119,76 +121,81 @@ function RouteSyncer() {
   return null;
 }
 
+// Restore the stored accent before first paint so it survives reloads.
+applyStoredAccent();
+
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <RootErrorBoundary>
       <ToolbarErrorBoundary>
         <VlyToolbar />
       </ToolbarErrorBoundary>
-      <ConvexAuthProvider client={convex}>
-        <BootstrapRole />
-        <BrowserRouter>
-          <RouteSyncer />
-          <Suspense fallback={<RouteLoading />}>
-            <Routes>
-              <Route path="/" element={<Landing />} />
-              <Route path="/auth" element={<AuthPage />} />
+      <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
+        <ConvexAuthProvider client={convex}>
+          <BootstrapRole />
+          <BrowserRouter>
+            <RouteSyncer />
+            <Suspense fallback={<RouteLoading />}>
+              <Routes>
+                <Route path="/" element={<Landing />} />
+                <Route path="/auth" element={<AuthPage />} />
 
-              {/* Owner panel — full control */}
-              <Route
-                path="/owner"
-                element={
-                  <RequireAuth>
-                    <RequireRole roles={["owner"]}>
-                      <OwnerPanel />
-                    </RequireRole>
-                  </RequireAuth>
-                }
-              >
-                <Route index element={<OwnerOverview />} />
-                <Route path="servers" element={<Servers />} />
-                <Route path="keys" element={<OwnerKeys />} />
-                <Route path="connections" element={<Connections />} />
-                <Route path="members" element={<OwnerMembers />} />
-                <Route path="api" element={<ApiTokens />} />
-                <Route path="telegram" element={<OwnerTelegram />} />
-                <Route path="settings" element={<OwnerSettings />} />
-              </Route>
+                {/* Owner panel — full control */}
+                <Route
+                  path="/owner"
+                  element={
+                    <RequireAuth>
+                      <RequireRole roles={["owner"]}>
+                        <OwnerPanel />
+                      </RequireRole>
+                    </RequireAuth>
+                  }
+                >
+                  <Route index element={<OwnerOverview />} />
+                  <Route path="servers" element={<Servers />} />
+                  <Route path="keys" element={<OwnerKeys />} />
+                  <Route path="connections" element={<Connections />} />
+                  <Route path="members" element={<OwnerMembers />} />
+                  <Route path="api" element={<ApiTokens />} />
+                  <Route path="telegram" element={<OwnerTelegram />} />
+                  <Route path="settings" element={<OwnerSettings />} />
+                </Route>
 
-              {/* Admin panel — create servers, generate keys (balance) */}
-              <Route
-                path="/admin"
-                element={
-                  <RequireAuth>
-                    <RequireRole roles={["owner", "admin"]}>
-                      <AdminPanel />
-                    </RequireRole>
-                  </RequireAuth>
-                }
-              >
-                <Route index element={<AdminOverview />} />
-                <Route path="servers" element={<Servers />} />
-                <Route path="keys" element={<AdminKeys />} />
-                <Route path="connections" element={<Connections />} />
-                <Route path="api" element={<ApiTokens />} />
-              </Route>
+                {/* Admin panel — create servers, generate keys (balance) */}
+                <Route
+                  path="/admin"
+                  element={
+                    <RequireAuth>
+                      <RequireRole roles={["owner", "admin"]}>
+                        <AdminPanel />
+                      </RequireRole>
+                    </RequireAuth>
+                  }
+                >
+                  <Route index element={<AdminOverview />} />
+                  <Route path="servers" element={<Servers />} />
+                  <Route path="keys" element={<AdminKeys />} />
+                  <Route path="connections" element={<Connections />} />
+                  <Route path="api" element={<ApiTokens />} />
+                </Route>
 
-              {/* Regular accounts */}
-              <Route
-                path="/dashboard"
-                element={
-                  <RequireAuth>
-                    <UserHome />
-                  </RequireAuth>
-                }
-              />
+                {/* Regular accounts */}
+                <Route
+                  path="/dashboard"
+                  element={
+                    <RequireAuth>
+                      <UserHome />
+                    </RequireAuth>
+                  }
+                />
 
-              <Route path="*" element={<NotFound />} />
-            </Routes>
-          </Suspense>
-        </BrowserRouter>
-        <Toaster />
-      </ConvexAuthProvider>
+                <Route path="*" element={<NotFound />} />
+              </Routes>
+            </Suspense>
+          </BrowserRouter>
+          <Toaster />
+        </ConvexAuthProvider>
+      </ThemeProvider>
     </RootErrorBoundary>
   </StrictMode>,
 );

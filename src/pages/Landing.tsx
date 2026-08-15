@@ -1,4 +1,5 @@
 import { Button } from "@/components/ui/button";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import { useAuth } from "@/hooks/use-auth";
 import { roleHome } from "@/lib/roles";
 import logo from "@/assets/logo.svg";
@@ -100,6 +101,7 @@ export default function Landing() {
             <span className="text-[15px] font-bold tracking-tight">nameserver</span>
           </Link>
           <nav className="flex items-center gap-2">
+            <ThemeToggle />
             {isAuthenticated ? (
               <Button asChild size="sm" className="cursor-pointer">
                 <Link to={home}>
