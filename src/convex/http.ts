@@ -423,6 +423,13 @@ const deleteFile = httpAction(async (ctx, request) => {
  *     POST /connect  application/x-www-form-urlencoded
  *     game=MLBB&version=1.0&user_key=NS-…&serial=device-abc&resource=menu
  *
+ *   HERZ (herz_fix.sh, MLBB) form — same parsing as Havest, but the binary
+ *     validates the MIGORENG response shape. Form-encoded successes get the
+ *     extra fields it checks (reason, data.token, data.rng, data.tittle,
+ *     data.expired, seal) — see `send` below.
+ *     POST /connect  application/x-www-form-urlencoded
+ *     game=MLBB&user_key=NS-…&serial=<device-id>
+ *
  * `device` / `hwid` / `serial` is optional but recommended: each key binds
  * to the devices that connect, gated by `maxDevices` (1 = 1 key 1 device,
  * 0 = unlimited). `action: "reset"` unbinds the key from its devices (only
@@ -447,7 +454,8 @@ const connect = httpAction(async (ctx, request) => {
     raw.trim().toUpperCase().slice(0, 128);
 
   const contentType = (request.headers.get("content-type") || "").toLowerCase();
-  if (contentType.includes("application/x-www-form-urlencoded")) {
+  const isForm = contentType.includes("application/x-www-form-urlencoded");
+  if (isForm) {
     // Havest-style: game=MLBB&version=1.0&user_key=…&serial=…&resource=…
     const params = new URLSearchParams(await request.text());
     key = normalizeKey(
@@ -553,6 +561,20 @@ const connect = httpAction(async (ctx, request) => {
       d.getUTCDate(),
     )} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}`;
   };
+
+  // HERZ (herz_fix.sh, MLBB) — MIGORENG response format. The binary
+  // verifies `seal` against this exact MD5 and parses the Indonesian
+  // `data.expired` string, so both must never change.
+  const HERZ_SEAL = "96ce5f9743814c22352025eb8703fc39";
+  const INDONESIAN_MONTHS = [
+    "Jan", "Feb", "Mar", "Apr", "Mei", "Jun",
+    "Jul", "Agt", "Sep", "Okt", "Nov", "Des",
+  ];
+  const formatIndonesianDate = (ms: number) => {
+    const d = new Date(ms);
+    const p = (n: number) => String(n).padStart(2, "0");
+    return `${p(d.getUTCDate())} - ${INDONESIAN_MONTHS[d.getUTCMonth()]} - ${d.getUTCFullYear()} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}`;
+  };
   const cors = corsFor(request);
   const send = (body: Record<string, unknown>, status = 200) => {
     if (body.ok === true) {
@@ -573,6 +595,22 @@ const connect = httpAction(async (ctx, request) => {
       };
       if (server !== undefined) {
         out.data = { server, key, url: url ?? null };
+      }
+      // HERZ / Havest form clients (MIGORENG format): the binary validates
+      // `status`, `reason`, `data.token` (non-empty), `data.rng` (server
+      // unix seconds, must be within 30 s of now), `data.tittle` (non-empty)
+      // and `data.expired` (Indonesian date, must be in the future), then
+      // compares `seal` — so those fields are merged into the success
+      // response for every form-encoded request. JSON clients are untouched.
+      if (isForm) {
+        out.reason = "success";
+        out.seal = HERZ_SEAL;
+        const data = (out.data ?? {}) as Record<string, unknown>;
+        data.token = `TOKEN-${randomToken().slice(0, 6).toUpperCase()}`;
+        data.rng = Math.floor(Date.now() / 1000);
+        data.tittle = game.length > 0 ? game : "MLBB";
+        data.expired = formatIndonesianDate(expiresAt);
+        out.data = data;
       }
       if (typeof body.action === "string") out.action = body.action;
       return json(out, status, cors);

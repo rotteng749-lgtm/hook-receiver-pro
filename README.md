@@ -154,6 +154,32 @@ game=MLBB&version=1.0&user_key=NS-…&serial=device-abc&resource=menu
   {"status":true,"message":"connected","data":{"server":{…},"key":{…},"url":"https://…/databases/<id>"}}
   ```
 
+### HERZ-style form protocol (herz_fix.sh, MIGORENG format)
+
+Same form fields as Havest, but the binary validates the response shape field
+by field. Form-encoded successes to `/connect` therefore also carry the
+MIGORENG fields:
+
+```
+POST /connect   (Content-Type: application/x-www-form-urlencoded)
+game=MLBB&user_key=NS-…&serial=<device-id>
+```
+
+- `user_key` → the license key · `serial` → device id (1 key = 1 device)
+- Success (HTTP 200) is a superset that satisfies the binary's checks:
+
+  ```json
+  {"ok":true,"status":true,"reason":"success","seal":"96ce5f9743814c22352025eb8703fc39","data":{"token":"TOKEN-ABC123","rng":1755302400,"tittle":"MLBB","expired":"15 - Des - 2027 12:00:00","server":{…},"key":{…},"url":…}}
+  ```
+
+  - `data.rng` is the server unix timestamp (always `>= now - 30 s`)
+  - `data.expired` is the key's expiry as an Indonesian date
+    (`<dd> - <Mon> - <yyyy> <HH:mm:ss>`; forever keys report 2099)
+  - `seal` is fixed at `96ce5f9743814c22352025eb8703fc39` — the binary
+    compares it, so it must never change
+- Failures stay non-200 with the usual error shape, so the binary's HTTP
+  check (0xc8) rejects them.
+
 ### Primebit-style JSON protocol (FF_KERNEL / ML-KERNEL loaders)
 
 Loaders that expect the `https://…/api/login` JSON protocol (Laravel-style

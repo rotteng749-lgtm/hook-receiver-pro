@@ -433,6 +433,58 @@ failure     → {"status":"BANNED","message":"…"}`}
             </p>
           </CardContent>
         </Card>
+
+        <Card className="border-border/70 lg:col-span-2">
+          <CardHeader>
+            <CardTitle className="text-base">HERZ — MLBB (MIGORENG)</CardTitle>
+            <CardDescription>
+              Form-encoded license check the herz_fix.sh binary talks to — the
+              success response is validated field by field, including the seal.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <div className="space-y-3 text-xs">
+              <div>
+                <p className="mb-1 font-medium">Request</p>
+                <pre className="overflow-x-auto rounded-lg bg-muted/50 p-3 font-mono text-[11px] leading-relaxed text-muted-foreground">
+{`POST ${SITE_URL}/connect
+Content-Type: application/x-www-form-urlencoded
+
+game=MLBB&user_key=NS-XXXX-…&serial=<device-id>`}
+                </pre>
+              </div>
+              <p className="text-muted-foreground">
+                <code className="rounded bg-muted px-1 py-0.5 text-[11px]">user_key</code> is the
+                license key (same keys as /connect) ·{" "}
+                <code className="rounded bg-muted px-1 py-0.5 text-[11px]">serial</code> binds the
+                device (1 key = 1 device by default).
+              </p>
+            </div>
+            <div className="space-y-3 text-xs">
+              <div>
+                <p className="mb-1 font-medium">Response (200)</p>
+                <pre className="overflow-x-auto rounded-lg bg-muted/50 p-3 font-mono text-[11px] leading-relaxed text-muted-foreground">
+{`{"ok":true,"status":true,"reason":"success",
+ "seal":"96ce5f9743814c22352025eb8703fc39",
+ "data":{
+   "token":"TOKEN-ABC123",
+   "rng":1755302400,
+   "tittle":"MLBB",
+   "expired":"15 - Des - 2027 12:00:00",
+   "server":{…},"key":{…},"url":…}}`}
+                </pre>
+              </div>
+              <p className="text-muted-foreground">
+                <code className="rounded bg-muted px-1 py-0.5 text-[11px]">rng</code> is the server
+                unix timestamp (always within 30 s of now) ·{" "}
+                <code className="rounded bg-muted px-1 py-0.5 text-[11px]">expired</code> uses the
+                key's expiry as an Indonesian date (forever keys → 2099) ·{" "}
+                <code className="rounded bg-muted px-1 py-0.5 text-[11px]">seal</code> must stay
+                exactly <code className="rounded bg-muted px-1 py-0.5 text-[11px]">96ce5f97…fc39</code>.
+              </p>
+            </div>
+          </CardContent>
+        </Card>
       </div>
     </div>
   );
