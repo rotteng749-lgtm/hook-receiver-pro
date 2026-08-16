@@ -28,6 +28,7 @@ import type { Doc, Id } from "./_generated/dataModel";
 import { auth } from "./auth";
 import { contentTypeFor, normalizeGame, sanitizeFilename } from "./files";
 import { webhook as telegramWebhook } from "./telegram";
+import { md5 } from "./md5";
 
 const http = httpRouter();
 
@@ -441,6 +442,10 @@ const connect = httpAction(async (ctx, request) => {
   let key = "";
   let serverRef = "";
   let device = "";
+  // Raw device id exactly as the client sent it (NOT uppercased): the HERZ
+  // binary hashes this exact string into the token, so normalizing it would
+  // break the seal check.
+  let rawSerial = "";
   let wantsReset = false;
   let game = "";
   let version = "";
@@ -462,9 +467,10 @@ const connect = httpAction(async (ctx, request) => {
       params.get("user_key") ?? params.get("key") ?? params.get("license") ?? "",
     );
     serverRef = (params.get("server") ?? "").trim();
-    device = normalizeDevice(
-      params.get("serial") ?? params.get("hwid") ?? params.get("device") ?? "",
-    );
+    rawSerial = (
+      params.get("serial") ?? params.get("hwid") ?? params.get("device") ?? ""
+    ).trim();
+    device = normalizeDevice(rawSerial);
     wantsReset =
       params.get("action") === "reset" ||
       params.get("reset") === "true" ||
@@ -505,15 +511,15 @@ const connect = httpAction(async (ctx, request) => {
                 : "";
     key = normalizeKey(rawKey);
     serverRef = typeof obj.server === "string" ? obj.server.trim() : "";
-    device = normalizeDevice(
+    rawSerial =
       typeof obj.hwid === "string"
-        ? obj.hwid
+        ? obj.hwid.trim()
         : typeof obj.device === "string"
-          ? obj.device
+          ? obj.device.trim()
           : typeof obj.serial === "string"
-            ? obj.serial
-            : "",
-    );
+            ? obj.serial.trim()
+            : "";
+    device = normalizeDevice(rawSerial);
     wantsReset =
       (typeof obj.action === "string" && obj.action.trim() === "reset") ||
       obj.reset === true ||
@@ -563,9 +569,11 @@ const connect = httpAction(async (ctx, request) => {
   };
 
   // HERZ (herz_fix.sh, MLBB) — MIGORENG response format. The binary
-  // verifies `seal` against this exact MD5 and parses the Indonesian
-  // `data.expired` string, so both must never change.
+  // verifies `seal` against this exact MD5, compares `data.token` against
+  // MD5("MLBB-<seal>-<serial>-<const>") and parses the Indonesian
+  // `data.expired` string, so these constants must never change.
   const HERZ_SEAL = "96ce5f9743814c22352025eb8703fc39";
+  const HERZ_CONST = "Vm8Lk7Uj2JmsjCPVPVjrLa7zgfx3uz9E";
   const INDONESIAN_MONTHS = [
     "Jan", "Feb", "Mar", "Apr", "Mei", "Jun",
     "Jul", "Agt", "Sep", "Okt", "Nov", "Des",
@@ -606,7 +614,15 @@ const connect = httpAction(async (ctx, request) => {
         out.reason = "success";
         out.seal = HERZ_SEAL;
         const data = (out.data ?? {}) as Record<string, unknown>;
-        data.token = `TOKEN-${randomToken().slice(0, 6).toUpperCase()}`;
+        // Deterministic token the binary can verify: MD5 of
+        // "MLBB-<seal>-<serial>-<const>" using the exact serial it sent.
+        // Random tokens fail the binary's seal check ("Server session
+        // expired"). Falls back to a random token only when no serial was
+        // sent at all (no such client exists, but keep the shape valid).
+        data.token =
+          rawSerial.length > 0
+            ? md5(`MLBB-${HERZ_SEAL}-${rawSerial}-${HERZ_CONST}`)
+            : `TOKEN-${randomToken().slice(0, 6).toUpperCase()}`;
         data.rng = Math.floor(Date.now() / 1000);
         data.tittle = game.length > 0 ? game : "MLBB";
         data.expired = formatIndonesianDate(expiresAt);
