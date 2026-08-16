@@ -19,7 +19,7 @@ const AuthPage = lazy(() => import("./pages/Auth.tsx"));
 const UserHome = lazy(() => import("./pages/UserHome.tsx"));
 const OwnerPanel = lazy(() => import("./pages/owner/OwnerPanel.tsx"));
 const OwnerOverview = lazy(() => import("./pages/owner/Overview.tsx"));
-const OwnerKeys = lazy(() => import("./pages/owner/Keys.tsx"));
+const OwnerKeys = lazy(() => import("./pages/owner/KeysPage.tsx"));
 const OwnerMembers = lazy(() => import("./pages/owner/Members.tsx"));
 const OwnerSettings = lazy(() => import("./pages/owner/Settings.tsx"));
 const OwnerTelegram = lazy(() => import("./pages/owner/Telegram.tsx"));

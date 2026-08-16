@@ -379,6 +379,18 @@ r = requests.post("https://<deployment>.convex.site/connect",
 print(r.json())  # {"ok": true, "server": {…}, "key": {…}} or {"ok": false, "error": …}
 ```
 
+### UDP handshake (librudp.createPipe)
+
+Apps that use a reliable-UDP runtime handshake wire it after the HTTP
+connect: `POST /connect` validates the license key and binds the device, then
+the app calls `librudp.createPipe(endpoint)` (`udp://<host>:<port>`) and sends
+a handshake packet (license + device + timestamp). The relay re-validates the
+session against `/connect` and replies `{"ok":true}` to start the session.
+
+> Convex serves HTTP only — it cannot listen on raw UDP. Run the UDP relay on
+your own host/VPS; the panel's **API & Tokens** page has a copy-paste Node.js
+client (`udp-handshake.mjs`) that shows the full flow.
+
 ## Project structure
 
 - `src/convex/nameserver.ts` — servers, keys, balance, settings, connections,

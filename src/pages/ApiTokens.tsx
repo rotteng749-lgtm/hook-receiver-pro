@@ -214,6 +214,72 @@ object NameserverApi {
 // Usage (inside a coroutine):
 // val result = NameserverApi.connect("LIC-XXXX-XXXX-XXXX-XXXX-XXXX", "device-abc-123")`;
 
+const udpCode = `// udp-handshake.mjs — stage 2 after a successful /connect
+// The app calls librudp.createPipe(endpoint) → UDP handshake. This is a
+// reliable-UDP pipe over a real UDP socket; run the relay on your own host
+// (Convex serves HTTP only — it cannot listen on raw UDP). Adjust the packet
+// layout below to match your binary's expectation.
+import dgram from "node:dgram";
+
+const CONVEX_SITE = "${SITE_URL}";
+
+// 1. HTTP connect first — validates the license key, binds the device.
+const res = await fetch(\`\${CONVEX_SITE}/connect\`, {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+    license: "NS-XXXX-XXXX-XXXX-XXXX-XXXX",
+    device: "device-abc",
+  }),
+});
+const auth = await res.json();
+if (!auth.ok) throw new Error(auth.error ?? "connect rejected");
+
+// 2. librudp.createPipe(endpoint) — reliable-UDP pipe over a UDP socket.
+//    endpoint format: udp://<host>:<port> (your UDP relay, not Convex)
+function createPipe(endpoint) {
+  const { hostname, port } = new URL(endpoint);
+  const socket = dgram.createSocket("udp4");
+  return {
+    send(payload) {
+      return new Promise((resolve, reject) =>
+        socket.send(payload, Number(port), hostname, (err) =>
+          err ? reject(err) : resolve()),
+      );
+    },
+    onMessage(fn) {
+      socket.on("message", fn);
+    },
+    close() {
+      socket.close();
+    },
+  };
+}
+
+const pipe = createPipe("udp://127.0.0.1:9000");
+
+// 3. Handshake: prove the session. The relay re-validates license + device
+//    against /connect, then opens the UDP session.
+const handshake = Buffer.from(JSON.stringify({
+  type: "handshake",
+  license: "NS-XXXX-XXXX-XXXX-XXXX-XXXX",
+  device: "device-abc",
+  t: Math.floor(Date.now() / 1000),
+}));
+
+pipe.onMessage((msg) => {
+  const ack = JSON.parse(msg.toString());
+  if (ack.ok) {
+    console.log("UDP handshake ok — session ready");
+    // >>> your runtime starts here <<<
+  } else {
+    console.error("UDP handshake rejected:", ack.error);
+  }
+  pipe.close();
+});
+await pipe.send(handshake);
+setTimeout(() => pipe.close(), 5000); // timeout guard`;
+
 const endpoints = [
   {
     method: "POST",
@@ -553,6 +619,43 @@ export default function ApiTokens() {
           </CardContent>
         </Card>
       </div>
+
+      <Card className="border-border/70">
+        <CardHeader>
+          <CardTitle className="text-base">
+            UDP handshake — librudp.createPipe(endpoint)
+          </CardTitle>
+          <CardDescription>
+            After a successful connect, the app opens a reliable-UDP pipe and
+            does a UDP handshake before starting the runtime. Convex serves
+            HTTP only, so the UDP relay runs on your own host — the snippet
+            below is the client side.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <p className="text-xs text-muted-foreground">
+            Flow:{" "}
+            <code className="rounded bg-muted px-1 py-0.5 text-xs">
+              POST /connect
+            </code>{" "}
+            (validate key, bind device) →{" "}
+            <code className="rounded bg-muted px-1 py-0.5 text-xs">
+              librudp.createPipe(endpoint)
+            </code>{" "}
+            → send handshake packet (license + device + timestamp) → relay
+            re-validates and replies{" "}
+            <code className="rounded bg-muted px-1 py-0.5 text-xs">
+              {"{\"ok\":true}"}
+            </code>{" "}
+            → session starts. The endpoint is{" "}
+            <code className="rounded bg-muted px-1 py-0.5 text-xs">
+              udp://&lt;host&gt;:&lt;port&gt;
+            </code>
+            .
+          </p>
+          <CodeBlock code={udpCode} />
+        </CardContent>
+      </Card>
     </div>
   );
 }
