@@ -142,8 +142,14 @@ const schema = defineSchema(
       defaultKeyHours: v.number(), // 0 = never expires
       maintenance: v.boolean(), // blocks all /connect calls
       downMessage: v.optional(v.string()), // shown to clients during maintenance
-      // Prefix used when generating keys, e.g. "NS" → NS-XXXX-… or "LIC" → LIC-XXXX-…
+      // Legacy prefix used when generating keys, e.g. "NS" → NS-XXXX-…
+      // or "LIC" → LIC-XXXX-… (kept for compatibility).
       keyPrefix: v.optional(v.string()),
+      // Key format template: X = random letter/number, # = random digit,
+      // everything else literal. Examples: NS-XXXX-XXXX-XXXX-XXXX-XXXX,
+      // ML_######### → ML_227182973, ML_XXXXXXXXXXXX. When unset, falls
+      // back to the keyPrefix-based default above.
+      keyFormat: v.optional(v.string()),
       telegramOwnerChatId: v.optional(v.string()), // bound Telegram chat (owner-level bot access)
       telegramBotUsername: v.optional(v.string()), // bot username cached from getMe
       // Bound Telegram chats for admin users: { chatId, userId } pairs.
