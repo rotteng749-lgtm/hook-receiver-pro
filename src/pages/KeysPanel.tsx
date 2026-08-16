@@ -47,6 +47,7 @@ import {
   Loader2,
   Plus,
   RefreshCw,
+  Settings2,
   Trash2,
   XCircle,
 } from "lucide-react";
@@ -349,7 +350,35 @@ export default function KeysPanel({ scope }: { scope: "owner" | "admin" }) {
   const revokeKey = useMutation(api.nameserver.revokeKey);
   const deleteKey = useMutation(api.nameserver.deleteKey);
   const resetKeyDevice = useMutation(api.nameserver.resetKeyDevice);
+  const updateKeyDevices = useMutation(api.nameserver.updateKeyDevices);
   const balance = stats?.balance ?? 0;
+  const [editKey, setEditKey] = useState<KeyRow | null>(null);
+  const [editMaxDevices, setEditMaxDevices] = useState("1");
+  const [editBusy, setEditBusy] = useState(false);
+
+  const openEditDevices = (key: KeyRow) => {
+    setEditKey(key);
+    setEditMaxDevices(String(key.maxDevices ?? 1));
+  };
+
+  const saveDevices = async () => {
+    if (!editKey) return;
+    setEditBusy(true);
+    try {
+      const value = Math.max(0, Math.round(Number(editMaxDevices) || 0));
+      await updateKeyDevices({ id: editKey._id, maxDevices: value });
+      toast.success(
+        value === 0
+          ? "Device limit set to unlimited"
+          : `Device limit set to ${value}`,
+      );
+      setEditKey(null);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to update key");
+    } finally {
+      setEditBusy(false);
+    }
+  };
 
   const revoke = async (key: KeyRow) => {
     try {
@@ -495,6 +524,18 @@ export default function KeysPanel({ scope }: { scope: "owner" | "admin" }) {
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center justify-end gap-1">
+                        {key.canManage && (
+                          <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            className="cursor-pointer text-muted-foreground hover:text-foreground"
+                            aria-label="Edit max devices"
+                            title="Device limit (0 = unlimited)"
+                            onClick={() => openEditDevices(key)}
+                          >
+                            <Settings2 className="size-4" />
+                          </Button>
+                        )}
                         {key.canManage && key.deviceId && key.status !== "revoked" && (
                           <AlertDialog>
                             <AlertDialogTrigger asChild>
@@ -595,6 +636,52 @@ export default function KeysPanel({ scope }: { scope: "owner" | "admin" }) {
           </p>
         )}
       </div>
+
+      <Dialog open={editKey !== null} onOpenChange={(open) => !open && setEditKey(null)}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Device limit</DialogTitle>
+            <DialogDescription className="break-all">
+              <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs">
+                {editKey?.key}
+              </code>{" "}
+              — set how many devices may bind to this key.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor="edit-max-devices">Max devices</Label>
+            <Input
+              id="edit-max-devices"
+              type="number"
+              min={0}
+              value={editMaxDevices}
+              onChange={(e) => setEditMaxDevices(e.target.value)}
+              placeholder="0 = unlimited"
+            />
+            <p className="text-xs text-muted-foreground">
+              0 = unlimited (any device), 1 = 1 key 1 device, N = mass key.
+              Applies immediately — keys already bound keep their devices.
+            </p>
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button
+              variant="outline"
+              className="cursor-pointer"
+              onClick={() => setEditKey(null)}
+            >
+              Cancel
+            </Button>
+            <Button
+              className="cursor-pointer"
+              disabled={editBusy}
+              onClick={saveDevices}
+            >
+              {editBusy && <Loader2 className="size-4 animate-spin" />}
+              Save
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

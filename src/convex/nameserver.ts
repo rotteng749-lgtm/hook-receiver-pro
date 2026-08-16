@@ -558,6 +558,26 @@ export const deleteKey = mutation({
 });
 
 /**
+ * Change a key's max devices on an existing key (0 = unlimited, N = mass
+ * key) — no need to regenerate. Owner, or the admin who generated the key.
+ * Existing bound devices are untouched; the new limit applies immediately.
+ */
+export const updateKeyDevices = mutation({
+  args: { id: v.id("connectKeys"), maxDevices: v.number() },
+  handler: async (ctx, args) => {
+    const { user } = await requireRole(ctx, ["owner", "admin"]);
+    const key = await ctx.db.get(args.id);
+    if (key === null) throw new Error("Key not found");
+    if (roleOf(user) !== "owner" && key.createdBy !== user._id) {
+      throw new Error("Forbidden");
+    }
+    const maxDevices = Math.max(0, Math.round(args.maxDevices));
+    await ctx.db.patch(args.id, { maxDevices });
+    return { key: key.key, maxDevices };
+  },
+});
+
+/**
  * Unbind a key from its device (1 key = 1 device) so it can bind to a new
  * device on the next successful connect. Owner, or the admin who generated
  * the key. The key itself can also unbind from the bound device via the
