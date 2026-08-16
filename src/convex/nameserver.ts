@@ -676,6 +676,53 @@ export const listConnections = query({
   },
 });
 
+/** Delete a single connection log entry. Owners may delete anything; admins
+ *  only entries tied to a key they created. */
+export const deleteConnection = mutation({
+  args: { id: v.id("connections") },
+  handler: async (ctx, { id }) => {
+    const { user } = await requireRole(ctx, ["owner", "admin"]);
+    const conn = await ctx.db.get(id);
+    if (conn === null) throw new Error("Log entry not found");
+    if (roleOf(user) !== "owner") {
+      if (conn.keyId === undefined) throw new Error("Forbidden");
+      const key = await ctx.db.get(conn.keyId);
+      if (key === null || key.createdBy !== user._id) {
+        throw new Error("Forbidden");
+      }
+    }
+    await ctx.db.delete(id);
+    return { deleted: true };
+  },
+});
+
+/** Clear the connect log: owner clears everything, admins only the entries
+ *  tied to keys they created. Returns how many entries were removed. */
+export const clearConnections = mutation({
+  args: {},
+  handler: async (ctx) => {
+    const { user } = await requireRole(ctx, ["owner", "admin"]);
+    const isOwner = roleOf(user) === "owner";
+    let conns: Doc<"connections">[];
+    if (isOwner) {
+      conns = await ctx.db.query("connections").collect();
+    } else {
+      const myKeys = await ctx.db
+        .query("connectKeys")
+        .withIndex("by_creator", (q) => q.eq("createdBy", user._id))
+        .take(500);
+      const ids = myKeys.map((k) => k._id);
+      if (ids.length === 0) return { deleted: 0 };
+      conns = await ctx.db
+        .query("connections")
+        .filter((q) => q.or(...ids.map((id) => q.eq(q.field("keyId"), id))))
+        .collect();
+    }
+    for (const c of conns) await ctx.db.delete(c._id);
+    return { deleted: conns.length };
+  },
+});
+
 /* ------------------------------ stats ------------------------------ */
 
 export const overviewStats = query({

@@ -69,6 +69,11 @@ export default function SettingsPage() {
     }
   }, [settings]);
 
+  // Live sample of the custom format (recomputed as the owner types).
+  // MUST stay before the early return below — hooks can't be skipped between
+  // renders (React error #310 otherwise).
+  const sample = useMemo(() => sampleKey(keyFormat), [keyFormat]);
+
   if (settings === undefined) {
     return (
       <div className="flex min-h-[40vh] items-center justify-center">
@@ -97,9 +102,6 @@ export default function SettingsPage() {
       setBusy(false);
     }
   };
-
-  // Live sample of the custom format (recomputed as the owner types).
-  const sample = useMemo(() => sampleKey(keyFormat), [keyFormat]);
 
   return (
     <div className="space-y-8">

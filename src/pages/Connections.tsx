@@ -1,12 +1,25 @@
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { PageHeader } from "@/components/panel/PageHeader";
 import { api } from "@/convex/_generated/api";
 import type { Doc } from "@/convex/_generated/dataModel";
 import { formatRelative } from "@/lib/format";
 import { useAuth } from "@/hooks/use-auth";
-import { useQuery } from "convex/react";
-import { Activity, Loader2 } from "lucide-react";
+import { useMutation, useQuery } from "convex/react";
+import { Activity, Eraser, Loader2, Trash2 } from "lucide-react";
+import { toast } from "sonner";
 
 type ConnRow = Doc<"connections"> & {
   serverName: string;
@@ -21,7 +34,31 @@ function reasonLabel(reason?: string): string {
 export default function Connections() {
   const { user } = useAuth();
   const connections = useQuery(api.nameserver.listConnections);
+  const deleteConnection = useMutation(api.nameserver.deleteConnection);
+  const clearConnections = useMutation(api.nameserver.clearConnections);
   const role = user?.role ?? "user";
+
+  const removeOne = async (id: Doc<"connections">["_id"]) => {
+    try {
+      await deleteConnection({ id });
+      toast.success("Log entry deleted");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to delete entry");
+    }
+  };
+
+  const clearAll = async () => {
+    try {
+      const res = await clearConnections();
+      toast.success(
+        res.deleted > 0
+          ? `Deleted ${res.deleted} log ${res.deleted === 1 ? "entry" : "entries"}`
+          : "Nothing to delete",
+      );
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to clear log");
+    }
+  };
 
   if (connections === undefined) {
     return (
@@ -41,10 +78,47 @@ export default function Connections() {
             : "Every /connect attempt against your keys."
         }
         actions={
-          <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-2.5 py-1 text-xs text-muted-foreground">
-            <span className="size-1.5 animate-pulse rounded-full bg-emerald-500" />
-            Live — updates automatically
-          </span>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-2.5 py-1 text-xs text-muted-foreground">
+              <span className="size-1.5 animate-pulse rounded-full bg-emerald-500" />
+              Live — updates automatically
+            </span>
+            {connections.length > 0 && (
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="cursor-pointer"
+                  >
+                    <Eraser className="size-3.5" />
+                    Clear all
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Clear the connect log?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      {role === "owner"
+                        ? `This deletes all ${connections.length} log entries permanently.`
+                        : `This deletes all ${connections.length} log entries tied to your keys permanently.`}
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel className="cursor-pointer">
+                      Cancel
+                    </AlertDialogCancel>
+                    <AlertDialogAction
+                      className="cursor-pointer bg-destructive text-white hover:bg-destructive/90"
+                      onClick={clearAll}
+                    >
+                      Delete all
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            )}
+          </div>
         }
       />
 
@@ -70,6 +144,7 @@ export default function Connections() {
                 <th className="px-4 py-3 font-medium">IP</th>
                 <th className="px-4 py-3 font-medium">Result</th>
                 <th className="px-4 py-3 font-medium">User agent</th>
+                <th className="px-4 py-3 font-medium text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
@@ -121,6 +196,44 @@ export default function Connections() {
                     <p className="truncate text-xs text-muted-foreground">
                       {conn.userAgent ?? "—"}
                     </p>
+                  </td>
+                  <td className="px-4 py-3">
+                    <div className="flex items-center justify-end">
+                      <AlertDialog>
+                        <AlertDialogTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            className="cursor-pointer text-muted-foreground hover:text-destructive"
+                            aria-label="Delete log entry"
+                            title="Delete this log entry"
+                          >
+                            <Trash2 className="size-4" />
+                          </Button>
+                        </AlertDialogTrigger>
+                        <AlertDialogContent>
+                          <AlertDialogHeader>
+                            <AlertDialogTitle>Delete this log entry?</AlertDialogTitle>
+                            <AlertDialogDescription>
+                              This removes the record of this /connect attempt
+                              permanently. It does not affect the key or its
+                              device binding.
+                            </AlertDialogDescription>
+                          </AlertDialogHeader>
+                          <AlertDialogFooter>
+                            <AlertDialogCancel className="cursor-pointer">
+                              Cancel
+                            </AlertDialogCancel>
+                            <AlertDialogAction
+                              className="cursor-pointer bg-destructive text-white hover:bg-destructive/90"
+                              onClick={() => removeOne(conn._id)}
+                            >
+                              Delete
+                            </AlertDialogAction>
+                          </AlertDialogFooter>
+                        </AlertDialogContent>
+                      </AlertDialog>
+                    </div>
                   </td>
                 </tr>
               ))}
