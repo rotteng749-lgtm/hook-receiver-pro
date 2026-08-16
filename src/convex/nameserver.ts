@@ -362,6 +362,7 @@ export const generateKey = mutation({
     note: v.optional(v.string()),
     uses: v.optional(v.number()),
     hours: v.optional(v.number()),
+    maxDevices: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
     const { userId, user } = await requireRole(ctx, ["owner", "admin"]);
@@ -399,6 +400,11 @@ export const generateKey = mutation({
       key = generateKeyValue(prefix);
     }
 
+    // 0 = unlimited, N = max devices, default 1 (1 key = 1 device).
+    const maxDevices =
+      args.maxDevices === undefined
+        ? 1
+        : Math.max(0, Math.round(args.maxDevices));
     const id = await ctx.db.insert("connectKeys", {
       key,
       serverId: server._id,
@@ -409,6 +415,7 @@ export const generateKey = mutation({
       expiresAt: hours > 0 ? Date.now() + hours * 60 * 60 * 1000 : 0,
       cost,
       note: args.note?.trim().slice(0, 160) || undefined,
+      maxDevices,
     });
     if (!isOwner) {
       await ctx.db.patch(userId, { balance: balance - cost });
@@ -501,9 +508,10 @@ export const resetKeyDevice = mutation({
     if (roleOf(user) !== "owner" && key.createdBy !== user._id) {
       throw new Error("Forbidden");
     }
-    const hadDevice = key.deviceId !== undefined;
+    const hadDevice =
+      key.deviceId !== undefined || (key.devices ?? []).length > 0;
     if (hadDevice) {
-      await ctx.db.patch(id, { deviceId: undefined });
+      await ctx.db.patch(id, { deviceId: undefined, devices: [] });
     }
     return { key: key.key, hadDevice };
   },
@@ -690,8 +698,10 @@ export const resetKeyDeviceInternal = internalMutation({
   handler: async (ctx, { keyId }) => {
     const key = await ctx.db.get(keyId);
     if (key === null) throw new Error("Key not found");
-    if (key.deviceId !== undefined) {
-      await ctx.db.patch(keyId, { deviceId: undefined });
+    const hadDevice =
+      key.deviceId !== undefined || (key.devices ?? []).length > 0;
+    if (hadDevice) {
+      await ctx.db.patch(keyId, { deviceId: undefined, devices: [] });
     }
   },
 });
@@ -716,9 +726,10 @@ export const resetKeyByValueInternal = internalMutation({
         throw new Error("Forbidden — you can only reset keys you created");
       }
     }
-    const hadDevice = keyDoc.deviceId !== undefined;
+    const hadDevice =
+      keyDoc.deviceId !== undefined || (keyDoc.devices ?? []).length > 0;
     if (hadDevice) {
-      await ctx.db.patch(keyDoc._id, { deviceId: undefined });
+      await ctx.db.patch(keyDoc._id, { deviceId: undefined, devices: [] });
     }
     return { keyId: keyDoc._id, key: keyDoc.key, hadDevice };
   },
@@ -768,7 +779,20 @@ export const exportSnapshotInternal = internalQuery({
   },
 });
 
-/** Log an attempt and (on success) advance the key's usage counter. */
+/**
+ * Log an attempt and (on success) advance the key's usage counter.
+ *
+ * Device binding + counter rules (unified):
+ *   - `uses` counts UNIQUE devices ever (only increments when a brand-new
+ *     device binds) — reconnects from a known device never burn quota.
+ *   - `maxDevices` gates how many devices may bind: 0 = unlimited,
+ *     N = max, undefined = 1 (1 key = 1 device).
+ *   - `devices` stores the last MAX_STORED_DEVICES bound ids (oldest dropped),
+ *     `deviceId` is kept in sync as devices[0].
+ *
+ * Returns the key's post-connect state so the HTTP handler can answer with
+ * accurate uses/devicesCount without a second read.
+ */
 export const recordConnect = internalMutation({
   args: {
     keyId: v.optional(v.id("connectKeys")),
@@ -783,7 +807,7 @@ export const recordConnect = internalMutation({
     game: v.optional(v.string()),
     version: v.optional(v.string()),
     resource: v.optional(v.string()),
-    // Bind the key to this device on the first successful connect.
+    // Bind the key to this device on a successful connect.
     bindDevice: v.optional(v.boolean()),
     // Set false for informational log entries (e.g. a device reset) that
     // should not advance the key's usage counter.
@@ -803,26 +827,50 @@ export const recordConnect = internalMutation({
       ok: args.ok,
       reason: args.reason,
     });
-    if (args.ok && args.keyId !== undefined && args.countUse !== false) {
-      const key = await ctx.db.get(args.keyId);
-      if (key !== null) {
-        const uses = key.uses + 1;
-        const status =
-          key.maxUses > 0 && uses >= key.maxUses ? "used" : key.status;
-        const patch: {
-          uses: number;
-          status: Doc<"connectKeys">["status"];
-          deviceId?: string;
-        } = { uses, status };
-        // 1 key = 1 device: bind on first successful connect.
-        if (args.bindDevice && key.deviceId === undefined && args.deviceId) {
-          patch.deviceId = args.deviceId.slice(0, 128);
+
+    if (!(args.ok && args.keyId !== undefined && args.countUse !== false)) {
+      return null;
+    }
+    const key = await ctx.db.get(args.keyId);
+    if (key === null) return null;
+
+    let uses = key.uses;
+    let status: Doc<"connectKeys">["status"] = key.status;
+    let devices = key.devices ?? (key.deviceId ? [key.deviceId] : []);
+    let deviceId = key.deviceId;
+    let deviceAdded = false;
+
+    if (args.bindDevice && args.deviceId) {
+      const dev = args.deviceId.slice(0, 128);
+      const known = devices.some((d) => d.toUpperCase() === dev.toUpperCase());
+      if (!known) {
+        const maxDevices = key.maxDevices ?? 1;
+        if (maxDevices === 0 || devices.length < maxDevices) {
+          const next = [...devices, dev];
+          // Unlimited keys: keep only the most recent ids on disk.
+          if (next.length > MAX_STORED_DEVICES) {
+            devices = next.slice(-MAX_STORED_DEVICES);
+          } else {
+            devices = next;
+          }
+          deviceId = devices[0];
+          deviceAdded = true;
         }
-        await ctx.db.patch(args.keyId, patch);
       }
     }
+
+    if (deviceAdded) {
+      uses = key.uses + 1; // a new unique device — this is the usage counter
+      if (key.maxUses > 0 && uses >= key.maxUses) status = "used";
+      await ctx.db.patch(args.keyId, { uses, status, devices, deviceId });
+    }
+
+    return { uses, status, devicesCount: devices.length };
   },
 });
+
+/** Devices kept on disk for unlimited keys (oldest dropped beyond this). */
+const MAX_STORED_DEVICES = 50;
 
 /* -------------------- internal helpers (telegram bot) -------------------- */
 
@@ -905,6 +953,7 @@ export const genKeyAsOwner = internalMutation({
     uses: v.optional(v.number()),
     hours: v.optional(v.number()),
     note: v.optional(v.string()),
+    maxDevices: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
     const server = await ctx.db
@@ -945,6 +994,10 @@ export const genKeyAsOwner = internalMutation({
     }
 
     const expiresAt = hours > 0 ? Date.now() + hours * 60 * 60 * 1000 : 0;
+    const maxDevices =
+      args.maxDevices === undefined
+        ? 1
+        : Math.max(0, Math.round(args.maxDevices));
     await ctx.db.insert("connectKeys", {
       key,
       serverId: server._id,
@@ -955,6 +1008,7 @@ export const genKeyAsOwner = internalMutation({
       expiresAt,
       cost,
       note: args.note?.trim().slice(0, 160) || undefined,
+      maxDevices,
     });
     return {
       key,
@@ -965,6 +1019,7 @@ export const genKeyAsOwner = internalMutation({
       serverCode: server.code,
       maxUses,
       expiresAt,
+      maxDevices,
     };
   },
 });

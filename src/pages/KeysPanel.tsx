@@ -96,6 +96,7 @@ function GenerateKeyCard({ scope }: { scope: "owner" | "admin" }) {
   const [note, setNote] = useState("");
   const [uses, setUses] = useState("");
   const [hours, setHours] = useState("");
+  const [maxDevices, setMaxDevices] = useState("");
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<{
     key: string;
@@ -121,11 +122,13 @@ function GenerateKeyCard({ scope }: { scope: "owner" | "admin" }) {
         note: note || undefined,
         uses: uses === "" ? undefined : Number(uses),
         hours: hours === "" ? undefined : Number(hours),
+        maxDevices: maxDevices === "" ? undefined : Number(maxDevices),
       });
       setResult(res);
       setNote("");
       setUses("");
       setHours("");
+      setMaxDevices("");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to generate key");
     } finally {
@@ -146,7 +149,9 @@ function GenerateKeyCard({ scope }: { scope: "owner" | "admin" }) {
                 — your wallet is unlimited, so nothing is deducted. The client
                 asks the user to enter this license key at{" "}
                 <code className="rounded bg-muted px-1 py-0.5 text-xs">/connect</code>,
-                and it binds to the first device that connects (1 key = 1 device).
+                and it binds to the devices that connect (max devices:{" "}
+                <span className="font-semibold text-foreground">1</span> by default,
+                0 = unlimited).
               </>
             ) : (
               <>
@@ -155,7 +160,9 @@ function GenerateKeyCard({ scope }: { scope: "owner" | "admin" }) {
                 deducted from your wallet ({balance} left). The client asks the
                 user to enter this license key at{" "}
                 <code className="rounded bg-muted px-1 py-0.5 text-xs">/connect</code>,
-                and it binds to the first device that connects (1 key = 1 device).
+                and it binds to the devices that connect (max devices:{" "}
+                <span className="font-semibold text-foreground">1</span> by default,
+                0 = unlimited).
               </>
             )}
           </CardDescription>
@@ -222,6 +229,22 @@ function GenerateKeyCard({ scope }: { scope: "owner" | "admin" }) {
                 value={hours}
                 onChange={(e) => setHours(e.target.value)}
                 placeholder={String(settings?.defaultKeyHours ?? 0)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="key-max-devices">
+                Max devices{" "}
+                <span className="font-normal text-muted-foreground">
+                  (1 = 1 key 1 device, 0 = unlimited, N = mass key)
+                </span>
+              </Label>
+              <Input
+                id="key-max-devices"
+                type="number"
+                min={0}
+                value={maxDevices}
+                onChange={(e) => setMaxDevices(e.target.value)}
+                placeholder="1"
               />
             </div>
             <div className="flex items-end">
@@ -394,11 +417,18 @@ export default function KeysPanel({ scope }: { scope: "owner" | "admin" }) {
                     <td className="px-4 py-3 text-xs tabular-nums">
                       {formatUses(key.uses, key.maxUses)}
                     </td>
-                    <td className="max-w-[140px] px-4 py-3">
+                    <td className="max-w-[160px] px-4 py-3">
                       {key.deviceId ? (
-                        <code className="truncate font-mono text-[11px]">
-                          {key.deviceId}
-                        </code>
+                        <>
+                          <code className="truncate font-mono text-[11px]">
+                            {key.deviceId}
+                          </code>
+                          {(key.devices?.length ?? 1) > 1 && (
+                            <span className="ml-1 text-[11px] text-muted-foreground">
+                              +{key.devices!.length - 1}
+                            </span>
+                          )}
+                        </>
                       ) : (
                         <span className="text-xs text-muted-foreground">
                           unbound — binds on first connect
@@ -440,8 +470,8 @@ export default function KeysPanel({ scope }: { scope: "owner" | "admin" }) {
                                   </code>
                                   . Unbinding lets it connect from a new device
                                   — the next successful connect binds it again
-                                  (1 key = 1 device). The usage counter is not
-                                  affected.
+                                  (up to its max devices). The usage counter is
+                                  not affected.
                                 </AlertDialogDescription>
                               </AlertDialogHeader>
                               <AlertDialogFooter>

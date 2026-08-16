@@ -100,10 +100,14 @@ const schema = defineSchema(
       expiresAt: v.number(), // epoch ms; 0 = never expires
       cost: v.number(), // balance that was deducted
       note: v.optional(v.string()),
-      // Device this key is bound to (1 key = 1 device). Bound on the first
-      // successful /connect; unset means not bound yet. Empty string is the
-      // placeholder when the client didn't send a device id.
+      // Primary bound device (devices[0]). Kept in sync with `devices`.
       deviceId: v.optional(v.string()),
+      // Every device that has bound to this key (capped at MAX_STORED_DEVICES,
+      // oldest dropped). `uses` counts unique devices ever (history).
+      devices: v.optional(v.array(v.string())),
+      // 0 = unlimited devices, N = max devices. Undefined is treated as 1
+      // (1 key = 1 device — the safe default).
+      maxDevices: v.optional(v.number()),
     })
       .index("by_key", ["key"])
       .index("by_server", ["serverId"])

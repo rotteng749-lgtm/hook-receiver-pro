@@ -6,34 +6,49 @@ through a single public endpoint:
 
 ```
 POST /connect   { "license": "NS-XXXX-…", "device": "device-abc" }
-GET  /connect   ?license=NS-XXXX-…&device=device-abc
 ```
 
-Valid keys get `{ ok: true, … }`; invalid, expired, revoked, or exhausted keys
-are rejected with a reason — and **every attempt is logged** (server, key,
-device, IP, user agent, result).
+**`/connect` is POST-only** (GET / PUT / PATCH / DELETE → `405`). Valid keys
+get `{ ok: true, … }`; invalid, expired, revoked, or exhausted keys are
+rejected with a reason — and **every attempt is logged** (server, key, device,
+IP, user agent, result).
 
 **License-key flow:** the client (app / `.sh` / `.dll`) just asks the user to
 enter their license key. The `server` field is optional — it is detected from
-the key automatically. `key` / `licenseKey` / `license_key` are accepted as
-aliases for the license field.
+the key automatically. `key` / `licenseKey` / `license_key` / `user_key` are
+accepted as aliases for the license field; `device` / `hwid` / `serial` are
+aliases for the device id. Keys and device ids are **case-insensitive**
+(`ns-…` matches `NS-…`).
 
-**1 key = 1 device:** the optional `device` field (or `hwid`, or `serial`)
-binds a key to the first device that connects. Once bound, a different device
-presenting the same key is rejected with
-`403 {"ok":false,"status":"error","error":"Device limit",…}`.
+**Device binding:** each key binds to the devices that connect, gated by its
+`maxDevices` setting:
+
+- `maxDevices: 1` (default) → **1 key = 1 device**; a different device is
+  rejected with `403 {"ok":false,"status":false,"error":"Device limit",…}`
+- `maxDevices: N` → the key may bind up to N devices (mass-key / reseller
+  mode)
+- `maxDevices: 0` → unlimited devices
+- `uses` counts **unique devices ever** — reconnects from a known device never
+  burn quota, and a key that has reached `maxUses` via device binds is
+  marked `used`.
 
 **Response shape (works for every client):** every `/connect` response is a
 superset that satisfies all three client families at once:
 
-- native JSON clients check `ok: true` → `{"ok":true,"status":true,"message":"connected","expires":"2026-08-16 12:00:00","server":{…},"key":{…},"url":…}`
-- Havest-style validators check `status: true`
+- native JSON clients check `ok: true` → `{"ok":true,"status":true,"message":"connected","expires":"2099-12-31 23:59:59","expiresAt":4102444799000,"expires_ts":4102444799,"data":{"server":{…},"key":{…},"url":…}}`
+- Havest-style validators check `status: true` (a **boolean** everywhere —
+  never a string)
 - primebit-style loaders (FF_KERNEL / ML-KERNEL) search for the error strings
   `Invalid key` / `Key expired` / `Key banned` / `Device limit` /
-  `Wrong Game Key` — no match = success — and parse `expires` (a
-  `YYYY-MM-DD HH:MM:SS` UTC string; `expiresAt` ms and `expires_ts` s are also
-  included). Errors always carry the exact string in `error` and a readable
-  `message`.
+  `Wrong Game Key` — no match = success — and parse `expires` for the expiry
+  datetime.
+
+Consistency rules: `status` is always `true`/`false`, every error carries the
+same shape `{ok, status, error, message}`, and the three expiry fields
+(`expires` string, `expiresAt` epoch ms, `expires_ts` epoch s) are all derived
+from **one** source (`key.expiresAt`, epoch ms — forever keys report the
+`2099-12-31 23:59:59` UTC sentinel instead of `0`, so no client ever reads
+"expired in 1970").
 
 **Reset a device binding** — when a key needs to move to a new machine:
 
@@ -46,10 +61,16 @@ superset that satisfies all three client families at once:
   curl -X POST https://<deployment>.convex.site/connect \
     -H "Content-Type: application/json" \
     -d '{"key":"NS-…","device":"device-abc","action":"reset"}'
-  # 200 → {"ok":true,"action":"reset","message":"device unbound — the key can now connect from a new device"}
+  # 200 → {"ok":true,"status":true,"action":"reset","message":"device unbound — the key can now connect from a new device"}
   ```
 
   The reset does not count as a key use, and the usage counter is untouched.
+
+**Rate limiting & CORS:** `/connect` is protected against brute force —
+5 failed attempts per IP per minute get `429` (total volume is also capped at
+60 req/min/IP), and CORS is only granted to same-origin / localhost /
+`.convex.site` / `.vercel.app` origins (native clients send no `Origin` header,
+so curl / .sh / Android are unaffected).
 
 **Custom key format:** the owner sets the key prefix in **Settings** (e.g.
 `NS` → `NS-XXXX-…`, or `LIC` → `LIC-XXXX-…`). Only A-Z / 0-9, up to 10 chars.
@@ -99,13 +120,16 @@ curl -X POST https://<deployment>.convex.site/connect \
   -H "Content-Type: application/json" \
   -d '{"license":"NS-K4F2-X9LM-P7QW-3RTY-5VBN","device":"device-abc"}'
 
-# 200 → {"ok":true,"status":true,"message":"connected","expires":"2026-08-16 12:00:00","server":{"name":"EU Main","code":"eu-main"},"key":{…},"url":…}
-# 401 → {"ok":false,"status":"error","error":"Invalid key","message":"invalid key"}
-# 403 → {"ok":false,"status":"error","error":"Key expired","message":"key has expired"}
+# 200 → {"ok":true,"status":true,"message":"connected","expires":"2099-12-31 23:59:59","expiresAt":4102444799000,"expires_ts":4102444799,"data":{"server":{"name":"EU Main","code":"eu-main"},"key":{…},"url":…}}
+# 400 → {"ok":false,"status":false,"error":"Invalid key","message":"missing key"}          (no key sent)
+# 401 → {"ok":false,"status":false,"error":"Invalid key","message":"invalid key"}
+# 403 → {"ok":false,"status":false,"error":"Key expired","message":"key has expired"}
 #        (or revoked/offline → "Key banned" · wrong server → "Wrong Game Key" ·
 #         bound to another device → "Device limit" · usage limit → "Key banned")
-# 503 → {"ok":false,"status":"error","error":"Key banned","message":"server under maintenance"}
-# 404 → {"ok":false,"status":"error","error":"Invalid key","message":"server not found"}
+# 405 → {"ok":false,"status":false,"error":"Invalid key","message":"method not allowed — /connect accepts POST only"}
+# 429 → {"ok":false,"status":false,"error":"Key banned","message":"too many attempts, try again later"}
+# 503 → {"ok":false,"status":false,"error":"Key banned","message":"server under maintenance"}
+# 404 → {"ok":false,"status":false,"error":"Invalid key","message":"server not found"}
 ```
 
 ### Havest-style form protocol
@@ -149,18 +173,20 @@ POST /connect   (Content-Type: application/json)
   Key`) in `error`/`message`:
 
   ```json
-  {"ok":false,"status":"error","error":"Invalid key","message":"invalid key"}
+  {"ok":false,"status":false,"error":"Invalid key","message":"invalid key"}
   ```
 
 - Success contains none of those substrings (so the loader treats it as a
   success) and includes `expires` for the expiry check:
 
   ```json
-  {"ok":true,"status":true,"message":"connected","expires":"2026-08-16 12:00:00","key":{"expiresAt":1784275200000,"uses":1,"maxUses":0},"url":"https://…/databases/<id>"}
+  {"ok":true,"status":true,"message":"connected","expires":"2099-12-31 23:59:59","expiresAt":4102444799000,"expires_ts":4102444799,"data":{"server":{…},"key":{"expiresAt":4102444799000,"uses":1,"maxUses":0,"maxDevices":1,"devicesCount":1},"url":"https://…/databases/<id>"}}
   ```
 
-  `expires` is a `YYYY-MM-DD HH:MM:SS` (UTC) string — if your loader parses
-  unix seconds instead, use `expires_ts`.
+  `expires` is a `YYYY-MM-DD HH:MM:SS` (UTC) string derived from the single
+  expiry source (`expiresAt`, epoch ms) — if your loader parses unix seconds
+  instead, use `expires_ts`. Forever keys report the `2099-12-31 23:59:59`
+  sentinel, never `0`.
 
 ## Databases (loaders / APK)
 

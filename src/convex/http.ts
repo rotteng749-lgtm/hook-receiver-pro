@@ -7,8 +7,7 @@
  *
  * Routes:
  *   GET    /health            → public status
- *   POST   /connect           → public, validate { license, device? } (JSON)
- *   GET    /connect           → public, validate ?license=…&device=…
+ *   POST   /connect           → public, validate { license, device? } (POST only)
  *   POST   /api/login         → public, {username,password} → {token} (24 h)
  *   POST   /api/files         → admin (Bearer), multipart upload
  *   GET    /api/files         → admin (Bearer), list all files
@@ -49,13 +48,58 @@ const MAX_LOGIN_ATTEMPTS = 5;
 const LOGIN_TTL_MS = 24 * 60 * 60 * 1000;
 
 const JSON_HEADERS: Record<string, string> = { "Content-Type": "application/json" };
+// No wildcard origin: CORS is only granted for a whitelist of origins (see
+// corsFor below). Native clients (curl/.sh/Android) don't send an Origin
+// header, so this never applies to them.
 const CORS_HEADERS: Record<string, string> = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
   "Access-Control-Allow-Headers":
     "Content-Type, Authorization, X-Checksum-Sha256, Content-Disposition",
   "Access-Control-Max-Age": "86400",
 };
+
+/**
+ * CORS only for same-origin, localhost dev, the Convex site and Vercel
+ * previews. Anything else gets no Access-Control-Allow-Origin, so browsers
+ * block it. (The panel talks to Convex via the SDK, not these routes.)
+ */
+function corsFor(request: Request): Record<string, string> {
+  const origin = request.headers.get("origin");
+  if (!origin) return {};
+  const host = new URL(request.url).host;
+  const allowed =
+    origin.includes(host) ||
+    /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin) ||
+    origin.endsWith(".convex.site") ||
+    origin.endsWith(".vercel.app");
+  if (!allowed) return {};
+  return { "Access-Control-Allow-Origin": origin };
+}
+
+/* ------------------- in-process rate limiting (best effort) ------------------- */
+
+const RATE_WINDOW_MS = 60_000;
+/** Total /connect calls per IP per minute. */
+const RATE_MAX_TOTAL = 60;
+/** Failed attempts per IP per minute before 429 (brute-force guard). */
+const RATE_MAX_FAILURES = 5;
+const rateBuckets = new Map<string, number[]>();
+
+/** Register a hit; returns true when the caller is over the limit. */
+function rateHit(key: string, limit: number): boolean {
+  const now = Date.now();
+  const hits = (rateBuckets.get(key) ?? []).filter(
+    (t) => now - t < RATE_WINDOW_MS,
+  );
+  if (hits.length >= limit) {
+    rateBuckets.set(key, hits);
+    return true;
+  }
+  hits.push(now);
+  rateBuckets.set(key, hits);
+  if (rateBuckets.size > 10_000) rateBuckets.clear();
+  return false;
+}
 
 /** Spec §5: basic security header on every response. */
 const SECURITY_HEADERS: Record<string, string> = { "X-Content-Type-Options": "nosniff" };
@@ -366,23 +410,22 @@ const deleteFile = httpAction(async (ctx, request) => {
  * license key — the server is optional and inferred from the key.
  *
  * Accepted request styles — the response satisfies every client family at
- * once (see the `send` formatter below):
+ * once (see the `send` formatter below). POST only (GET /connect → 405):
  *
  *   JSON body (key/license/device/hwid/action):
  *     POST /connect  { "license": "NS-…", "device": "device-abc" }
  *     POST /connect  { "key": "NS-…", "hwid": "android-id", "game": "Free Fire" }
- *       (primebit-style FF_KERNEL / ML-KERNEL loaders — `hwid` binds 1 key = 1 device)
+ *       (primebit-style FF_KERNEL / ML-KERNEL loaders — `hwid` binds the device)
  *
  *   Havest-style form (game/version/user_key/serial/resource):
  *     POST /connect  application/x-www-form-urlencoded
  *     game=MLBB&version=1.0&user_key=NS-…&serial=device-abc&resource=menu
  *
- *   GET /connect?license=…&device=…[&action=reset]  (JSON shape)
- *
- * `device` / `hwid` / `serial` is optional but recommended: each key is
- * bound to the FIRST device that connects (1 key = 1 device). `action:
- * "reset"` unbinds the key from its device (only the bound device can
- * reset). Every attempt is logged (IP, user agent, device, result).
+ * `device` / `hwid` / `serial` is optional but recommended: each key binds
+ * to the devices that connect, gated by `maxDevices` (1 = 1 key 1 device,
+ * 0 = unlimited). `action: "reset"` unbinds the key from its devices (only
+ * a bound device can reset). Every attempt is logged (IP, user agent,
+ * device, result).
  */
 const connect = httpAction(async (ctx, request) => {
   const url = new URL(request.url);
@@ -394,95 +437,80 @@ const connect = httpAction(async (ctx, request) => {
   let version = "";
   let resource = "";
 
-  if (request.method === "POST") {
-    const contentType = (request.headers.get("content-type") || "").toLowerCase();
-    if (contentType.includes("application/x-www-form-urlencoded")) {
-      // Havest-style: game=MLBB&version=1.0&user_key=…&serial=…&resource=…
-      const params = new URLSearchParams(await request.text());
-      key = (
-        params.get("user_key") ??
-        params.get("key") ??
-        params.get("license") ??
-        ""
-      ).trim();
-      serverRef = (params.get("server") ?? "").trim();
-      device = (
-        params.get("serial") ??
-        params.get("hwid") ??
-        params.get("device") ??
-        ""
-      )
-        .trim()
-        .slice(0, 128);
-      wantsReset =
-        params.get("action") === "reset" ||
-        params.get("reset") === "true" ||
-        params.get("reset") === "1";
-      game = (params.get("game") ?? "").trim().slice(0, 32);
-      version = (params.get("version") ?? "").trim().slice(0, 32);
-      resource = (params.get("resource") ?? "").trim().slice(0, 128);
-    } else {
-      // JSON body — key / license / licenseKey / license_key aliases.
-      let body: unknown;
-      try {
-        body = JSON.parse(await request.text());
-      } catch {
-        return json({ ok: false, error: "expected a JSON body with a key" }, 400);
-      }
-      const obj = body as Record<string, unknown>;
-      const rawKey =
-        typeof obj.key === "string"
-          ? obj.key
-          : typeof obj.license === "string"
-            ? obj.license
-            : typeof obj.licenseKey === "string"
-              ? obj.licenseKey
-              : typeof obj.license_key === "string"
-                ? obj.license_key
-                : "";
-      key = rawKey.trim();
-      serverRef = typeof obj.server === "string" ? obj.server.trim() : "";
-      device = (
-        typeof obj.hwid === "string"
-          ? obj.hwid
-          : typeof obj.device === "string"
-            ? obj.device
-            : ""
-      )
-        .trim()
-        .slice(0, 128);
-      wantsReset =
-        (typeof obj.action === "string" && obj.action.trim() === "reset") ||
-        obj.reset === true ||
-        obj.reset === "true";
-      game = typeof obj.game === "string" ? obj.game.trim().slice(0, 32) : "";
-      version = typeof obj.version === "string" ? obj.version.trim().slice(0, 32) : "";
-      resource = typeof obj.resource === "string" ? obj.resource.trim().slice(0, 128) : "";
-    }
-  } else {
-    key = (
-      url.searchParams.get("key") ??
-      url.searchParams.get("license") ??
-      url.searchParams.get("license_key") ??
-      url.searchParams.get("user_key") ??
-      ""
-    ).trim();
-    serverRef = (url.searchParams.get("server") ?? "").trim();
-    device = (
-      url.searchParams.get("device") ??
-      url.searchParams.get("hwid") ??
-      url.searchParams.get("serial") ??
-      ""
-    )
-      .trim()
-      .slice(0, 128);
+  // Keys and device ids are normalized the same way everywhere: trimmed and
+  // UPPERCASED, so `ns-…` / `Device-ABC` match their stored forms.
+  const normalizeKey = (raw: string) =>
+    raw.replace(/[\u0000-\u001f\u007f]/g, "").trim().toUpperCase().slice(0, 80);
+  const normalizeDevice = (raw: string) =>
+    raw.trim().toUpperCase().slice(0, 128);
+
+  const contentType = (request.headers.get("content-type") || "").toLowerCase();
+  if (contentType.includes("application/x-www-form-urlencoded")) {
+    // Havest-style: game=MLBB&version=1.0&user_key=…&serial=…&resource=…
+    const params = new URLSearchParams(await request.text());
+    key = normalizeKey(
+      params.get("user_key") ?? params.get("key") ?? params.get("license") ?? "",
+    );
+    serverRef = (params.get("server") ?? "").trim();
+    device = normalizeDevice(
+      params.get("serial") ?? params.get("hwid") ?? params.get("device") ?? "",
+    );
     wantsReset =
-      url.searchParams.get("action") === "reset" ||
-      url.searchParams.get("reset") === "true" ||
-      url.searchParams.get("reset") === "1";
-    game = (url.searchParams.get("game") ?? "").trim().slice(0, 32);
-    version = (url.searchParams.get("version") ?? "").trim().slice(0, 32);
-    resource = (url.searchParams.get("resource") ?? "").trim().slice(0, 128);
+      params.get("action") === "reset" ||
+      params.get("reset") === "true" ||
+      params.get("reset") === "1";
+    game = (params.get("game") ?? "").trim().slice(0, 32);
+    version = (params.get("version") ?? "").trim().slice(0, 32);
+    resource = (params.get("resource") ?? "").trim().slice(0, 128);
+  } else {
+    // JSON body — key / license / licenseKey / license_key aliases.
+    let body: unknown;
+    try {
+      body = JSON.parse(await request.text());
+    } catch {
+      // Uniform error shape (send is defined below the parse, so inline it).
+      return json(
+        {
+          ok: false,
+          status: false,
+          error: "Invalid key",
+          message: "expected a JSON body with a key",
+        },
+        400,
+        corsFor(request),
+      );
+    }
+    const obj = body as Record<string, unknown>;
+    const rawKey =
+      typeof obj.key === "string"
+        ? obj.key
+        : typeof obj.license === "string"
+          ? obj.license
+          : typeof obj.licenseKey === "string"
+            ? obj.licenseKey
+            : typeof obj.license_key === "string"
+              ? obj.license_key
+              : typeof obj.user_key === "string"
+                ? obj.user_key
+                : "";
+    key = normalizeKey(rawKey);
+    serverRef = typeof obj.server === "string" ? obj.server.trim() : "";
+    device = normalizeDevice(
+      typeof obj.hwid === "string"
+        ? obj.hwid
+        : typeof obj.device === "string"
+          ? obj.device
+          : typeof obj.serial === "string"
+            ? obj.serial
+            : "",
+    );
+    wantsReset =
+      (typeof obj.action === "string" && obj.action.trim() === "reset") ||
+      obj.reset === true ||
+      obj.reset === "true";
+    game = typeof obj.game === "string" ? obj.game.trim().slice(0, 32) : "";
+    version = typeof obj.version === "string" ? obj.version.trim().slice(0, 32) : "";
+    resource = typeof obj.resource === "string" ? obj.resource.trim().slice(0, 128) : "";
   }
 
   // Response formatter — ONE superset shape that satisfies every client
@@ -492,6 +520,11 @@ const connect = httpAction(async (ctx, request) => {
   //   • primebit-style loaders (FF_KERNEL / ML-KERNEL) search the response
   //     for the exact error substrings below; when none match it's a success,
   //     and they parse `expires` for the expiry datetime.
+  //
+  // Consistency rules (recap §5): `status` is ALWAYS a boolean (true success
+  // / false error), every error carries { ok, status, error, message }, the
+  // three expiry fields are derived from ONE source, and `data.*` is not
+  // echoed at the top level.
   const PRIMEBIT_ERRORS: Record<string, string> = {
     invalid_key: "Invalid key",
     wrong_server: "Wrong Game Key",
@@ -501,11 +534,16 @@ const connect = httpAction(async (ctx, request) => {
     expired: "Key expired",
     usage_limit: "Key banned",
     device_mismatch: "Device limit",
+    device_limit: "Device limit",
     missing_device: "Device limit",
+    rate_limited: "Key banned",
   };
   const primebitError = (reason: string) =>
     PRIMEBIT_ERRORS[reason] ?? "Invalid key";
-  const NEVER_EXPIRES = "2099-12-31 23:59:59";
+  // Forever keys are stored as expiresAt 0; clients that compare epoch ms
+  // would read 0 as "expired in 1970". Always report the sentinel
+  // (2099-12-31 23:59:59 UTC) so all three expiry fields stay consistent.
+  const NEVER_EXPIRES_MS = 4102444799000; // 2099-12-31 23:59:59 UTC
   const formatDate = (ms: number) => {
     const d = new Date(ms);
     const p = (n: number) => String(n).padStart(2, "0");
@@ -513,33 +551,29 @@ const connect = httpAction(async (ctx, request) => {
       d.getUTCDate(),
     )} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}`;
   };
+  const cors = corsFor(request);
   const send = (body: Record<string, unknown>, status = 200) => {
     if (body.ok === true) {
       const server = body.server as Record<string, unknown> | undefined;
       const key = body.key as Record<string, unknown> | undefined;
       const url = typeof body.url === "string" ? body.url : undefined;
       const expiresAt =
-        key !== undefined && typeof key.expiresAt === "number"
+        key !== undefined && typeof key.expiresAt === "number" && key.expiresAt > 0
           ? key.expiresAt
-          : 0;
-      return json(
-        {
-          ok: true,
-          status: true,
-          message: body.message ?? "success",
-          expires: expiresAt > 0 ? formatDate(expiresAt) : NEVER_EXPIRES,
-          expiresAt,
-          expires_ts: expiresAt > 0 ? Math.floor(expiresAt / 1000) : 4102444800,
-          data:
-            server !== undefined
-              ? { server, key, url: url ?? null }
-              : undefined,
-          server,
-          key,
-          url: url ?? null,
-        },
-        status,
-      );
+          : NEVER_EXPIRES_MS;
+      const out: Record<string, unknown> = {
+        ok: true,
+        status: true,
+        message: body.message ?? "success",
+        expires: formatDate(expiresAt),
+        expiresAt,
+        expires_ts: Math.floor(expiresAt / 1000),
+      };
+      if (server !== undefined) {
+        out.data = { server, key, url: url ?? null };
+      }
+      if (typeof body.action === "string") out.action = body.action;
+      return json(out, status, cors);
     }
     const error =
       typeof body.error === "string" && body.error.length > 0
@@ -548,7 +582,7 @@ const connect = httpAction(async (ctx, request) => {
     return json(
       {
         ok: false,
-        status: "error",
+        status: false,
         error,
         message:
           typeof body.message === "string" && body.message.length > 0
@@ -556,6 +590,7 @@ const connect = httpAction(async (ctx, request) => {
             : error,
       },
       status,
+      cors,
     );
   };
 
@@ -565,6 +600,15 @@ const connect = httpAction(async (ctx, request) => {
 
   const ip = clientIp(request);
   const ua = request.headers.get("user-agent") ?? undefined;
+
+  // Per-IP rate limiting (in-process best effort): cap total volume and
+  // failed attempts so the endpoint can't be brute-forced.
+  if (rateHit(`ip:${ip}`, RATE_MAX_TOTAL)) {
+    return send(
+      { ok: false, error: primebitError("rate_limited"), message: "too many requests" },
+      429,
+    );
+  }
 
   // `server` is optional — when omitted it is inferred from the key.
   let server: Doc<"servers"> | null = null;
@@ -637,7 +681,7 @@ const connect = httpAction(async (ctx, request) => {
   }
 
   const keyDoc = await ctx.runQuery(internal.nameserver.getKeyByValue, { key });
-  const fail = async (status: number, reason: string, error: string) => {
+  const fail = async (status: number, reason: string, message: string) => {
     await ctx.runMutation(internal.nameserver.recordConnect, {
       key,
       serverId: server?._id,
@@ -651,8 +695,15 @@ const connect = httpAction(async (ctx, request) => {
       reason,
     });
     accessLog(request, status, "-");
+    // Brute-force guard: 5 failed attempts per IP per minute → 429.
+    if (rateHit(`fail:${ip}`, RATE_MAX_FAILURES)) {
+      return send(
+        { ok: false, error: primebitError("rate_limited"), message: "too many attempts, try again later" },
+        429,
+      );
+    }
     return send(
-      { ok: false, error: primebitError(reason), message: error },
+      { ok: false, error: primebitError(reason), message },
       status,
     );
   };
@@ -684,12 +735,20 @@ const connect = httpAction(async (ctx, request) => {
     return await fail(403, "usage_limit", "key has reached its usage limit");
   }
 
-  // Reset the device binding: the currently-bound device may unbind itself
-  // so the key can move to a new machine (or rebind on this one). Panel
-  // users can also unbind from the Keys page — the bound device id is not
-  // needed there.
+  // Effective device binding state (works for keys stored before `devices`
+  // existed — deviceId doubles as devices[0]). Comparisons are
+  // case-insensitive, matching the normalization above.
+  const boundDevices = keyDoc.devices ?? (keyDoc.deviceId ? [keyDoc.deviceId] : []);
+  const knownDevice =
+    device.length > 0 &&
+    boundDevices.some((d) => d.toUpperCase() === device);
+  const maxDevices = keyDoc.maxDevices ?? 1; // 0 = unlimited
+
+  // Reset the device binding: a bound device may unbind itself so the key
+  // can move to a new machine. Panel users can also unbind from the Keys
+  // page without sending the device id.
   if (wantsReset) {
-    if (keyDoc.deviceId === undefined) {
+    if (boundDevices.length === 0) {
       await ctx.runMutation(internal.nameserver.recordConnect, {
         keyId: keyDoc._id,
         key,
@@ -712,13 +771,9 @@ const connect = httpAction(async (ctx, request) => {
       });
     }
     if (device.length === 0) {
-      return await fail(
-        400,
-        "missing_device",
-        "send the bound device id to reset it",
-      );
+      return await fail(400, "missing_device", "send the bound device id to reset it");
     }
-    if (device !== keyDoc.deviceId) {
+    if (!knownDevice) {
       return await fail(403, "device_mismatch", "key is bound to another device");
     }
     await ctx.runMutation(internal.nameserver.resetKeyDeviceInternal, {
@@ -746,9 +801,16 @@ const connect = httpAction(async (ctx, request) => {
     });
   }
 
-  // 1 key = 1 device: reject a different device once the key is bound.
-  if (keyDoc.deviceId !== undefined && keyDoc.deviceId !== device) {
-    return await fail(403, "device_mismatch", "key is bound to another device");
+  // Device gate (maxDevices semantics):
+  //   • known device           → allowed, no new binding
+  //   • key already bound + no device sent → explicit "missing device"
+  //   • maxDevices reached     → 403 Device limit
+  //   • 0 (unlimited) / free slot → allowed, bind happens in recordConnect
+  if (boundDevices.length > 0 && device.length === 0) {
+    return await fail(400, "missing_device", "missing device — this key is bound to a device");
+  }
+  if (device.length > 0 && !knownDevice && maxDevices > 0 && boundDevices.length >= maxDevices) {
+    return await fail(403, "device_limit", "key has reached its device limit");
   }
 
   // The "APK response URL": if a loader/APK file is uploaded for this
@@ -764,7 +826,7 @@ const connect = httpAction(async (ctx, request) => {
     }
   }
 
-  await ctx.runMutation(internal.nameserver.recordConnect, {
+  const rec = await ctx.runMutation(internal.nameserver.recordConnect, {
     keyId: keyDoc._id,
     key,
     serverId: server._id,
@@ -783,8 +845,10 @@ const connect = httpAction(async (ctx, request) => {
     server: { name: server.name, code: server.code },
     key: {
       expiresAt: keyDoc.expiresAt,
-      uses: keyDoc.uses + 1,
+      uses: rec?.uses ?? keyDoc.uses,
       maxUses: keyDoc.maxUses,
+      maxDevices,
+      devicesCount: rec?.devicesCount ?? boundDevices.length,
     },
     url: loaderUrl,
     message: "connected",
@@ -793,8 +857,26 @@ const connect = httpAction(async (ctx, request) => {
 
 /* ------------------------------ CORS ------------------------------ */
 
-const preflight = httpAction(async () => {
-  return new Response(null, { status: 204, headers: CORS_HEADERS });
+const preflight = httpAction(async (_ctx, request) => {
+  return new Response(null, {
+    status: 204,
+    headers: { ...CORS_HEADERS, ...corsFor(request) },
+  });
+});
+
+/** /connect is POST-only (recap §5 P8) — anything else gets a clear 405. */
+const methodNotAllowed = httpAction(async (_ctx, request) => {
+  accessLog(request, 405, "-");
+  return json(
+    {
+      ok: false,
+      status: false,
+      error: "Invalid key",
+      message: "method not allowed — /connect accepts POST only",
+    },
+    405,
+    corsFor(request),
+  );
 });
 
 /* ---------------------------- routes ---------------------------- */
@@ -802,7 +884,10 @@ const preflight = httpAction(async () => {
 http.route({ path: "/health", method: "GET", handler: health });
 
 http.route({ path: "/connect", method: "POST", handler: connect });
-http.route({ path: "/connect", method: "GET", handler: connect });
+http.route({ path: "/connect", method: "GET", handler: methodNotAllowed });
+http.route({ path: "/connect", method: "PUT", handler: methodNotAllowed });
+http.route({ path: "/connect", method: "PATCH", handler: methodNotAllowed });
+http.route({ path: "/connect", method: "DELETE", handler: methodNotAllowed });
 
 http.route({ path: "/api/login", method: "POST", handler: login });
 

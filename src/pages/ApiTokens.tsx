@@ -219,15 +219,8 @@ const endpoints = [
     method: "POST",
     path: "/connect",
     auth: "public",
-    desc: "Validate a license key. JSON body {\"license\"|\"key\", \"device\"|\"hwid\", \"game\"?} (primebit-style loaders send {\"key\", \"hwid\", \"game\"} — errors reply \"Invalid key\" / \"Key expired\" / \"Key banned\" / \"Device limit\" / \"Wrong Game Key\", success includes expires + the loader URL) — or the Havest-style form (game, version, user_key, serial, resource). Add \"action\": \"reset\" to unbind the device",
+    desc: "Validate a license key. POST only (GET → 405). JSON body {\"license\"|\"key\", \"device\"|\"hwid\", \"game\"?} (primebit-style loaders send {\"key\", \"hwid\", \"game\"} — errors reply \"Invalid key\" / \"Key expired\" / \"Key banned\" / \"Device limit\" / \"Wrong Game Key\", success includes expires + the loader URL) — or the Havest-style form (game, version, user_key, serial, resource). Add \"action\": \"reset\" to unbind the device. Keys/devices are case-insensitive; 5 failed attempts/min/IP → 429",
     methodClass: "bg-emerald-600/90 text-white",
-  },
-  {
-    method: "GET",
-    path: "/connect",
-    auth: "public",
-    desc: "Same via query string: ?license=LIC-…&device=device-abc&action=reset",
-    methodClass: "bg-sky-600/90 text-white",
   },
   {
     method: "POST",
