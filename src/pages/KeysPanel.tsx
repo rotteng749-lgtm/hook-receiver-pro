@@ -93,6 +93,7 @@ function GenerateKeyCard({ scope }: { scope: "owner" | "admin" }) {
   const generateKey = useMutation(api.nameserver.generateKey);
 
   const [serverId, setServerId] = useState("");
+  const [customKey, setCustomKey] = useState("");
   const [note, setNote] = useState("");
   const [uses, setUses] = useState("");
   const [hours, setHours] = useState("");
@@ -126,8 +127,10 @@ function GenerateKeyCard({ scope }: { scope: "owner" | "admin" }) {
         uses: uses === "" ? undefined : Number(uses),
         hours: hours === "" ? undefined : Number(hours),
         maxDevices: maxDevices === "" ? undefined : Number(maxDevices),
+        customKey: customKey.trim() || undefined,
       });
       setResult(res);
+      setCustomKey("");
       setNote("");
       setUses("");
       setHours("");
@@ -173,13 +176,25 @@ function GenerateKeyCard({ scope }: { scope: "owner" | "admin" }) {
         <CardContent>
           <p className="mb-4 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
             <KeyRound className="size-3.5" />
-            New keys use format{" "}
-            <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px]">
-              {keyFormat}
-            </code>
-            <span className="text-muted-foreground/80">
-              — {scope === "owner" ? "change it in Settings" : "set by the owner in Settings"}
-            </span>
+            {customKey.trim().length > 0 ? (
+              <>
+                Manual key{" "}
+                <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px]">
+                  {customKey}
+                </code>{" "}
+                — the configured format is ignored for this key.
+              </>
+            ) : (
+              <>
+                New keys use format{" "}
+                <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px]">
+                  {keyFormat}
+                </code>
+                <span className="text-muted-foreground/80">
+                  — {scope === "owner" ? "change it in Settings" : "set by the owner in Settings"}
+                </span>
+              </>
+            )}
           </p>
           <form onSubmit={submit} className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div className="space-y-2 sm:col-span-2">
@@ -201,6 +216,26 @@ function GenerateKeyCard({ scope }: { scope: "owner" | "admin" }) {
                   )}
                 </SelectContent>
               </Select>
+            </div>
+            <div className="space-y-2 sm:col-span-2">
+              <Label htmlFor="key-custom">
+                Custom key (optional)
+                <span className="ml-1 font-normal text-muted-foreground">
+                  — leave empty to auto-generate
+                </span>
+              </Label>
+              <Input
+                id="key-custom"
+                value={customKey}
+                onChange={(e) => setCustomKey(e.target.value.toUpperCase())}
+                placeholder="e.g. ML_227182973"
+                maxLength={80}
+                className="font-mono"
+              />
+              <p className="text-xs text-muted-foreground">
+                Uppercased automatically and must be unique — type anything
+                (letters, digits, dashes, underscores).
+              </p>
             </div>
             <div className="space-y-2">
               <Label htmlFor="key-note">Note (optional)</Label>

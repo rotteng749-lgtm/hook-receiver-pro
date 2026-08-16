@@ -403,6 +403,10 @@ export const generateKey = mutation({
     uses: v.optional(v.number()),
     hours: v.optional(v.number()),
     maxDevices: v.optional(v.number()),
+    // Manual key value; empty = auto-generate with the configured format.
+    // Normalized exactly like /connect does (uppercase, control chars
+    // stripped, max 80) so the key always matches at connect time.
+    customKey: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const { userId, user } = await requireRole(ctx, ["owner", "admin"]);
@@ -431,14 +435,33 @@ export const generateKey = mutation({
       );
     }
 
-    let key = generateKeyValue(prefix, keyFormat);
-    for (let i = 0; i < 5; i++) {
+    // Manual key (if provided) is used as-is and must be unique; otherwise
+    // a random key is generated from the configured format.
+    const customKey = (args.customKey ?? "")
+      .replace(/[\u0000-\u001f\u007f]/g, "")
+      .trim()
+      .toUpperCase()
+      .slice(0, 80);
+    let key: string;
+    if (customKey.length > 0) {
       const dup = await ctx.db
         .query("connectKeys")
-        .withIndex("by_key", (q) => q.eq("key", key))
+        .withIndex("by_key", (q) => q.eq("key", customKey))
         .first();
-      if (dup === null) break;
+      if (dup !== null) {
+        throw new Error(`Key "${customKey}" already exists — pick another one`);
+      }
+      key = customKey;
+    } else {
       key = generateKeyValue(prefix, keyFormat);
+      for (let i = 0; i < 5; i++) {
+        const dup = await ctx.db
+          .query("connectKeys")
+          .withIndex("by_key", (q) => q.eq("key", key))
+          .first();
+        if (dup === null) break;
+        key = generateKeyValue(prefix, keyFormat);
+      }
     }
 
     // 0 = unlimited, N = max devices, default 1 (1 key = 1 device).
