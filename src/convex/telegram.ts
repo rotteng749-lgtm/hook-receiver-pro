@@ -47,7 +47,7 @@ const HELP_OWNER = [
   "- /servers — list servers",
   "- /keys — last 5 keys",
   "- /server <code> — server detail + recent connects",
-  "- /genkey <code> [uses] [hours] — generate a key (from your balance)",
+  "- /genkey <code> [uses] [hours] [maxdevices] — generate a key (0 maxdevices = unlimited devices)",
   "- /check <key> — key info (status, uses, device, id)",
   "- /resetkey <key> — unbind device (1 key = 1 device reset)",
   "- /export — JSON snapshot with ids (servers/keys/connections/members)",
@@ -79,8 +79,8 @@ const TUTORIAL = [
   "   Cek daftarnya: /servers",
   "",
   "2️⃣ Generate key:",
-  "   /genkey <kode> [uses] [jam]",
-  "   Contoh: /genkey eu-main 3 24",
+  "   /genkey <kode> [uses] [jam] [maxdevices]",
+  "   Contoh: /genkey eu-main 3 24 0   (0 = unlimited devices, kosong = 1 device)",
   "   → key: NS-XXXX-XXXX-XXXX-XXXX-XXXX",
   "",
   "3️⃣ Connect dari aplikasi (.sh, .dll, dll):",
@@ -491,15 +491,22 @@ const webhook = httpAction(async (ctx, request) => {
   if (cmd === "/genkey") {
     const code = (parts[1] ?? "").toLowerCase();
     if (!code) {
-      return reply("Usage: /genkey <code> [uses] [hours]\nExample: /genkey eu-main 3 24");
+      return reply(
+        "Usage: /genkey <code> [uses] [hours] [maxdevices]\nExample: /genkey eu-main 3 24 0\n(maxdevices: 0 = unlimited devices, empty = 1 device)",
+      );
     }
     const uses = parts[2] !== undefined ? Number(parts[2]) : undefined;
     const hours = parts[3] !== undefined ? Number(parts[3]) : undefined;
+    const maxDevices = parts[4] !== undefined ? Number(parts[4]) : undefined;
     try {
       const r = await ctx.runMutation(internal.nameserver.genKeyAsOwner, {
         serverCode: code,
         uses: uses !== undefined && Number.isFinite(uses) ? uses : undefined,
         hours: hours !== undefined && Number.isFinite(hours) ? hours : undefined,
+        maxDevices:
+          maxDevices !== undefined && Number.isFinite(maxDevices)
+            ? maxDevices
+            : undefined,
       });
       const expires =
         r.expiresAt > 0 ? new Date(r.expiresAt).toISOString().slice(0, 10) : "never";
@@ -509,6 +516,7 @@ const webhook = httpAction(async (ctx, request) => {
           r.key,
           `Cost: ${r.cost} · Remaining balance: ${r.unlimited ? "∞ (unlimited)" : r.balance}`,
           `Uses: ${r.maxUses > 0 ? r.maxUses : "unlimited"}`,
+          `Devices: ${r.maxDevices === 0 ? "unlimited" : r.maxDevices}`,
           `Expires: ${expires}`,
         ].join("\n"),
       );
@@ -539,6 +547,7 @@ const webhook = httpAction(async (ctx, request) => {
         `Server: ${server?.name ?? "?"} (${server?.code ?? "?"})`,
         `Status: ${r.status}`,
         `Uses: ${r.uses}/${r.maxUses === 0 ? "unlimited" : r.maxUses}`,
+        `Max devices: ${r.maxDevices === 0 ? "unlimited" : r.maxDevices ?? 1}`,
         `Expires: ${expires}`,
         `Device: ${r.deviceId ? r.deviceId : "not bound"}`,
         `Creator: ${creator?.name ?? creator?.email ?? r.createdBy}`,

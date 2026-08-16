@@ -846,7 +846,7 @@ const connect = httpAction(async (ctx, request) => {
   //   • key already bound + no device sent → explicit "missing device"
   //   • maxDevices reached     → 403 Device limit
   //   • 0 (unlimited) / free slot → allowed, bind happens in recordConnect
-  if (boundDevices.length > 0 && device.length === 0) {
+  if (maxDevices > 0 && boundDevices.length > 0 && device.length === 0) {
     return await fail(400, "missing_device", "missing device — this key is bound to a device");
   }
   if (device.length > 0 && !knownDevice && maxDevices > 0 && boundDevices.length >= maxDevices) {
@@ -1028,7 +1028,9 @@ const dimz = httpAction(async (ctx, request) => {
   const knownDevice =
     device.length > 0 && boundDevices.some((d) => d.toUpperCase() === device);
   const maxDevices = keyDoc.maxDevices ?? 1; // 0 = unlimited
-  if (boundDevices.length > 0 && device.length === 0) {
+  // Same semantics as /connect: unlimited keys (maxDevices = 0) never demand
+  // a device id and never hit a device limit.
+  if (maxDevices > 0 && boundDevices.length > 0 && device.length === 0) {
     await log(false, "missing_device", keyDoc._id, server._id);
     return send("BANNED", "missing device — this key is bound to a device");
   }
