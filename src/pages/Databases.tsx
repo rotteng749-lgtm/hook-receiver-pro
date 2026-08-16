@@ -367,6 +367,73 @@ export default function Databases() {
           </code>
         </p>
       </div>
+
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <Card className="border-border/70">
+          <CardHeader>
+            <CardTitle className="text-base">DIMZNEXTV2 — Free Fire</CardTitle>
+            <CardDescription>
+              License check endpoint that the DIMZNEXTV2.sh binary talks to.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3 text-xs">
+            <div>
+              <p className="mb-1 font-medium">Request</p>
+              <pre className="overflow-x-auto rounded-lg bg-muted/50 p-3 font-mono text-[11px] leading-relaxed text-muted-foreground">
+{`POST ${SITE_URL}/mod/dimz.php
+{"game":"freefire","licence":"NS-XXXX-…",
+ "nonce":"f3e978cf","timestamp":"1786742177",
+ "uuid":"<device-id>"}`}
+              </pre>
+            </div>
+            <div>
+              <p className="mb-1 font-medium">Response</p>
+              <pre className="overflow-x-auto rounded-lg bg-muted/50 p-3 font-mono text-[11px] leading-relaxed text-muted-foreground">
+{`{"status":"SUCCESS","message":"ok",
+ "signature":"00000000000000000000000000000000"}
+
+maintenance → {"status":"maintenace","message":"…"}
+failure     → {"status":"BANNED","message":"…"}`}
+              </pre>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="border-border/70">
+          <CardHeader>
+            <CardTitle className="text-base">ZALL RW — MLBB</CardTitle>
+            <CardDescription>
+              App version check the ZALL RW v4.7 APK polls on launch (no auth).
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3 text-xs">
+            <div>
+              <p className="mb-1 font-medium">Request</p>
+              <pre className="overflow-x-auto rounded-lg bg-muted/50 p-3 font-mono text-[11px] leading-relaxed text-muted-foreground">
+{`GET ${SITE_URL}/api/app/version
+(optional ?game=MLBB | FREEFIRE | PUBG)`}
+              </pre>
+            </div>
+            <div>
+              <p className="mb-1 font-medium">Response</p>
+              <pre className="overflow-x-auto rounded-lg bg-muted/50 p-3 font-mono text-[11px] leading-relaxed text-muted-foreground">
+{`{"forceUpdate":true,"latestVersion":"4.7",
+ "minVersion":"4.7",
+ "downloadUrl":"https://…/databases/<id>",
+ "message":"Update Zall RW v4.7…"}`}
+              </pre>
+            </div>
+            <p className="text-muted-foreground">
+              <code className="rounded bg-muted px-1 py-0.5 text-[11px]">latestVersion</code>,
+              {" "}
+              <code className="rounded bg-muted px-1 py-0.5 text-[11px]">downloadUrl</code> and{" "}
+              <code className="rounded bg-muted px-1 py-0.5 text-[11px]">message</code> come from
+              the newest loader uploaded for that game. Upload one above to make
+              the APK point at your server.
+            </p>
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
 }

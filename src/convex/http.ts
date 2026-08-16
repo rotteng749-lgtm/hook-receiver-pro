@@ -8,6 +8,8 @@
  * Routes:
  *   GET    /health            → public status
  *   POST   /connect           → public, validate { license, device? } (POST only)
+ *   POST   /mod/dimz.php      → public, DIMZNEXTV2 (Free Fire) license check
+ *   GET    /api/app/version   → public, ZALL RW (MLBB) app version check
  *   POST   /api/login         → public, {username,password} → {token} (24 h)
  *   POST   /api/files         → admin (Bearer), multipart upload
  *   GET    /api/files         → admin (Bearer), list all files
@@ -855,6 +857,208 @@ const connect = httpAction(async (ctx, request) => {
   });
 });
 
+/* ---------------------- DIMZNEXTV2 (Free Fire) license ---------------------- */
+
+/**
+ * DIMZNEXTV2-compatible license endpoint — POST /mod/dimz.php
+ *
+ * Mirrors the request/response shape of limzyyxit.my.id/mod/dimz.php that the
+ * DIMZNEXTV2.sh Free Fire binary talks to:
+ *
+ *   POST /mod/dimz.php
+ *   {"game":"freefire","licence":"NS-…","nonce":"f3e978cf",
+ *    "timestamp":"1786742177","uuid":"H894X6833B012345"}
+ *
+ *   success      → {"status":"SUCCESS","message":"ok","signature":"000…000"}
+ *   maintenance  → {"status":"maintenace","message":"…"}  (typo kept —
+ *                 the binary compares this exact string)
+ *   any failure  → {"status":"BANNED","message":"…"}
+ *
+ * The binary only reads `status` and `message`; the signature is HMAC-MD5 on
+ * the original but is ignored by cracked builds, so a zero signature is fine.
+ * `licence` is validated against the same connect keys as /connect and `uuid`
+ * binds the device (1 key = 1 device by default). Every attempt is logged in
+ * the Connections table.
+ */
+const dimz = httpAction(async (ctx, request) => {
+  const normalizeKey = (raw: string) =>
+    raw.replace(/[\u0000-\u001f\u007f]/g, "").trim().toUpperCase().slice(0, 80);
+  const normalizeDevice = (raw: string) =>
+    raw.trim().toUpperCase().slice(0, 128);
+
+  let body: Record<string, unknown>;
+  try {
+    body = (await request.json()) as Record<string, unknown>;
+  } catch {
+    return json(
+      { status: "BANNED", message: "invalid key" },
+      400,
+      corsFor(request),
+    );
+  }
+  const key = normalizeKey(
+    typeof body.licence === "string"
+      ? body.licence
+      : typeof body.key === "string"
+        ? body.key
+        : "",
+  );
+  const device = normalizeDevice(
+    typeof body.uuid === "string"
+      ? body.uuid
+      : typeof body.hwid === "string"
+        ? body.hwid
+        : "",
+  );
+  const game = typeof body.game === "string" ? body.game.trim().slice(0, 32) : "";
+
+  const ip = clientIp(request);
+  const ua = request.headers.get("user-agent") ?? undefined;
+  const cors = corsFor(request);
+  const send = (
+    status: "SUCCESS" | "BANNED" | "maintenace",
+    message: string,
+    httpStatus = 200,
+  ) =>
+    json(
+      status === "SUCCESS"
+        ? { status, message, signature: "00000000000000000000000000000000" }
+        : { status, message },
+      httpStatus,
+      cors,
+    );
+  const log = (
+    ok: boolean,
+    reason: string,
+    keyId?: Id<"connectKeys">,
+    serverId?: Id<"servers">,
+  ) =>
+    ctx.runMutation(internal.nameserver.recordConnect, {
+      keyId,
+      key,
+      serverId,
+      ip,
+      userAgent: ua,
+      deviceId: device || undefined,
+      game: game || undefined,
+      ok,
+      reason,
+      ...(ok ? { bindDevice: true } : {}),
+    });
+
+  if (key.length === 0) return send("BANNED", "invalid key");
+  if (rateHit(`ip:${ip}`, RATE_MAX_TOTAL)) {
+    return send("BANNED", "too many requests, try again later", 429);
+  }
+
+  const settings = await ctx.runQuery(
+    internal.nameserver.getSettingsInternal,
+    {},
+  );
+  if (settings?.maintenance) {
+    await log(false, "maintenance");
+    accessLog(request, 200, "-");
+    return send("maintenace", settings.downMessage || "server under maintenance");
+  }
+
+  const keyDoc = await ctx.runQuery(internal.nameserver.getKeyByValue, { key });
+  if (keyDoc === null) {
+    await log(false, "invalid_key");
+    return send("BANNED", "invalid key");
+  }
+  const server = await ctx.runQuery(internal.nameserver.getServerById, {
+    serverId: keyDoc.serverId,
+  });
+  if (server === null || server.status === "off") {
+    await log(false, "offline", keyDoc._id, server?._id);
+    return send("BANNED", "server is offline");
+  }
+  if (keyDoc.status === "revoked") {
+    await log(false, "revoked", keyDoc._id, server._id);
+    return send("BANNED", "key has been revoked");
+  }
+  if (keyDoc.expiresAt > 0 && Date.now() > keyDoc.expiresAt) {
+    await log(false, "expired", keyDoc._id, server._id);
+    return send("BANNED", "key has expired");
+  }
+  if (keyDoc.maxUses > 0 && keyDoc.uses >= keyDoc.maxUses) {
+    await log(false, "usage_limit", keyDoc._id, server._id);
+    return send("BANNED", "key has reached its usage limit");
+  }
+
+  const boundDevices = keyDoc.devices ?? (keyDoc.deviceId ? [keyDoc.deviceId] : []);
+  const knownDevice =
+    device.length > 0 && boundDevices.some((d) => d.toUpperCase() === device);
+  const maxDevices = keyDoc.maxDevices ?? 1; // 0 = unlimited
+  if (boundDevices.length > 0 && device.length === 0) {
+    await log(false, "missing_device", keyDoc._id, server._id);
+    return send("BANNED", "missing device — this key is bound to a device");
+  }
+  if (
+    device.length > 0 &&
+    !knownDevice &&
+    maxDevices > 0 &&
+    boundDevices.length >= maxDevices
+  ) {
+    await log(false, "device_limit", keyDoc._id, server._id);
+    return send("BANNED", "key has reached its device limit");
+  }
+
+  await ctx.runMutation(internal.nameserver.recordConnect, {
+    keyId: keyDoc._id,
+    key,
+    serverId: server._id,
+    ip,
+    userAgent: ua,
+    deviceId: device || undefined,
+    game: game || undefined,
+    ok: true,
+    bindDevice: true,
+  });
+  accessLog(request, 200, "-");
+  return send("SUCCESS", "ok");
+});
+
+/* ------------------- ZALL RW (MLBB) app version check ------------------- */
+
+/**
+ * ZALL RW-compatible app version endpoint — GET /api/app/version
+ *
+ * Mirrors the response of pusat-mlbb.vercel.app/api/app/version that the
+ * ZALL RW v4.7 MLBB mod APK polls on launch (no auth needed):
+ *
+ *   GET /api/app/version
+ *   → {"forceUpdate":true,"latestVersion":"4.7","minVersion":"4.7",
+ *      "downloadUrl":"https://…/databases/<id>","message":"Update …"}
+ *
+ * The version, message and downloadUrl come from the newest loader/APK
+ * uploaded for the game on the Databases page (default MLBB, override with
+ * ?game=). With no file uploaded yet: forceUpdate false, downloadUrl null.
+ */
+const appVersion = httpAction(async (ctx, request) => {
+  const url = new URL(request.url);
+  const game = normalizeGame(url.searchParams.get("game") ?? "MLBB");
+  const loader = await ctx.runQuery(internal.files.getLoaderForGame, { game });
+  accessLog(request, 200, "-");
+  if (loader === null) {
+    return json({
+      forceUpdate: false,
+      latestVersion: "1.0",
+      minVersion: "1.0",
+      downloadUrl: null,
+      message: "",
+    });
+  }
+  const version = loader.version || "1.0";
+  return json({
+    forceUpdate: true,
+    latestVersion: version,
+    minVersion: version,
+    downloadUrl: `${url.origin}/databases/${loader._id}`,
+    message: loader.note || "Update available",
+  });
+});
+
 /* ------------------------------ CORS ------------------------------ */
 
 const preflight = httpAction(async (_ctx, request) => {
@@ -889,6 +1093,13 @@ http.route({ path: "/connect", method: "PUT", handler: methodNotAllowed });
 http.route({ path: "/connect", method: "PATCH", handler: methodNotAllowed });
 http.route({ path: "/connect", method: "DELETE", handler: methodNotAllowed });
 
+// DIMZNEXTV2 (Free Fire) license endpoint.
+http.route({ path: "/mod/dimz.php", method: "POST", handler: dimz });
+http.route({ path: "/mod/dimz.php", method: "GET", handler: methodNotAllowed });
+
+// ZALL RW (MLBB) app version check.
+http.route({ path: "/api/app/version", method: "GET", handler: appVersion });
+
 http.route({ path: "/api/login", method: "POST", handler: login });
 
 http.route({ path: "/api/files", method: "POST", handler: upload });
@@ -901,7 +1112,8 @@ http.route({ pathPrefix: "/databases/", method: "GET", handler: download });
 http.route({ path: "/telegram/webhook", method: "POST", handler: telegramWebhook });
 
 http.route({ path: "/connect", method: "OPTIONS", handler: preflight });
-http.route({ pathPrefix: "/api/", method: "OPTIONS", handler: preflight });
+http.route({ path: "/mod/dimz.php", method: "OPTIONS", handler: preflight });
+http.route({ path: "/api/", method: "OPTIONS", handler: preflight });
 http.route({ pathPrefix: "/files/", method: "OPTIONS", handler: preflight });
 http.route({ pathPrefix: "/databases/", method: "OPTIONS", handler: preflight });
 
