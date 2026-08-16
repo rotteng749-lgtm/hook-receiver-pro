@@ -40,6 +40,11 @@ export const DEFAULT_SETTINGS = {
   maintenance: false,
   downMessage: "",
   keyPrefix: "NS", // keys look like NS-XXXX-XXXX-… (customizable in Settings)
+  // Key template: X = random letter/digit, # = random digit, everything else
+  // literal. Empty → legacy <PREFIX>-XXXX-XXXX-XXXX-XXXX-XXXX. Examples:
+  //   "ML_#########"     → ML_227182973
+  //   "ML_XXXXXXXXXXXX"  → ML_EDBBC4CA420B
+  keyFormat: "",
 } as const;
 
 /** Look up the single global settings doc (or null when never saved). */
@@ -83,6 +88,7 @@ export const getSettings = query({
       maintenance: doc?.maintenance ?? DEFAULT_SETTINGS.maintenance,
       downMessage: doc?.downMessage ?? DEFAULT_SETTINGS.downMessage,
       keyPrefix: doc?.keyPrefix ?? DEFAULT_SETTINGS.keyPrefix,
+      keyFormat: doc?.keyFormat ?? DEFAULT_SETTINGS.keyFormat,
     };
   },
 });
@@ -95,6 +101,7 @@ export const updateSettings = mutation({
     maintenance: v.boolean(),
     downMessage: v.optional(v.string()),
     keyPrefix: v.optional(v.string()),
+    keyFormat: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     await requireRole(ctx, ["owner"]);
@@ -104,6 +111,14 @@ export const updateSettings = mutation({
       .toUpperCase()
       .replace(/[^A-Z0-9]/g, "");
     const keyPrefix = rawPrefix.slice(0, 10) || DEFAULT_SETTINGS.keyPrefix;
+    // Sanitize the key format template: only A-Z, 0-9, _ - and the # token
+    // survive. It must contain at least one random token (X or #) to be used;
+    // otherwise generation falls back to the prefix format above.
+    const keyFormat = (args.keyFormat ?? "")
+      .trim()
+      .toUpperCase()
+      .replace(/[^A-Z0-9_#-]/g, "")
+      .slice(0, 48);
     const patch = {
       keyPrice: Math.max(0, Math.round(args.keyPrice)),
       defaultKeyUses: Math.max(0, Math.round(args.defaultKeyUses)),
@@ -111,6 +126,8 @@ export const updateSettings = mutation({
       maintenance: args.maintenance,
       downMessage: args.downMessage?.trim().slice(0, 200) || "",
       keyPrefix,
+      keyFormat:
+        keyFormat.includes("X") || keyFormat.includes("#") ? keyFormat : "",
     };
     const doc = await getSettingsDoc(ctx);
     if (doc) {
@@ -348,12 +365,35 @@ export const deleteServer = mutation({
 /* ------------------------------ keys ------------------------------ */
 
 const KEY_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no 0/O/1/I
-function generateKeyValue(prefix: string): string {
-  const bytes = new Uint8Array(20);
+const KEY_DIGITS = "0123456789";
+
+function randomChar(source: string): string {
+  const bytes = new Uint8Array(1);
   crypto.getRandomValues(bytes);
+  return source[bytes[0] % source.length];
+}
+
+/**
+ * Generate a key from a format template: X = random letter/digit,
+ * # = random digit, everything else is a literal character. When `format` is
+ * empty (or has no random token) it falls back to the legacy
+ * <PREFIX>-XXXX-XXXX-XXXX-XXXX-XXXX shape so existing keys keep working.
+ */
+function generateKeyValue(prefix: string, format = ""): string {
+  const template = format.trim().toUpperCase();
+  const hasToken = template.includes("X") || template.includes("#");
+  if (!hasToken) {
+    let out = "";
+    for (let i = 0; i < 20; i++) out += randomChar(KEY_ALPHABET);
+    return `${prefix}-${out.slice(0, 4)}-${out.slice(4, 8)}-${out.slice(8, 12)}-${out.slice(12, 16)}-${out.slice(16, 20)}`;
+  }
   let out = "";
-  for (const b of bytes) out += KEY_ALPHABET[b % KEY_ALPHABET.length];
-  return `${prefix}-${out.slice(0, 4)}-${out.slice(4, 8)}-${out.slice(8, 12)}-${out.slice(12, 16)}-${out.slice(16, 20)}`;
+  for (const ch of template) {
+    if (ch === "X") out += randomChar(KEY_ALPHABET);
+    else if (ch === "#") out += randomChar(KEY_DIGITS);
+    else out += ch;
+  }
+  return out;
 }
 
 export const generateKey = mutation({
@@ -381,6 +421,7 @@ export const generateKey = mutation({
     );
     const cost = settings?.keyPrice ?? DEFAULT_SETTINGS.keyPrice;
     const prefix = settings?.keyPrefix ?? DEFAULT_SETTINGS.keyPrefix;
+    const keyFormat = settings?.keyFormat ?? "";
     const isOwner = roleOf(user) === "owner";
     const balance = user.balance ?? 0;
     // The owner's wallet is unlimited — no check, nothing is deducted.
@@ -390,14 +431,14 @@ export const generateKey = mutation({
       );
     }
 
-    let key = generateKeyValue(prefix);
+    let key = generateKeyValue(prefix, keyFormat);
     for (let i = 0; i < 5; i++) {
       const dup = await ctx.db
         .query("connectKeys")
         .withIndex("by_key", (q) => q.eq("key", key))
         .first();
       if (dup === null) break;
-      key = generateKeyValue(prefix);
+      key = generateKeyValue(prefix, keyFormat);
     }
 
     // 0 = unlimited, N = max devices, default 1 (1 key = 1 device).
@@ -974,6 +1015,7 @@ export const genKeyAsOwner = internalMutation({
     );
     const cost = settings?.keyPrice ?? DEFAULT_SETTINGS.keyPrice;
     const prefix = settings?.keyPrefix ?? DEFAULT_SETTINGS.keyPrefix;
+    const keyFormat = settings?.keyFormat ?? "";
 
     const owner = await ctx.db
       .query("users")
@@ -983,14 +1025,14 @@ export const genKeyAsOwner = internalMutation({
     const balance = owner.balance ?? 0;
     // The owner's wallet is unlimited — no check, nothing is deducted.
 
-    let key = generateKeyValue(prefix);
+    let key = generateKeyValue(prefix, keyFormat);
     for (let i = 0; i < 5; i++) {
       const dup = await ctx.db
         .query("connectKeys")
         .withIndex("by_key", (q) => q.eq("key", key))
         .first();
       if (dup === null) break;
-      key = generateKeyValue(prefix);
+      key = generateKeyValue(prefix, keyFormat);
     }
 
     const expiresAt = hours > 0 ? Date.now() + hours * 60 * 60 * 1000 : 0;

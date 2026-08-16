@@ -108,6 +108,9 @@ function GenerateKeyCard({ scope }: { scope: "owner" | "admin" }) {
   const balance = stats?.balance ?? 0;
   const unlimited = scope === "owner" && stats?.unlimited === true;
   const activeServers = servers.filter((s) => s.status === "active");
+  // Format new keys will be generated in (custom template or classic prefix).
+  const keyFormat =
+    settings?.keyFormat || `${settings?.keyPrefix ?? "NS"}-XXXX-XXXX-XXXX-XXXX-XXXX`;
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -168,6 +171,16 @@ function GenerateKeyCard({ scope }: { scope: "owner" | "admin" }) {
           </CardDescription>
         </CardHeader>
         <CardContent>
+          <p className="mb-4 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+            <KeyRound className="size-3.5" />
+            New keys use format{" "}
+            <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px]">
+              {keyFormat}
+            </code>
+            <span className="text-muted-foreground/80">
+              — {scope === "owner" ? "change it in Settings" : "set by the owner in Settings"}
+            </span>
+          </p>
           <form onSubmit={submit} className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div className="space-y-2 sm:col-span-2">
               <Label>Server</Label>
