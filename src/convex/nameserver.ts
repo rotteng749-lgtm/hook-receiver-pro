@@ -182,7 +182,7 @@ export const bootstrapOwner = mutation({
 
 /**
  * Ensures the fixed owner account exists and is the owner. Credentials come
- * from ADMIN_USERNAME / ADMIN_PASSWORD (defaults: Panxcz / Panxxcz) — the
+ * from ADMIN_USERNAME / ADMIN_PASSWORD (defaults: Panxcz / Panxcz@2026!) — the
  * same pair used by the REST /api/login endpoint. Called from the sign-in
  * page on mount so the owner can always log in with username + password,
  * no email needed. Idempotent: if the username already has an account it is
