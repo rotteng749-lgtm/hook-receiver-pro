@@ -36,7 +36,7 @@ import { api } from "@/convex/_generated/api";
 import type { Doc } from "@/convex/_generated/dataModel";
 import { formatRelative } from "@/lib/format";
 import { useMutation, useQuery } from "convex/react";
-import { Loader2, Pencil, Plus, Server as ServerIcon, Trash2 } from "lucide-react";
+import { Loader2, Pencil, Plus, RotateCcw, Server as ServerIcon, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
@@ -311,19 +311,36 @@ export default function Servers() {
                 calls /connect with it — the server is detected automatically:
               </CardDescription>
             </div>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className="shrink-0 cursor-pointer"
-              onClick={() => {
-                setEditingDomain(!editingDomain);
-                setDomainInput(domain);
-              }}
-            >
-              <Pencil className="size-3.5" />
-              Edit URL
-            </Button>
+            <div className="flex items-center gap-1 shrink-0">
+              {domain.length > 0 && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="cursor-pointer text-muted-foreground"
+                  onClick={() => {
+                    setDomainInput("");
+                    saveDomain();
+                  }}
+                  title="Reset to default Convex URL"
+                >
+                  <RotateCcw className="size-3.5" />
+                </Button>
+              )}
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="cursor-pointer"
+                onClick={() => {
+                  setEditingDomain(!editingDomain);
+                  setDomainInput(domain);
+                }}
+              >
+                <Pencil className="size-3.5" />
+                Edit URL
+              </Button>
+            </div>
           </div>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -336,7 +353,7 @@ export default function Servers() {
                 <Input
                   value={domainInput}
                   onChange={(e) => setDomainInput(e.target.value.toLowerCase().replace(/[^a-z0-9.-]/g, ""))}
-                  placeholder="panxcz.site"
+                  placeholder="panxcz.convex.site or custom.com"
                   maxLength={63}
                   className="rounded-l-none font-mono text-sm"
                 />
