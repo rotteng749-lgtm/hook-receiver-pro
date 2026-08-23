@@ -45,7 +45,7 @@ export const DEFAULT_SETTINGS = {
   //   "ML_#########"     → ML_227182973
   //   "ML_XXXXXXXXXXXX"  → ML_EDBBC4CA420B
   keyFormat: "",
-  serverDomain: "", // e.g. "panxcz" → used in UI responses
+  serverDomain: "panxcz", // default domain → panxcz.site
   endpointAuthToken: "", // Bearer token for custom endpoints
 } as const;
 
