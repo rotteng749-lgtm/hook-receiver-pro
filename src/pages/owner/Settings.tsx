@@ -13,15 +13,20 @@ import { Textarea } from "@/components/ui/textarea";
 import { PageHeader } from "@/components/panel/PageHeader";
 import { api } from "@/convex/_generated/api";
 import { useMutation, useQuery } from "convex/react";
+import { motion, AnimatePresence } from "framer-motion";
 import {
+  ChevronDown,
+  ChevronRight,
   Globe,
   KeyRound,
   Loader2,
+  Plug,
   Plus,
   Save,
   Shield,
+  Sparkles,
   Trash2,
-  Webhook,
+  Zap,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
@@ -37,22 +42,35 @@ const FORMAT_PRESETS = [
 const SAMPLE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const SAMPLE_DIGITS = "0123456789";
 
-/** Render the template once with random chars so the owner sees the shape. */
 function sampleKey(format: string): string {
   const template = format.trim().toUpperCase();
   if (!template.includes("X") && !template.includes("#")) return "";
   let out = "";
   for (const ch of template) {
-    if (ch === "X") {
-      out += SAMPLE_ALPHABET[Math.floor(Math.random() * SAMPLE_ALPHABET.length)];
-    } else if (ch === "#") {
-      out += SAMPLE_DIGITS[Math.floor(Math.random() * SAMPLE_DIGITS.length)];
-    } else {
-      out += ch;
-    }
+    if (ch === "X") out += SAMPLE_ALPHABET[Math.floor(Math.random() * SAMPLE_ALPHABET.length)];
+    else if (ch === "#") out += SAMPLE_DIGITS[Math.floor(Math.random() * SAMPLE_DIGITS.length)];
+    else out += ch;
   }
   return out;
 }
+
+const METHOD_COLORS: Record<string, string> = {
+  GET: "bg-emerald-500/15 text-emerald-400 border-emerald-500/30",
+  POST: "bg-blue-500/15 text-blue-400 border-blue-500/30",
+  PUT: "bg-amber-500/15 text-amber-400 border-amber-500/30",
+  PATCH: "bg-orange-500/15 text-orange-400 border-orange-500/30",
+  DELETE: "bg-red-500/15 text-red-400 border-red-500/30",
+  ANY: "bg-purple-500/15 text-purple-400 border-purple-500/30",
+};
+
+const cardVariants = {
+  hidden: { opacity: 0, y: 20 },
+  visible: { opacity: 1, y: 0, transition: { duration: 0.35, ease: "easeOut" as const } },
+};
+
+const stagger = {
+  visible: { transition: { staggerChildren: 0.08 } },
+};
 
 /* ========================== Custom Endpoint Form ========================== */
 
@@ -113,179 +131,202 @@ function CustomEndpointsSection() {
   };
 
   return (
-    <Card className="border-border/70">
-      <CardHeader>
-        <div className="flex items-center justify-between">
-          <div>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Webhook className="size-4" />
-              Custom Endpoints
-            </CardTitle>
-            <CardDescription>
-              Create your own HTTP endpoints at /hook/&lt;path&gt;. Each one
-              returns the response you configure — useful for webhooks, custom
-              APIs, or mock servers.
-            </CardDescription>
+    <motion.div variants={cardVariants} initial="hidden" animate="visible">
+      <div className="relative overflow-hidden rounded-xl border border-violet-500/20 bg-gradient-to-br from-violet-500/5 via-background to-fuchsia-500/5">
+        {/* Decorative glow */}
+        <div className="pointer-events-none absolute -top-24 -right-24 size-48 rounded-full bg-violet-500/10 blur-3xl" />
+        <div className="pointer-events-none absolute -bottom-16 -left-16 size-32 rounded-full bg-fuchsia-500/10 blur-3xl" />
+
+        <div className="relative">
+          <div className="flex items-center justify-between border-b border-violet-500/10 px-6 py-4">
+            <div className="flex items-center gap-3">
+              <div className="flex size-9 items-center justify-center rounded-lg bg-violet-500/15">
+                <Plug className="size-4.5 text-violet-400" />
+              </div>
+              <div>
+                <h3 className="text-sm font-semibold">Custom Endpoints</h3>
+                <p className="text-xs text-muted-foreground">
+                  Create your own HTTP endpoints at <code className="font-mono text-violet-400">/hook/&lt;path&gt;</code>
+                </p>
+              </div>
+            </div>
+            <Button
+              type="button"
+              variant={showForm ? "destructive" : "default"}
+              size="sm"
+              onClick={() => setShowForm(!showForm)}
+              className="cursor-pointer shrink-0 gap-1.5"
+            >
+              <Plus className={`size-3.5 transition-transform duration-200 ${showForm ? "rotate-45" : ""}`} />
+              {showForm ? "Cancel" : "New endpoint"}
+            </Button>
           </div>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => setShowForm(!showForm)}
-            className="cursor-pointer shrink-0"
-          >
-            <Plus className="size-3.5" />
-            {showForm ? "Cancel" : "New endpoint"}
-          </Button>
-        </div>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        {/* Existing endpoints */}
-        {endpoints && endpoints.length === 0 && !showForm && (
-          <p className="text-sm text-muted-foreground">
-            No custom endpoints yet. Click "New endpoint" to create one.
-          </p>
-        )}
-        {endpoints && endpoints.length > 0 && (
-          <div className="space-y-2">
-            {endpoints.map((ep) => (
-              <div
-                key={ep._id}
-                className="flex items-center justify-between rounded-lg border border-border bg-muted/30 px-4 py-3"
-              >
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <code className="font-mono text-sm">/hook/{ep.path}</code>
-                    <span className="rounded bg-muted px-1.5 py-0.5 text-xs font-medium">
-                      {ep.method}
-                    </span>
-                    <span className="text-xs text-muted-foreground">
-                      → {ep.statusCode}
-                    </span>
-                    {ep.authRequired && (
-                      <Shield className="size-3 text-amber-500" />
+
+          <div className="px-6 py-4 space-y-3">
+            {/* Existing endpoints */}
+            {!showForm && endpoints && endpoints.length === 0 && (
+              <div className="flex flex-col items-center gap-2 py-8 text-center">
+                <div className="flex size-12 items-center justify-center rounded-2xl bg-violet-500/10">
+                  <Zap className="size-6 text-violet-400/50" />
+                </div>
+                <p className="text-sm text-muted-foreground">No endpoints yet</p>
+                <p className="text-xs text-muted-foreground/60">Create one to get started — each endpoint returns your configured response.</p>
+              </div>
+            )}
+
+            <AnimatePresence mode="popLayout">
+              {endpoints && endpoints.map((ep) => (
+                <motion.div
+                  key={ep._id}
+                  layout
+                  initial={{ opacity: 0, scale: 0.95 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.95, x: -20 }}
+                  transition={{ duration: 0.2 }}
+                  className="group flex items-center justify-between rounded-lg border border-border/60 bg-card/50 px-4 py-3 transition-all hover:border-violet-500/30 hover:bg-card"
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <code className="font-mono text-sm font-medium">/hook/{ep.path}</code>
+                      <span className={`rounded-md border px-1.5 py-0.5 text-[10px] font-bold tracking-wide ${METHOD_COLORS[ep.method] ?? METHOD_COLORS.ANY}`}>
+                        {ep.method}
+                      </span>
+                      <span className="rounded bg-muted/80 px-1.5 py-0.5 text-[10px] font-mono text-muted-foreground">
+                        {ep.statusCode}
+                      </span>
+                      {ep.authRequired && (
+                        <span className="flex items-center gap-0.5 rounded bg-amber-500/10 px-1.5 py-0.5 text-[10px] text-amber-400">
+                          <Shield className="size-2.5" /> Auth
+                        </span>
+                      )}
+                    </div>
+                    {ep.contentType && (
+                      <p className="mt-0.5 text-[10px] text-muted-foreground/50 font-mono">{ep.contentType}</p>
                     )}
                   </div>
-                </div>
-                <div className="flex items-center gap-1">
-                  <Switch
-                    checked={ep.enabled}
-                    onCheckedChange={() => handleToggle(ep._id, ep.enabled)}
-                    aria-label={`Toggle ${ep.path}`}
-                  />
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="size-7 text-destructive hover:text-destructive"
-                    onClick={() => handleDelete(ep._id, ep.path)}
-                  >
-                    <Trash2 className="size-3.5" />
-                  </Button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
+                  <div className="flex items-center gap-1.5 ml-3">
+                    <Switch
+                      checked={ep.enabled}
+                      onCheckedChange={() => handleToggle(ep._id, ep.enabled)}
+                      aria-label={`Toggle ${ep.path}`}
+                    />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="size-7 text-destructive/60 hover:text-destructive opacity-0 group-hover:opacity-100 transition-opacity"
+                      onClick={() => handleDelete(ep._id, ep.path)}
+                    >
+                      <Trash2 className="size-3.5" />
+                    </Button>
+                  </div>
+                </motion.div>
+              ))}
+            </AnimatePresence>
 
-        {/* New endpoint form */}
-        {showForm && (
-          <div className="space-y-3 rounded-lg border border-dashed border-primary/40 bg-muted/20 p-4">
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-              <div className="space-y-1.5">
-                <Label>Path</Label>
-                <div className="flex items-center gap-0">
-                  <span className="rounded-l-md border border-r-0 border-border bg-muted px-2 py-1.5 text-xs text-muted-foreground">
-                    /hook/
-                  </span>
-                  <Input
-                    value={epPath}
-                    onChange={(e) =>
-                      setEpPath(
-                        e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, ""),
-                      )
-                    }
-                    placeholder="my-endpoint"
-                    maxLength={64}
-                    className="rounded-l-none font-mono text-sm"
-                  />
-                </div>
-              </div>
-              <div className="space-y-1.5">
-                <Label>Method</Label>
-                <select
-                  value={epMethod}
-                  onChange={(e) => setEpMethod(e.target.value as any)}
-                  className="flex h-9 w-full rounded-md border border-border bg-transparent px-3 text-sm"
+            {/* New endpoint form */}
+            <AnimatePresence>
+              {showForm && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: "auto" }}
+                  exit={{ opacity: 0, height: 0 }}
+                  transition={{ duration: 0.25 }}
+                  className="overflow-hidden"
                 >
-                  <option value="ANY">ANY (all methods)</option>
-                  <option value="GET">GET</option>
-                  <option value="POST">POST</option>
-                  <option value="PUT">PUT</option>
-                  <option value="PATCH">PATCH</option>
-                  <option value="DELETE">DELETE</option>
-                </select>
-              </div>
-              <div className="space-y-1.5">
-                <Label>Status code</Label>
-                <Input
-                  value={epStatus}
-                  onChange={(e) => setEpStatus(e.target.value)}
-                  type="number"
-                  min={100}
-                  max={599}
-                  className="font-mono text-sm"
-                />
-              </div>
-            </div>
-            <div className="space-y-1.5">
-              <Label>Content-Type</Label>
-              <Input
-                value={epContentType}
-                onChange={(e) => setEpContentType(e.target.value)}
-                placeholder="application/json"
-                className="font-mono text-sm"
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label>Response body</Label>
-              <Textarea
-                value={epBody}
-                onChange={(e) => setEpBody(e.target.value)}
-                rows={4}
-                className="font-mono text-xs"
-                placeholder='{"ok":true, "status":"success"}'
-              />
-            </div>
-            <div className="flex items-center justify-between">
-              <label className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={epAuth}
-                  onChange={(e) => setEpAuth(e.target.checked)}
-                  className="rounded border-border"
-                />
-                Require auth token
-              </label>
-              <Button
-                type="button"
-                size="sm"
-                onClick={handleCreate}
-                disabled={busy || epPath.length === 0}
-                className="cursor-pointer"
-              >
-                {busy ? (
-                  <Loader2 className="size-3.5 animate-spin" />
-                ) : (
-                  <Plus className="size-3.5" />
-                )}
-                Create
-              </Button>
-            </div>
+                  <div className="space-y-3 rounded-lg border border-dashed border-violet-500/30 bg-violet-500/5 p-4">
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                      <div className="space-y-1.5">
+                        <Label className="text-xs font-medium">Path</Label>
+                        <div className="flex items-center gap-0">
+                          <span className="rounded-l-md border border-r-0 border-border bg-muted/80 px-2 py-1.5 text-xs text-muted-foreground">
+                            /hook/
+                          </span>
+                          <Input
+                            value={epPath}
+                            onChange={(e) => setEpPath(e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, ""))}
+                            placeholder="my-endpoint"
+                            maxLength={64}
+                            className="rounded-l-none font-mono text-sm"
+                          />
+                        </div>
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label className="text-xs font-medium">Method</Label>
+                        <select
+                          value={epMethod}
+                          onChange={(e) => setEpMethod(e.target.value as any)}
+                          className="flex h-9 w-full rounded-md border border-border bg-transparent px-3 text-sm"
+                        >
+                          <option value="ANY">ANY (all methods)</option>
+                          <option value="GET">GET</option>
+                          <option value="POST">POST</option>
+                          <option value="PUT">PUT</option>
+                          <option value="PATCH">PATCH</option>
+                          <option value="DELETE">DELETE</option>
+                        </select>
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label className="text-xs font-medium">Status code</Label>
+                        <Input
+                          value={epStatus}
+                          onChange={(e) => setEpStatus(e.target.value)}
+                          type="number"
+                          min={100}
+                          max={599}
+                          className="font-mono text-sm"
+                        />
+                      </div>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs font-medium">Content-Type</Label>
+                      <Input
+                        value={epContentType}
+                        onChange={(e) => setEpContentType(e.target.value)}
+                        placeholder="application/json"
+                        className="font-mono text-sm"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs font-medium">Response body</Label>
+                      <Textarea
+                        value={epBody}
+                        onChange={(e) => setEpBody(e.target.value)}
+                        rows={4}
+                        className="font-mono text-xs"
+                        placeholder='{"ok":true, "status":"success"}'
+                      />
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <label className="flex items-center gap-2 text-sm cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={epAuth}
+                          onChange={(e) => setEpAuth(e.target.checked)}
+                          className="rounded border-border"
+                        />
+                        <Shield className="size-3.5 text-amber-400" />
+                        Require auth token
+                      </label>
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={handleCreate}
+                        disabled={busy || epPath.length === 0}
+                        className="cursor-pointer bg-violet-600 hover:bg-violet-700 text-white"
+                      >
+                        {busy ? <Loader2 className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}
+                        Create endpoint
+                      </Button>
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
-        )}
-      </CardContent>
-    </Card>
+        </div>
+      </div>
+    </motion.div>
   );
 }
 
@@ -320,9 +361,6 @@ export default function SettingsPage() {
     }
   }, [settings]);
 
-  // Live sample of the custom format (recomputed as the owner types).
-  // MUST stay before the early return below — hooks can't be skipped between
-  // renders (React error #310 otherwise).
   const sample = useMemo(() => sampleKey(keyFormat), [keyFormat]);
 
   if (settings === undefined) {
@@ -364,209 +402,165 @@ export default function SettingsPage() {
       />
 
       <form onSubmit={submit} className="space-y-6">
-        {/* ─── Server Domain ─── */}
-        <Card className="border-border/70">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Globe className="size-4" />
-              Server Domain
-            </CardTitle>
-            <CardDescription>
-              Set a short custom domain for your server. This replaces the long
-              Convex URL in all responses and generated links. Leave empty to use
-              the default Convex URL.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="server-domain">Custom domain</Label>
-              <Input
-                id="server-domain"
-                value={serverDomain}
-                onChange={(e) =>
-                  setServerDomain(
-                    e.target.value
-                      .toLowerCase()
-                      .replace(/[^a-z0-9.-]/g, ""),
-                  )
-                }
-                placeholder="panxcz"
-                maxLength={63}
-              />
-              <p className="text-xs text-muted-foreground">
-                Just the name — e.g. <code className="rounded bg-muted px-1 py-0.5 font-mono">panxcz</code> becomes{" "}
-                <code className="rounded bg-muted px-1 py-0.5 font-mono">https://panxcz.site</code>. Point your domain's DNS to your hosting provider and set up an SSL cert.
-              </p>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="endpoint-auth-token">Endpoint auth token</Label>
-              <Input
-                id="endpoint-auth-token"
-                value={endpointAuthToken}
-                onChange={(e) => setEndpointAuthToken(e.target.value)}
-                placeholder="your-secret-token-here"
-                maxLength={128}
-                type="password"
-              />
-              <p className="text-xs text-muted-foreground">
-                Bearer token for custom endpoints that have "Require auth token" enabled. Clients must send{" "}
-                <code className="rounded bg-muted px-1 py-0.5 font-mono">Authorization: Bearer &lt;token&gt;</code> or{" "}
-                <code className="rounded bg-muted px-1 py-0.5 font-mono">?token=&lt;token&gt;</code>.
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* ─── Key Pricing ─── */}
-        <Card className="border-border/70">
-          <CardHeader>
-            <CardTitle className="text-base">Key pricing & defaults</CardTitle>
-            <CardDescription>
-              Generating a key always deducts the price from the generator's
-              balance. Use limits and lifetime default to what new keys get when
-              the admin leaves them blank. The prefix controls the classic
-              license key format, e.g. "NS" → NS-XXXX-… or "LIC" → LIC-XXXX-…
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-4">
-            <div className="space-y-2">
-              <Label htmlFor="key-price">Key price (balance per key)</Label>
-              <Input
-                id="key-price"
-                type="number"
-                min={0}
-                value={keyPrice}
-                onChange={(e) => setKeyPrice(e.target.value)}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="default-uses">Default max uses (0 = unlimited)</Label>
-              <Input
-                id="default-uses"
-                type="number"
-                min={0}
-                value={defaultKeyUses}
-                onChange={(e) => setDefaultKeyUses(e.target.value)}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="default-hours">Default lifetime (hours, 0 = never)</Label>
-              <Input
-                id="default-hours"
-                type="number"
-                min={0}
-                value={defaultKeyHours}
-                onChange={(e) => setDefaultKeyHours(e.target.value)}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="key-prefix">License key prefix (A-Z, 0-9)</Label>
-              <Input
-                id="key-prefix"
-                value={keyPrefix}
-                onChange={(e) => setKeyPrefix(e.target.value.toUpperCase())}
-                placeholder="NS"
-                maxLength={10}
-              />
-            </div>
-          </CardContent>
-
-          <CardContent className="border-t border-border/70 pt-5">
-            <div className="space-y-2">
-              <Label htmlFor="key-format">Custom key format (optional)</Label>
-              <Input
-                id="key-format"
-                value={keyFormat}
-                onChange={(e) => setKeyFormat(e.target.value.toUpperCase())}
-                placeholder="NS-XXXX-XXXX-XXXX-XXXX-XXXX"
-                maxLength={48}
-                className="font-mono"
-              />
-              <p className="text-xs leading-relaxed text-muted-foreground">
-                Template: <code className="rounded bg-muted px-1 py-0.5 font-mono">X</code>{" "}
-                = random letter/digit,{" "}
-                <code className="rounded bg-muted px-1 py-0.5 font-mono">#</code>{" "}
-                = random digit, everything else stays literal. Leave empty to
-                keep the classic prefix format{" "}
-                <code className="rounded bg-muted px-1 py-0.5 font-mono">
-                  {keyPrefix || "NS"}-XXXX-XXXX-XXXX-XXXX-XXXX
-                </code>
-                . Existing keys are never affected — the format only applies to
-                newly generated keys.
-              </p>
-              <div className="flex flex-wrap gap-2 pt-1">
-                {FORMAT_PRESETS.map((preset) => (
-                  <button
-                    key={preset.template}
-                    type="button"
-                    onClick={() => setKeyFormat(preset.template)}
-                    className="cursor-pointer rounded-full border border-border bg-muted/40 px-3 py-1 text-xs transition-colors hover:border-primary/40 hover:bg-muted"
-                    title={preset.hint}
-                  >
-                    <code className="font-mono">{preset.template}</code>
-                  </button>
-                ))}
-              </div>
-              {sample.length > 0 && (
-                <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/40 px-3 py-2">
-                  <KeyRound className="size-3.5 shrink-0 text-muted-foreground" />
-                  <span className="text-xs text-muted-foreground">
-                    Example key:
-                  </span>
-                  <code className="min-w-0 flex-1 truncate font-mono text-xs">
-                    {sample}
-                  </code>
+        <motion.div variants={stagger} initial="hidden" animate="visible" className="space-y-6">
+          {/* ─── Server Domain ─── */}
+          <motion.div variants={cardVariants}>
+            <Card className="border-border/70 overflow-hidden">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <Globe className="size-4 text-blue-400" />
+                  Server Domain
+                </CardTitle>
+                <CardDescription>
+                  Set a short custom domain for your server. Leave empty to use the default Convex URL.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="server-domain">Custom domain</Label>
+                  <Input
+                    id="server-domain"
+                    value={serverDomain}
+                    onChange={(e) => setServerDomain(e.target.value.toLowerCase().replace(/[^a-z0-9.-]/g, ""))}
+                    placeholder="panxcz"
+                    maxLength={63}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    e.g. <code className="rounded bg-muted px-1 py-0.5 font-mono">panxcz</code> → <code className="rounded bg-muted px-1 py-0.5 font-mono">https://panxcz.site</code>
+                  </p>
                 </div>
-              )}
-            </div>
-          </CardContent>
-        </Card>
+                <div className="space-y-2">
+                  <Label htmlFor="endpoint-auth-token">Endpoint auth token</Label>
+                  <Input
+                    id="endpoint-auth-token"
+                    value={endpointAuthToken}
+                    onChange={(e) => setEndpointAuthToken(e.target.value)}
+                    placeholder="your-secret-token-here"
+                    maxLength={128}
+                    type="password"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Bearer token for custom endpoints with auth enabled.
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+          </motion.div>
 
-        {/* ─── Maintenance ─── */}
-        <Card className="border-border/70">
-          <CardHeader>
-            <CardTitle className="text-base">Maintenance</CardTitle>
-            <CardDescription>
-              While maintenance is on, every /connect call is rejected with the
-              message below — useful for updates or downtime.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex items-center justify-between rounded-lg border border-border bg-muted/40 px-4 py-3">
-              <div>
-                <p className="text-sm font-medium">Block all connects</p>
-                <p className="text-xs text-muted-foreground">
-                  Clients get 503 with your message.
-                </p>
-              </div>
-              <Switch
-                checked={maintenance}
-                onCheckedChange={setMaintenance}
-                aria-label="Maintenance mode"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="down-message">Message shown to clients</Label>
-              <Input
-                id="down-message"
-                value={downMessage}
-                onChange={(e) => setDownMessage(e.target.value)}
-                placeholder="Server is under maintenance, come back later"
-                maxLength={200}
-              />
-            </div>
-          </CardContent>
-        </Card>
+          {/* ─── Key Pricing ─── */}
+          <motion.div variants={cardVariants}>
+            <Card className="border-border/70">
+              <CardHeader>
+                <CardTitle className="text-base">Key pricing & defaults</CardTitle>
+                <CardDescription>
+                  Generating a key always deducts the price from the generator's balance.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-4">
+                <div className="space-y-2">
+                  <Label htmlFor="key-price">Key price (balance per key)</Label>
+                  <Input id="key-price" type="number" min={0} value={keyPrice} onChange={(e) => setKeyPrice(e.target.value)} />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="default-uses">Default max uses (0 = unlimited)</Label>
+                  <Input id="default-uses" type="number" min={0} value={defaultKeyUses} onChange={(e) => setDefaultKeyUses(e.target.value)} />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="default-hours">Default lifetime (hours, 0 = never)</Label>
+                  <Input id="default-hours" type="number" min={0} value={defaultKeyHours} onChange={(e) => setDefaultKeyHours(e.target.value)} />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="key-prefix">License key prefix (A-Z, 0-9)</Label>
+                  <Input id="key-prefix" value={keyPrefix} onChange={(e) => setKeyPrefix(e.target.value.toUpperCase())} placeholder="NS" maxLength={10} />
+                </div>
+              </CardContent>
+
+              <CardContent className="border-t border-border/70 pt-5">
+                <div className="space-y-2">
+                  <Label htmlFor="key-format">Custom key format (optional)</Label>
+                  <Input
+                    id="key-format"
+                    value={keyFormat}
+                    onChange={(e) => setKeyFormat(e.target.value.toUpperCase())}
+                    placeholder="NS-XXXX-XXXX-XXXX-XXXX-XXXX"
+                    maxLength={48}
+                    className="font-mono"
+                  />
+                  <p className="text-xs leading-relaxed text-muted-foreground">
+                    Template: <code className="rounded bg-muted px-1 py-0.5 font-mono">X</code> = random letter/digit, <code className="rounded bg-muted px-1 py-0.5 font-mono">#</code> = random digit. Leave empty for prefix format.
+                  </p>
+                  <div className="flex flex-wrap gap-2 pt-1">
+                    {FORMAT_PRESETS.map((preset) => (
+                      <motion.button
+                        key={preset.template}
+                        type="button"
+                        whileHover={{ scale: 1.03 }}
+                        whileTap={{ scale: 0.97 }}
+                        onClick={() => setKeyFormat(preset.template)}
+                        className="cursor-pointer rounded-full border border-border bg-muted/40 px-3 py-1 text-xs transition-colors hover:border-primary/40 hover:bg-muted"
+                        title={preset.hint}
+                      >
+                        <code className="font-mono">{preset.template}</code>
+                      </motion.button>
+                    ))}
+                  </div>
+                  <AnimatePresence mode="wait">
+                    {sample.length > 0 && (
+                      <motion.div
+                        key={sample}
+                        initial={{ opacity: 0, y: -5 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: 5 }}
+                        className="flex items-center gap-2 rounded-lg border border-border bg-muted/40 px-3 py-2"
+                      >
+                        <KeyRound className="size-3.5 shrink-0 text-muted-foreground" />
+                        <span className="text-xs text-muted-foreground">Example key:</span>
+                        <code className="min-w-0 flex-1 truncate font-mono text-xs">{sample}</code>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
+              </CardContent>
+            </Card>
+          </motion.div>
+
+          {/* ─── Maintenance ─── */}
+          <motion.div variants={cardVariants}>
+            <Card className="border-border/70">
+              <CardHeader>
+                <CardTitle className="text-base">Maintenance</CardTitle>
+                <CardDescription>
+                  Block all /connect calls during updates or downtime.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex items-center justify-between rounded-lg border border-border bg-muted/40 px-4 py-3">
+                  <div>
+                    <p className="text-sm font-medium">Block all connects</p>
+                    <p className="text-xs text-muted-foreground">Clients get 503 with your message.</p>
+                  </div>
+                  <Switch checked={maintenance} onCheckedChange={setMaintenance} aria-label="Maintenance mode" />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="down-message">Message shown to clients</Label>
+                  <Input id="down-message" value={downMessage} onChange={(e) => setDownMessage(e.target.value)} placeholder="Server is under maintenance" maxLength={200} />
+                </div>
+              </CardContent>
+            </Card>
+          </motion.div>
+        </motion.div>
 
         <div className="flex justify-end">
-          <Button type="submit" disabled={busy} className="cursor-pointer">
-            {busy ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}
-            Save settings
-          </Button>
+          <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
+            <Button type="submit" disabled={busy} className="cursor-pointer gap-2">
+              {busy ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}
+              Save settings
+            </Button>
+          </motion.div>
         </div>
       </form>
 
-      {/* ─── Custom Endpoints (separate from settings form) ─── */}
+      {/* ─── Custom Endpoints (visually distinct, not inside the form) ─── */}
       <CustomEndpointsSection />
     </div>
   );

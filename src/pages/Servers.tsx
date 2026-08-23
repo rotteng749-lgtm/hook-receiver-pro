@@ -35,6 +35,7 @@ import { PageHeader } from "@/components/panel/PageHeader";
 import { api } from "@/convex/_generated/api";
 import type { Doc } from "@/convex/_generated/dataModel";
 import { formatRelative } from "@/lib/format";
+import { motion } from "framer-motion";
 import { useMutation, useQuery } from "convex/react";
 import { Loader2, Pencil, Plus, RotateCcw, Server as ServerIcon, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -301,6 +302,7 @@ export default function Servers() {
         actions={<NewServerDialog />}
       />
 
+      <motion.div initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
       <Card className="border-border/70">
         <CardHeader>
           <div className="flex items-start justify-between gap-4">
@@ -395,6 +397,7 @@ export default function Servers() {
           </p>
         </CardContent>
       </Card>
+      </motion.div>
 
       {servers.length === 0 ? (
         <Card className="border-dashed border-border bg-card/50">
@@ -409,8 +412,14 @@ export default function Servers() {
       ) : (
         <div className="overflow-hidden rounded-xl border border-border bg-card">
           <ul className="divide-y divide-border">
-            {servers.map((server) => (
-              <li key={server._id} className="flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center">
+            {servers.map((server, i) => (
+              <motion.li
+                key={server._id}
+                initial={{ opacity: 0, x: -10 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ delay: i * 0.05, duration: 0.25 }}
+                className="flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center"
+              >
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
                     <p className="truncate text-sm font-medium">{server.name}</p>
@@ -470,7 +479,7 @@ export default function Servers() {
                     </AlertDialog>
                   </div>
                 )}
-              </li>
+              </motion.li>
             ))}
           </ul>
         </div>
