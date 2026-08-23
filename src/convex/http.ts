@@ -857,6 +857,25 @@ const connect = httpAction(async (ctx, request) => {
     });
   }
 
+  // IP whitelist/blacklist check
+  const ipWhitelist = keyDoc.ipWhitelist ?? [];
+  const ipBlacklist = keyDoc.ipBlacklist ?? [];
+  if (ipBlacklist.length > 0 && ipBlacklist.some((blocked) => ip.startsWith(blocked.trim()))) {
+    await ctx.runMutation(internal.nameserver.recordConnect, { keyId: keyDoc._id, key, serverId: server._id, ip, userAgent: ua, deviceId: device, game, version, resource, ok: false, reason: "ip_blacklisted" });
+    return await fail(403, "ip_blacklisted", "your IP is blacklisted");
+  }
+  if (ipWhitelist.length > 0 && !ipWhitelist.some((allowed) => ip.startsWith(allowed.trim()))) {
+    await ctx.runMutation(internal.nameserver.recordConnect, { keyId: keyDoc._id, key, serverId: server._id, ip, userAgent: ua, deviceId: device, game, version, resource, ok: false, reason: "ip_not_whitelisted" });
+    return await fail(403, "ip_not_whitelisted", "your IP is not whitelisted");
+  }
+
+  // Per-key game filtering: if a game is assigned to this key, reject mismatched games.
+  const keyGame = keyDoc.game ?? "";
+  if (keyGame.length > 0 && game.length > 0 && game.toUpperCase() !== keyGame.toUpperCase()) {
+    await ctx.runMutation(internal.nameserver.recordConnect, { keyId: keyDoc._id, key, serverId: server._id, ip, userAgent: ua, deviceId: device, game, version, resource, ok: false, reason: "game_mismatch" });
+    return await fail(403, "game_mismatch", `this key is assigned to ${keyGame} only`);
+  }
+
   // Device gate (maxDevices semantics):
   //   • known device           → allowed, no new binding
   //   • key already bound + no device sent → explicit "missing device"
@@ -896,6 +915,29 @@ const connect = httpAction(async (ctx, request) => {
     bindDevice: true,
   });
   accessLog(request, 200, "-");
+
+  // Webhook notification (fire-and-forget)
+  const webhookUrl = settings?.webhookUrl ?? "";
+  if (webhookUrl.length > 0) {
+    try {
+      await fetch(webhookUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          event: "connect",
+          key,
+          server: server.name,
+          ip,
+          device: device || null,
+          game: game || null,
+          timestamp: Date.now(),
+        }),
+      });
+    } catch {
+      // webhook failure is non-blocking
+    }
+  }
+
   return send({
     ok: true,
     server: { name: server.name, code: server.code },

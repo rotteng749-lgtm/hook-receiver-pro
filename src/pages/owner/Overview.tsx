@@ -1,6 +1,6 @@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { PageHeader } from "@/components/panel/PageHeader";
 import { api } from "@/convex/_generated/api";
 import { formatRelative } from "@/lib/format";
@@ -9,7 +9,9 @@ import { useQuery } from "convex/react";
 import {
   Activity,
   ArrowRight,
+  BarChart3,
   Coins,
+  Gamepad2,
   KeyRound,
   Loader2,
   Server,
@@ -19,6 +21,18 @@ import {
   Wallet,
 } from "lucide-react";
 import { useNavigate } from "react-router";
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+  PieChart,
+  Pie,
+  Cell,
+} from "recharts";
 
 const cardVariants = {
   hidden: { opacity: 0, y: 20, scale: 0.95 },
@@ -76,6 +90,7 @@ export default function OwnerOverview() {
   const navigate = useNavigate();
   const stats = useQuery(api.nameserver.overviewStats);
   const connections = useQuery(api.nameserver.listConnections);
+  const chartData = useQuery(api.nameserver.chartStats);
 
   if (stats === undefined) {
     return (
@@ -156,6 +171,70 @@ export default function OwnerOverview() {
           index={5}
         />
       </div>
+
+      {/* Charts */}
+      {chartData && (
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <motion.div initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4, duration: 0.35 }}>
+            <Card className="border-border/70">
+              <CardHeader className="pb-2">
+                <CardTitle className="flex items-center gap-2 text-sm">
+                  <BarChart3 className="size-4 text-violet-500" />
+                  Connections (Last 7 Days)
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="pt-2">
+                {chartData.daily.length > 0 ? (
+                  <ResponsiveContainer width="100%" height={220}>
+                    <BarChart data={chartData.daily}>
+                      <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
+                      <XAxis dataKey="date" fontSize={11} tickLine={false} />
+                      <YAxis fontSize={11} tickLine={false} allowDecimals={false} />
+                      <Tooltip
+                        contentStyle={{ borderRadius: 8, border: "1px solid hsl(var(--border))", background: "hsl(var(--card))" }}
+                        labelStyle={{ fontSize: 12 }}
+                      />
+                      <Bar dataKey="success" name="Success" fill="#22c55e" radius={[4, 4, 0, 0]} />
+                      <Bar dataKey="failed" name="Failed" fill="#ef4444" radius={[4, 4, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <p className="py-8 text-center text-sm text-muted-foreground">No data yet</p>
+                )}
+              </CardContent>
+            </Card>
+          </motion.div>
+
+          <motion.div initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.45, duration: 0.35 }}>
+            <Card className="border-border/70">
+              <CardHeader className="pb-2">
+                <CardTitle className="flex items-center gap-2 text-sm">
+                  <Gamepad2 className="size-4 text-blue-500" />
+                  Connections by Game
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="pt-2">
+                {chartData.games.length > 0 ? (
+                  <ResponsiveContainer width="100%" height={220}>
+                    <PieChart>
+                      <Pie data={chartData.games} dataKey="total" nameKey="game" cx="50%" cy="50%" innerRadius={50} outerRadius={80} paddingAngle={3} label={({ game, percent }) => `${game} ${(percent * 100).toFixed(0)}%`}>
+                        {chartData.games.map((_, i) => (
+                          <Cell key={i} fill={["#22c55e", "#3b82f6", "#f59e0b", "#8b5cf6", "#ef4444", "#06b6d4"][i % 6]} />
+                        ))}
+                      </Pie>
+                      <Tooltip
+                        contentStyle={{ borderRadius: 8, border: "1px solid hsl(var(--border))", background: "hsl(var(--card))" }}
+                      />
+                    </PieChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <p className="py-8 text-center text-sm text-muted-foreground">No game data yet</p>
+                )}
+              </CardContent>
+            </Card>
+          </motion.div>
+        </div>
+      )}
 
       {/* Quick actions */}
       <motion.div

@@ -257,6 +257,7 @@ export default function Servers() {
         keyFormat: settings.keyFormat || undefined,
         serverDomain: domainInput || undefined,
         endpointAuthToken: settings.endpointAuthToken || undefined,
+        webhookUrl: settings.webhookUrl || undefined,
       });
       setEditingDomain(false);
       toast.success("Server URL updated");

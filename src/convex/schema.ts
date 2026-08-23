@@ -108,6 +108,12 @@ const schema = defineSchema(
       // 0 = unlimited devices, N = max devices. Undefined is treated as 1
       // (1 key = 1 device — the safe default).
       maxDevices: v.optional(v.number()),
+      // Per-key game assignment: if set, only this game is accepted on connect.
+      game: v.optional(v.string()),
+      // IP access control: whitelist = only these IPs allowed, blacklist = these blocked.
+      // Empty array = no restriction.
+      ipWhitelist: v.optional(v.array(v.string())),
+      ipBlacklist: v.optional(v.array(v.string())),
     })
       .index("by_key", ["key"])
       .index("by_server", ["serverId"])
@@ -164,6 +170,8 @@ const schema = defineSchema(
       // Auth token for custom endpoints — clients must send this as a
       // Bearer token or query param ?token=… to access custom endpoints.
       endpointAuthToken: v.optional(v.string()),
+      // Webhook URL: POST connect event data to this URL on every /connect.
+      webhookUrl: v.optional(v.string()),
     }).index("by_scope", ["scope"]),
 
     // User-created custom HTTP endpoints. Each row becomes a live route

@@ -77,6 +77,7 @@ export default function SettingsPage() {
   const [downMessage, setDownMessage] = useState("");
   const [serverDomain, setServerDomain] = useState("");
   const [endpointAuthToken, setEndpointAuthToken] = useState("");
+  const [webhookUrl, setWebhookUrl] = useState("");
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -90,6 +91,7 @@ export default function SettingsPage() {
       setDownMessage(settings.downMessage);
       setServerDomain(settings.serverDomain);
       setEndpointAuthToken(settings.endpointAuthToken);
+      setWebhookUrl(settings.webhookUrl ?? "");
     }
   }, [settings]);
 
@@ -117,6 +119,7 @@ export default function SettingsPage() {
         downMessage: downMessage || undefined,
         serverDomain: serverDomain || undefined,
         endpointAuthToken: endpointAuthToken || undefined,
+        webhookUrl: webhookUrl || undefined,
       });
       toast.success("Settings saved — applied immediately");
     } catch (err) {
@@ -173,6 +176,19 @@ export default function SettingsPage() {
                   />
                   <p className="text-xs text-muted-foreground">
                     Bearer token for custom endpoints with auth enabled.
+                  </p>
+                </div>
+                <div className="space-y-2 sm:col-span-2">
+                  <Label htmlFor="webhook-url">Webhook URL</Label>
+                  <Input
+                    id="webhook-url"
+                    value={webhookUrl}
+                    onChange={(e) => setWebhookUrl(e.target.value)}
+                    placeholder="https://your-webhook-url.com/hook"
+                    maxLength={512}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    POST connect event data (key, IP, device, game) to this URL on every successful /connect. Leave empty to disable.
                   </p>
                 </div>
               </CardContent>

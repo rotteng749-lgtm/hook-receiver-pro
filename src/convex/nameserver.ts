@@ -93,6 +93,7 @@ export const getSettings = query({
       keyFormat: doc?.keyFormat ?? DEFAULT_SETTINGS.keyFormat,
       serverDomain: doc?.serverDomain ?? DEFAULT_SETTINGS.serverDomain,
       endpointAuthToken: doc?.endpointAuthToken ?? DEFAULT_SETTINGS.endpointAuthToken,
+      webhookUrl: doc?.webhookUrl ?? "",
     };
   },
 });
@@ -108,6 +109,7 @@ export const updateSettings = mutation({
     keyFormat: v.optional(v.string()),
     serverDomain: v.optional(v.string()),
     endpointAuthToken: v.optional(v.string()),
+    webhookUrl: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     await requireRole(ctx, ["owner"]);
@@ -134,6 +136,7 @@ export const updateSettings = mutation({
     const endpointAuthToken = (args.endpointAuthToken ?? "")
       .trim()
       .slice(0, 128);
+    const webhookUrl = (args.webhookUrl ?? "").trim().slice(0, 512);
     const patch = {
       keyPrice: Math.max(0, Math.round(args.keyPrice)),
       defaultKeyUses: Math.max(0, Math.round(args.defaultKeyUses)),
@@ -145,6 +148,7 @@ export const updateSettings = mutation({
         keyFormat.includes("X") || keyFormat.includes("#") ? keyFormat : "",
       serverDomain,
       endpointAuthToken,
+      webhookUrl,
     };
     const doc = await getSettingsDoc(ctx);
     if (doc) {
@@ -420,10 +424,10 @@ export const generateKey = mutation({
     uses: v.optional(v.number()),
     hours: v.optional(v.number()),
     maxDevices: v.optional(v.number()),
-    // Manual key value; empty = auto-generate with the configured format.
-    // Normalized exactly like /connect does (uppercase, control chars
-    // stripped, max 80) so the key always matches at connect time.
     customKey: v.optional(v.string()),
+    game: v.optional(v.string()),
+    ipWhitelist: v.optional(v.array(v.string())),
+    ipBlacklist: v.optional(v.array(v.string())),
   },
   handler: async (ctx, args) => {
     const { userId, user } = await requireRole(ctx, ["owner", "admin"]);
@@ -497,6 +501,9 @@ export const generateKey = mutation({
       cost,
       note: args.note?.trim().slice(0, 160) || undefined,
       maxDevices,
+      game: args.game?.trim() || undefined,
+      ipWhitelist: args.ipWhitelist?.filter((ip) => ip.trim().length > 0) || undefined,
+      ipBlacklist: args.ipBlacklist?.filter((ip) => ip.trim().length > 0) || undefined,
     });
     if (!isOwner) {
       await ctx.db.patch(userId, { balance: balance - cost });
@@ -908,7 +915,190 @@ export const getCustomEndpointByPath = internalQuery({
   },
 });
 
+/* ------------------------- key management ------------------------- */
+
+/** Update a key's game assignment, IP whitelist, IP blacklist. */
+export const updateKeySettings = mutation({
+  args: {
+    id: v.id("connectKeys"),
+    game: v.optional(v.string()),
+    ipWhitelist: v.optional(v.array(v.string())),
+    ipBlacklist: v.optional(v.array(v.string())),
+    note: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const { user } = await requireRole(ctx, ["owner", "admin"]);
+    const key = await ctx.db.get(args.id);
+    if (key === null) throw new Error("Key not found");
+    if (roleOf(user) !== "owner" && key.createdBy !== user._id) throw new Error("Forbidden");
+    const patch: Record<string, unknown> = {};
+    if (args.game !== undefined) patch.game = args.game?.trim() || undefined;
+    if (args.ipWhitelist !== undefined) patch.ipWhitelist = args.ipWhitelist.filter((ip) => ip.trim().length > 0);
+    if (args.ipBlacklist !== undefined) patch.ipBlacklist = args.ipBlacklist.filter((ip) => ip.trim().length > 0);
+    if (args.note !== undefined) patch.note = args.note?.trim().slice(0, 160) || undefined;
+    await ctx.db.patch(args.id, patch);
+  },
+});
+
+/** Batch generate N keys at once. */
+export const batchGenerateKeys = mutation({
+  args: {
+    serverId: v.id("servers"),
+    count: v.number(),
+    uses: v.optional(v.number()),
+    hours: v.optional(v.number()),
+    maxDevices: v.optional(v.number()),
+    game: v.optional(v.string()),
+    ipWhitelist: v.optional(v.array(v.string())),
+    ipBlacklist: v.optional(v.array(v.string())),
+    note: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const { userId, user } = await requireRole(ctx, ["owner", "admin"]);
+    const server = await ctx.db.get(args.serverId);
+    if (server === null) throw new Error("Server not found");
+    if (server.status !== "active") throw new Error("Server is offline");
+    const count = Math.max(1, Math.min(100, Math.round(args.count)));
+    const settings = await getSettingsDoc(ctx);
+    const maxUses = Math.max(0, Math.round(args.uses ?? settings?.defaultKeyUses ?? DEFAULT_SETTINGS.defaultKeyUses));
+    const hours = Math.max(0, Math.round(args.hours ?? settings?.defaultKeyHours ?? DEFAULT_SETTINGS.defaultKeyHours));
+    const cost = (settings?.keyPrice ?? DEFAULT_SETTINGS.keyPrice) * count;
+    const prefix = settings?.keyPrefix ?? DEFAULT_SETTINGS.keyPrefix;
+    const keyFormat = settings?.keyFormat ?? "";
+    const isOwner = roleOf(user) === "owner";
+    const balance = user.balance ?? 0;
+    if (!isOwner && balance < cost) throw new Error(`Insufficient balance — generating ${count} keys costs ${cost}, your balance is ${balance}`);
+    const maxDevices = args.maxDevices === undefined ? 1 : Math.max(0, Math.round(args.maxDevices));
+    const expiresAt = hours > 0 ? Date.now() + hours * 60 * 60 * 1000 : 0;
+    const createdKeys: { key: string; id: Id<"connectKeys"> }[] = [];
+    for (let i = 0; i < count; i++) {
+      let key = generateKeyValue(prefix, keyFormat);
+      for (let j = 0; j < 10; j++) {
+        const dup = await ctx.db.query("connectKeys").withIndex("by_key", (q) => q.eq("key", key)).first();
+        if (dup === null) break;
+        key = generateKeyValue(prefix, keyFormat);
+      }
+      const id = await ctx.db.insert("connectKeys", {
+        key,
+        serverId: server._id,
+        createdBy: userId,
+        status: "active",
+        maxUses,
+        uses: 0,
+        expiresAt,
+        cost: settings?.keyPrice ?? DEFAULT_SETTINGS.keyPrice,
+        note: args.note?.trim().slice(0, 160) || undefined,
+        maxDevices,
+        game: args.game?.trim() || undefined,
+        ipWhitelist: args.ipWhitelist?.filter((ip) => ip.trim().length > 0) || undefined,
+        ipBlacklist: args.ipBlacklist?.filter((ip) => ip.trim().length > 0) || undefined,
+      });
+      createdKeys.push({ key, id });
+    }
+    if (!isOwner) await ctx.db.patch(userId, { balance: balance - cost });
+    return { count: createdKeys.length, cost, balance: isOwner ? balance : balance - cost, keys: createdKeys };
+  },
+});
+
+/** Export keys as JSON (for CSV, frontend converts). */
+export const exportKeys = query({
+  args: {},
+  handler: async (ctx) => {
+    const { user } = await requireRole(ctx, ["owner", "admin"]);
+    const isOwner = roleOf(user) === "owner";
+    const keys = isOwner
+      ? await ctx.db.query("connectKeys").order("desc").take(2000)
+      : await ctx.db.query("connectKeys").withIndex("by_creator", (q) => q.eq("createdBy", user._id)).order("desc").take(2000);
+    const serverIds = new Set(keys.map((k) => k.serverId));
+    const servers = new Map<Id<"servers">, Doc<"servers">>();
+    for (const id of serverIds) { const s = await ctx.db.get(id); if (s) servers.set(id, s); }
+    return keys.map((k) => ({
+      key: k.key,
+      status: k.status,
+      server: servers.get(k.serverId)?.name ?? "unknown",
+      game: k.game ?? "",
+      maxDevices: k.maxDevices ?? 1,
+      devices: (k.devices ?? []).length,
+      uses: k.uses,
+      maxUses: k.maxUses,
+      expiresAt: k.expiresAt > 0 ? new Date(k.expiresAt).toISOString() : "never",
+      note: k.note ?? "",
+      ipWhitelist: (k.ipWhitelist ?? []).join(", "),
+      ipBlacklist: (k.ipBlacklist ?? []).join(", "),
+      createdAt: new Date(k._creationTime).toISOString(),
+    }));
+  },
+});
+
+/** Per-key connect history (last N connections for a specific key). */
+export const keyConnectHistory = query({
+  args: { keyId: v.id("connectKeys"), limit: v.optional(v.number()) },
+  handler: async (ctx, args) => {
+    const { user } = await requireRole(ctx, ["owner", "admin"]);
+    const key = await ctx.db.get(args.keyId);
+    if (key === null) throw new Error("Key not found");
+    if (roleOf(user) !== "owner" && key.createdBy !== user._id) throw new Error("Forbidden");
+    const limit = Math.max(1, Math.min(100, args.limit ?? 50));
+    return await ctx.db.query("connections").withIndex("by_key", (q) => q.eq("keyId", args.keyId)).order("desc").take(limit);
+  },
+});
+
 /* ------------------------------ stats ------------------------------ */
+
+/** Enhanced stats for charts: connections per day, per game, per server. */
+export const chartStats = query({
+  args: {},
+  handler: async (ctx) => {
+    const { user } = await requireRole(ctx, ["owner", "admin"]);
+    const isOwner = roleOf(user) === "owner";
+    let conns: Doc<"connections">[];
+    if (isOwner) {
+      conns = await ctx.db.query("connections").order("desc").take(500);
+    } else {
+      const myKeys = await ctx.db
+        .query("connectKeys")
+        .withIndex("by_creator", (q) => q.eq("createdBy", user._id))
+        .take(300);
+      const keyIds = myKeys.map((k) => k._id);
+      if (keyIds.length === 0) {
+        conns = [];
+      } else {
+        conns = await ctx.db
+          .query("connections")
+          .filter((q) => q.or(...keyIds.map((id) => q.eq(q.field("keyId"), id))))
+          .order("desc")
+          .take(500);
+      }
+    }
+    // Connections per day (last 7 days)
+    const now = Date.now();
+    const dayMs = 86400000;
+    const dailyMap = new Map<string, { total: number; success: number; failed: number }>();
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(now - i * dayMs);
+      const label = `${d.getMonth() + 1}/${d.getDate()}`;
+      dailyMap.set(label, { total: 0, success: 0, failed: 0 });
+    }
+    // Game breakdown
+    const gameMap = new Map<string, { total: number; success: number }>();
+    for (const c of conns) {
+      const d = new Date(c._creationTime);
+      const label = `${d.getMonth() + 1}/${d.getDate()}`;
+      const entry = dailyMap.get(label);
+      if (entry) {
+        entry.total++;
+        if (c.ok) entry.success++; else entry.failed++;
+      }
+      const game = c.game || "Unknown";
+      const ge = gameMap.get(game);
+      if (ge) { ge.total++; if (c.ok) ge.success++; }
+      else gameMap.set(game, { total: 1, success: c.ok ? 1 : 0 });
+    }
+    const daily = [...dailyMap.entries()].map(([date, v]) => ({ date, ...v }));
+    const games = [...gameMap.entries()].map(([game, v]) => ({ game, ...v }));
+    return { daily, games, totalConnections: conns.length, totalSuccess: conns.filter((c) => c.ok).length };
+  },
+});
 
 export const overviewStats = query({
   args: {},
