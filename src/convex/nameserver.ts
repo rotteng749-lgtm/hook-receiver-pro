@@ -45,7 +45,7 @@ export const DEFAULT_SETTINGS = {
   //   "ML_#########"     → ML_227182973
   //   "ML_XXXXXXXXXXXX"  → ML_EDBBC4CA420B
   keyFormat: "",
-  serverDomain: "panxcz", // default domain → panxcz.site
+  serverDomain: "", // empty = uses Convex URL by default; set custom domain in Settings
   endpointAuthToken: "", // Bearer token for custom endpoints
 } as const;
 

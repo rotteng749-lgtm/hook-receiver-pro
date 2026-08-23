@@ -113,12 +113,12 @@ function buildTutorial(connectUrl: string) {
   ].join("\n");
 }
 
-/** Build the connect URL: uses custom domain if set, otherwise Panxcz.site. */
+/** Build the connect URL: uses custom domain if set, otherwise Convex site. */
 function getConnectUrl(domain: string): string {
   if (domain.length > 0) {
     return domain.includes(".") ? `https://${domain}` : `https://${domain}.site`;
   }
-  return "https://panxcz.site";
+  return "https://lovable-dove-890.convex.site";
 }
 
 async function tgFetch(method: string, body: Record<string, unknown> = {}) {
