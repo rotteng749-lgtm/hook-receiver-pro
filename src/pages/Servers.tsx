@@ -55,7 +55,7 @@ function buildConnectBase(domain: string): string {
   if (domain.length > 0) {
     return domain.includes(".") ? `https://${domain}` : `https://${domain}.site`;
   }
-  return "https://panxcz.convex.site";
+  return "https://lovable-dove-890.convex.site";
 }
 
 function slugify(name: string): string {
