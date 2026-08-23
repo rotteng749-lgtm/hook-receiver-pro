@@ -1189,14 +1189,65 @@ const customEndpoint = httpAction(async (ctx, request) => {
     }
   }
 
-  accessLog(request, endpoint.statusCode, endpoint.body.length);
+  accessLog(request, endpoint.statusCode, "-");
   const ct = endpoint.contentType || "application/json";
+  const cors = corsFor(request);
+
+  // File-based response: serve uploaded file from Convex storage
+  if (endpoint.responseType === "file" && endpoint.fileId) {
+    let file: Doc<"files"> | null = null;
+    try {
+      file = await ctx.runQuery(internal.files.getAny, {
+        fileId: endpoint.fileId as Id<"files">,
+      });
+    } catch {
+      file = null;
+    }
+    if (file === null) {
+      return json({ error: "linked file not found" }, 500);
+    }
+    const storageUrl = await ctx.storage.getUrl(file.storageId);
+    if (storageUrl === null) {
+      return json({ error: "file missing from storage" }, 500);
+    }
+    // Stream the file content through the action (like the download handler)
+    const STREAM_LIMIT = 15 * 1024 * 1024;
+    if (file.size > 0 && file.size <= STREAM_LIMIT) {
+      try {
+        const res = await fetch(storageUrl);
+        if (!res.ok) throw new Error(`storage responded ${res.status}`);
+        const buffer = await res.arrayBuffer();
+        return new Response(buffer, {
+          status: endpoint.statusCode,
+          headers: {
+            "Content-Type": file.contentType || ct,
+            "Content-Length": String(buffer.byteLength),
+            ...SECURITY_HEADERS,
+            ...cors,
+          },
+        });
+      } catch (err) {
+        console.error("custom endpoint file stream failed, redirecting:", err);
+      }
+    }
+    // Large file: redirect to storage URL
+    return new Response(null, {
+      status: 302,
+      headers: {
+        Location: storageUrl,
+        ...SECURITY_HEADERS,
+        ...cors,
+      },
+    });
+  }
+
+  // Text-based response (default)
   return new Response(endpoint.body, {
     status: endpoint.statusCode,
     headers: {
       "Content-Type": ct,
       ...SECURITY_HEADERS,
-      ...corsFor(request),
+      ...cors,
     },
   });
 });

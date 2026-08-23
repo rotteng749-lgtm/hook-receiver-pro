@@ -779,6 +779,8 @@ export const createCustomEndpoint = mutation({
     statusCode: v.number(),
     body: v.string(),
     contentType: v.optional(v.string()),
+    responseType: v.optional(v.union(v.literal("text"), v.literal("file"))),
+    fileId: v.optional(v.id("files")),
     enabled: v.boolean(),
     authRequired: v.optional(v.boolean()),
   },
@@ -786,18 +788,26 @@ export const createCustomEndpoint = mutation({
     await requireRole(ctx, ["owner"]);
     const path = args.path.trim().toLowerCase().replace(/[^a-z0-9_-]/g, "").slice(0, 64);
     if (path.length === 0) throw new Error("Path is required");
-    // Check for conflicts with existing fixed routes.
     const RESERVED = ["health", "connect", "files", "databases", "api", "mod", "telegram", "hook"];
     if (RESERVED.includes(path)) throw new Error(`Path "${path}" is reserved`);
     const existing = await ctx.db.query("customEndpoints").withIndex("by_path", (q) => q.eq("path", path)).first();
     if (existing) throw new Error(`Endpoint /${path} already exists`);
     const statusCode = Math.max(100, Math.min(599, Math.round(args.statusCode)));
+    const responseType = args.responseType ?? "text";
+    // Validate fileId when responseType is file
+    if (responseType === "file") {
+      if (!args.fileId) throw new Error("fileId is required when responseType is file");
+      const file = await ctx.db.get(args.fileId);
+      if (!file) throw new Error("File not found");
+    }
     return await ctx.db.insert("customEndpoints", {
       path,
       method: args.method,
       statusCode,
       body: args.body.slice(0, 50000),
       contentType: args.contentType?.trim().slice(0, 128) || undefined,
+      responseType,
+      fileId: responseType === "file" ? args.fileId : undefined,
       enabled: args.enabled,
       authRequired: args.authRequired ?? false,
       createdBy: (await requireRole(ctx, ["owner"])).userId,
@@ -813,6 +823,8 @@ export const updateCustomEndpoint = mutation({
     statusCode: v.optional(v.number()),
     body: v.optional(v.string()),
     contentType: v.optional(v.string()),
+    responseType: v.optional(v.union(v.literal("text"), v.literal("file"))),
+    fileId: v.optional(v.id("files")),
     enabled: v.optional(v.boolean()),
     authRequired: v.optional(v.boolean()),
   },
@@ -827,6 +839,21 @@ export const updateCustomEndpoint = mutation({
     if (args.contentType !== undefined) patch.contentType = args.contentType?.trim() || undefined;
     if (args.enabled !== undefined) patch.enabled = args.enabled;
     if (args.authRequired !== undefined) patch.authRequired = args.authRequired;
+    if (args.responseType !== undefined) {
+      patch.responseType = args.responseType;
+      if (args.responseType === "file" && args.fileId) {
+        const file = await ctx.db.get(args.fileId);
+        if (!file) throw new Error("File not found");
+        patch.fileId = args.fileId;
+      } else if (args.responseType === "text") {
+        patch.fileId = undefined;
+      }
+    }
+    if (args.fileId !== undefined && args.responseType === "file") {
+      const file = await ctx.db.get(args.fileId);
+      if (!file) throw new Error("File not found");
+      patch.fileId = args.fileId;
+    }
     await ctx.db.patch(args.id, patch);
   },
 });

@@ -7,6 +7,7 @@ import {
   Database,
   KeyRound,
   LayoutDashboard,
+  Plug,
   Server,
 } from "lucide-react";
 
@@ -16,6 +17,7 @@ const navItems = [
   { to: "/admin/keys", label: "Keys", icon: KeyRound, end: false },
   { to: "/admin/connections", label: "Connections", icon: Activity, end: false },
   { to: "/admin/databases", label: "Databases", icon: Database, end: false },
+  { to: "/admin/endpoints", label: "Endpoints", icon: Plug, end: false },
   { to: "/admin/api", label: "API", icon: Braces, end: false },
 ];
 

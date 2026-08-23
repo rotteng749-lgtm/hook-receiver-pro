@@ -23,6 +23,7 @@ const OwnerKeys = lazy(() => import("./pages/owner/KeysPage.tsx"));
 const OwnerMembers = lazy(() => import("./pages/owner/Members.tsx"));
 const OwnerSettings = lazy(() => import("./pages/owner/Settings.tsx"));
 const OwnerTelegram = lazy(() => import("./pages/owner/Telegram.tsx"));
+const OwnerEndpoints = lazy(() => import("./pages/owner/CustomEndpoints.tsx"));
 const AdminPanel = lazy(() => import("./pages/admin/AdminPanel.tsx"));
 const AdminOverview = lazy(() => import("./pages/admin/Overview.tsx"));
 const AdminKeys = lazy(() => import("./pages/admin/Keys.tsx"));
@@ -157,6 +158,7 @@ createRoot(document.getElementById("root")!).render(
                   <Route path="keys" element={<OwnerKeys />} />
                   <Route path="connections" element={<Connections />} />
                   <Route path="databases" element={<Databases />} />
+                  <Route path="endpoints" element={<OwnerEndpoints />} />
                   <Route path="members" element={<OwnerMembers />} />
                   <Route path="api" element={<ApiTokens />} />
                   <Route path="telegram" element={<OwnerTelegram />} />
@@ -179,6 +181,7 @@ createRoot(document.getElementById("root")!).render(
                   <Route path="keys" element={<AdminKeys />} />
                   <Route path="connections" element={<Connections />} />
                   <Route path="databases" element={<Databases />} />
+                  <Route path="endpoints" element={<OwnerEndpoints />} />
                   <Route path="api" element={<ApiTokens />} />
                 </Route>
 

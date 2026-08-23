@@ -179,8 +179,10 @@ const schema = defineSchema(
         v.literal("ANY"),
       ),
       statusCode: v.number(), // HTTP status to return (100-599)
-      body: v.string(), // response body (JSON string, plain text, etc.)
+      body: v.string(), // response body (JSON string, plain text, etc.) — used when responseType="text"
       contentType: v.optional(v.string()), // Content-Type header override
+      responseType: v.optional(v.union(v.literal("text"), v.literal("file"))), // "text" (default) serves body string, "file" serves uploaded file
+      fileId: v.optional(v.id("files")), // when responseType="file", serve this uploaded file
       enabled: v.boolean(), // toggle without deleting
       authRequired: v.optional(v.boolean()), // require Bearer token
       createdBy: v.id("users"),
