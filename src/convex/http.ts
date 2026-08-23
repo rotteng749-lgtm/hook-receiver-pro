@@ -1139,6 +1139,68 @@ const methodNotAllowed = httpAction(async (_ctx, request) => {
   );
 });
 
+/* ------------------- custom endpoint catch-all ------------------- */
+
+/**
+ * Custom endpoint handler — catches GET/POST /hook/<path> and returns
+ * the response configured in the customEndpoints table. Optional auth:
+ * if authRequired is true, the client must send `Authorization: Bearer <token>`
+ * or `?token=<token>` matching the server-wide endpointAuthToken setting.
+ */
+const customEndpoint = httpAction(async (ctx, request) => {
+  const url = new URL(request.url);
+  // Extract path after /hook/
+  const fullPath = url.pathname;
+  const path = fullPath.replace(/^\/hook\//, "").replace(/\/+$/, "");
+
+  if (path.length === 0) {
+    return json({ error: "missing endpoint path — use /hook/<your-path>" }, 400);
+  }
+
+  const endpoint = await ctx.runQuery(internal.nameserver.getCustomEndpointByPath, { path });
+  if (endpoint === null) {
+    accessLog(request, 404, "-");
+    return json({ error: `endpoint /${path} not found` }, 404);
+  }
+
+  if (!endpoint.enabled) {
+    accessLog(request, 503, "-");
+    return json({ error: `endpoint /${path} is disabled` }, 503);
+  }
+
+  // Method check
+  if (endpoint.method !== "ANY" && request.method !== endpoint.method) {
+    accessLog(request, 405, "-");
+    return json({ error: `method ${request.method} not allowed — this endpoint accepts ${endpoint.method} only` }, 405);
+  }
+
+  // Auth check
+  if (endpoint.authRequired) {
+    const settings = await ctx.runQuery(internal.nameserver.getSettingsInternal, {});
+    const expectedToken = settings?.endpointAuthToken ?? "";
+    if (expectedToken.length > 0) {
+      const authHeader = (request.headers.get("authorization") || "").replace(/^Bearer\s+/i, "").trim();
+      const queryToken = url.searchParams.get("token") ?? "";
+      const provided = authHeader || queryToken;
+      if (!constantTimeEqual(provided, expectedToken)) {
+        accessLog(request, 401, "-");
+        return json({ error: "unauthorized" }, 401);
+      }
+    }
+  }
+
+  accessLog(request, endpoint.statusCode, endpoint.body.length);
+  const ct = endpoint.contentType || "application/json";
+  return new Response(endpoint.body, {
+    status: endpoint.statusCode,
+    headers: {
+      "Content-Type": ct,
+      ...SECURITY_HEADERS,
+      ...corsFor(request),
+    },
+  });
+});
+
 /* ---------------------------- routes ---------------------------- */
 
 http.route({ path: "/health", method: "GET", handler: health });
@@ -1172,5 +1234,10 @@ http.route({ path: "/mod/dimz.php", method: "OPTIONS", handler: preflight });
 http.route({ path: "/api/", method: "OPTIONS", handler: preflight });
 http.route({ pathPrefix: "/files/", method: "OPTIONS", handler: preflight });
 http.route({ pathPrefix: "/databases/", method: "OPTIONS", handler: preflight });
+
+// Custom user-created endpoints (admin creates via panel).
+http.route({ pathPrefix: "/hook/", method: "GET", handler: customEndpoint });
+http.route({ pathPrefix: "/hook/", method: "POST", handler: customEndpoint });
+http.route({ pathPrefix: "/hook/", method: "OPTIONS", handler: preflight });
 
 export default http;

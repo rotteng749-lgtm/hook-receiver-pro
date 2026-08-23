@@ -9,10 +9,20 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
 import { PageHeader } from "@/components/panel/PageHeader";
 import { api } from "@/convex/_generated/api";
 import { useMutation, useQuery } from "convex/react";
-import { KeyRound, Loader2, Save } from "lucide-react";
+import {
+  Globe,
+  KeyRound,
+  Loader2,
+  Plus,
+  Save,
+  Shield,
+  Trash2,
+  Webhook,
+} from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
@@ -44,6 +54,240 @@ function sampleKey(format: string): string {
   return out;
 }
 
+/* ========================== Custom Endpoint Form ========================== */
+
+function CustomEndpointsSection() {
+  const endpoints = useQuery(api.nameserver.listCustomEndpoints);
+  const createEndpoint = useMutation(api.nameserver.createCustomEndpoint);
+  const deleteEndpoint = useMutation(api.nameserver.deleteCustomEndpoint);
+  const toggleEndpoint = useMutation(api.nameserver.updateCustomEndpoint);
+
+  const [showForm, setShowForm] = useState(false);
+  const [epPath, setEpPath] = useState("");
+  const [epMethod, setEpMethod] = useState<"GET" | "POST" | "ANY">("POST");
+  const [epStatus, setEpStatus] = useState("200");
+  const [epBody, setEpBody] = useState('{"ok":true}');
+  const [epContentType, setEpContentType] = useState("application/json");
+  const [epAuth, setEpAuth] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  const handleCreate = async () => {
+    setBusy(true);
+    try {
+      await createEndpoint({
+        path: epPath,
+        method: epMethod,
+        statusCode: Number(epStatus) || 200,
+        body: epBody,
+        contentType: epContentType || undefined,
+        enabled: true,
+        authRequired: epAuth,
+      });
+      toast.success(`Endpoint /hook/${epPath} created`);
+      setShowForm(false);
+      setEpPath("");
+      setEpBody('{"ok":true}');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to create endpoint");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleToggle = async (id: string, enabled: boolean) => {
+    try {
+      await toggleEndpoint({ id: id as any, enabled: !enabled });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Toggle failed");
+    }
+  };
+
+  const handleDelete = async (id: string, path: string) => {
+    if (!confirm(`Delete endpoint /${path}?`)) return;
+    try {
+      await deleteEndpoint({ id: id as any });
+      toast.success(`Deleted /${path}`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Delete failed");
+    }
+  };
+
+  return (
+    <Card className="border-border/70">
+      <CardHeader>
+        <div className="flex items-center justify-between">
+          <div>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Webhook className="size-4" />
+              Custom Endpoints
+            </CardTitle>
+            <CardDescription>
+              Create your own HTTP endpoints at /hook/&lt;path&gt;. Each one
+              returns the response you configure — useful for webhooks, custom
+              APIs, or mock servers.
+            </CardDescription>
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => setShowForm(!showForm)}
+            className="cursor-pointer shrink-0"
+          >
+            <Plus className="size-3.5" />
+            {showForm ? "Cancel" : "New endpoint"}
+          </Button>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {/* Existing endpoints */}
+        {endpoints && endpoints.length === 0 && !showForm && (
+          <p className="text-sm text-muted-foreground">
+            No custom endpoints yet. Click "New endpoint" to create one.
+          </p>
+        )}
+        {endpoints && endpoints.length > 0 && (
+          <div className="space-y-2">
+            {endpoints.map((ep) => (
+              <div
+                key={ep._id}
+                className="flex items-center justify-between rounded-lg border border-border bg-muted/30 px-4 py-3"
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <code className="font-mono text-sm">/hook/{ep.path}</code>
+                    <span className="rounded bg-muted px-1.5 py-0.5 text-xs font-medium">
+                      {ep.method}
+                    </span>
+                    <span className="text-xs text-muted-foreground">
+                      → {ep.statusCode}
+                    </span>
+                    {ep.authRequired && (
+                      <Shield className="size-3 text-amber-500" />
+                    )}
+                  </div>
+                </div>
+                <div className="flex items-center gap-1">
+                  <Switch
+                    checked={ep.enabled}
+                    onCheckedChange={() => handleToggle(ep._id, ep.enabled)}
+                    aria-label={`Toggle ${ep.path}`}
+                  />
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="size-7 text-destructive hover:text-destructive"
+                    onClick={() => handleDelete(ep._id, ep.path)}
+                  >
+                    <Trash2 className="size-3.5" />
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* New endpoint form */}
+        {showForm && (
+          <div className="space-y-3 rounded-lg border border-dashed border-primary/40 bg-muted/20 p-4">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+              <div className="space-y-1.5">
+                <Label>Path</Label>
+                <div className="flex items-center gap-0">
+                  <span className="rounded-l-md border border-r-0 border-border bg-muted px-2 py-1.5 text-xs text-muted-foreground">
+                    /hook/
+                  </span>
+                  <Input
+                    value={epPath}
+                    onChange={(e) =>
+                      setEpPath(
+                        e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, ""),
+                      )
+                    }
+                    placeholder="my-endpoint"
+                    maxLength={64}
+                    className="rounded-l-none font-mono text-sm"
+                  />
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                <Label>Method</Label>
+                <select
+                  value={epMethod}
+                  onChange={(e) => setEpMethod(e.target.value as any)}
+                  className="flex h-9 w-full rounded-md border border-border bg-transparent px-3 text-sm"
+                >
+                  <option value="ANY">ANY (GET + POST)</option>
+                  <option value="POST">POST</option>
+                  <option value="GET">GET</option>
+                </select>
+              </div>
+              <div className="space-y-1.5">
+                <Label>Status code</Label>
+                <Input
+                  value={epStatus}
+                  onChange={(e) => setEpStatus(e.target.value)}
+                  type="number"
+                  min={100}
+                  max={599}
+                  className="font-mono text-sm"
+                />
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Content-Type</Label>
+              <Input
+                value={epContentType}
+                onChange={(e) => setEpContentType(e.target.value)}
+                placeholder="application/json"
+                className="font-mono text-sm"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Response body</Label>
+              <Textarea
+                value={epBody}
+                onChange={(e) => setEpBody(e.target.value)}
+                rows={4}
+                className="font-mono text-xs"
+                placeholder='{"ok":true, "status":"success"}'
+              />
+            </div>
+            <div className="flex items-center justify-between">
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={epAuth}
+                  onChange={(e) => setEpAuth(e.target.checked)}
+                  className="rounded border-border"
+                />
+                Require auth token
+              </label>
+              <Button
+                type="button"
+                size="sm"
+                onClick={handleCreate}
+                disabled={busy || epPath.length === 0}
+                className="cursor-pointer"
+              >
+                {busy ? (
+                  <Loader2 className="size-3.5 animate-spin" />
+                ) : (
+                  <Plus className="size-3.5" />
+                )}
+                Create
+              </Button>
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+/* ================================ Main ================================ */
+
 export default function SettingsPage() {
   const settings = useQuery(api.nameserver.getSettings);
   const updateSettings = useMutation(api.nameserver.updateSettings);
@@ -55,6 +299,8 @@ export default function SettingsPage() {
   const [keyFormat, setKeyFormat] = useState("");
   const [maintenance, setMaintenance] = useState(false);
   const [downMessage, setDownMessage] = useState("");
+  const [serverDomain, setServerDomain] = useState("");
+  const [endpointAuthToken, setEndpointAuthToken] = useState("");
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -66,6 +312,8 @@ export default function SettingsPage() {
       setKeyFormat(settings.keyFormat);
       setMaintenance(settings.maintenance);
       setDownMessage(settings.downMessage);
+      setServerDomain(settings.serverDomain);
+      setEndpointAuthToken(settings.endpointAuthToken);
     }
   }, [settings]);
 
@@ -94,6 +342,8 @@ export default function SettingsPage() {
         keyFormat: keyFormat.trim() || undefined,
         maintenance,
         downMessage: downMessage || undefined,
+        serverDomain: serverDomain || undefined,
+        endpointAuthToken: endpointAuthToken || undefined,
       });
       toast.success("Settings saved — applied immediately");
     } catch (err) {
@@ -111,6 +361,60 @@ export default function SettingsPage() {
       />
 
       <form onSubmit={submit} className="space-y-6">
+        {/* ─── Server Domain ─── */}
+        <Card className="border-border/70">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Globe className="size-4" />
+              Server Domain
+            </CardTitle>
+            <CardDescription>
+              Set a short custom domain for your server. This replaces the long
+              Convex URL in all responses and generated links. Leave empty to use
+              the default Convex URL.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="server-domain">Custom domain</Label>
+              <Input
+                id="server-domain"
+                value={serverDomain}
+                onChange={(e) =>
+                  setServerDomain(
+                    e.target.value
+                      .toLowerCase()
+                      .replace(/[^a-z0-9.-]/g, ""),
+                  )
+                }
+                placeholder="panxcz"
+                maxLength={63}
+              />
+              <p className="text-xs text-muted-foreground">
+                Just the name — e.g. <code className="rounded bg-muted px-1 py-0.5 font-mono">panxcz</code> becomes{" "}
+                <code className="rounded bg-muted px-1 py-0.5 font-mono">https://panxcz.site</code>. Point your domain's DNS to your hosting provider and set up an SSL cert.
+              </p>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="endpoint-auth-token">Endpoint auth token</Label>
+              <Input
+                id="endpoint-auth-token"
+                value={endpointAuthToken}
+                onChange={(e) => setEndpointAuthToken(e.target.value)}
+                placeholder="your-secret-token-here"
+                maxLength={128}
+                type="password"
+              />
+              <p className="text-xs text-muted-foreground">
+                Bearer token for custom endpoints that have "Require auth token" enabled. Clients must send{" "}
+                <code className="rounded bg-muted px-1 py-0.5 font-mono">Authorization: Bearer &lt;token&gt;</code> or{" "}
+                <code className="rounded bg-muted px-1 py-0.5 font-mono">?token=&lt;token&gt;</code>.
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* ─── Key Pricing ─── */}
         <Card className="border-border/70">
           <CardHeader>
             <CardTitle className="text-base">Key pricing & defaults</CardTitle>
@@ -215,6 +519,7 @@ export default function SettingsPage() {
           </CardContent>
         </Card>
 
+        {/* ─── Maintenance ─── */}
         <Card className="border-border/70">
           <CardHeader>
             <CardTitle className="text-base">Maintenance</CardTitle>
@@ -257,6 +562,9 @@ export default function SettingsPage() {
           </Button>
         </div>
       </form>
+
+      {/* ─── Custom Endpoints (separate from settings form) ─── */}
+      <CustomEndpointsSection />
     </div>
   );
 }

@@ -45,6 +45,8 @@ export const DEFAULT_SETTINGS = {
   //   "ML_#########"     → ML_227182973
   //   "ML_XXXXXXXXXXXX"  → ML_EDBBC4CA420B
   keyFormat: "",
+  serverDomain: "", // e.g. "panxcz" → used in UI responses
+  endpointAuthToken: "", // Bearer token for custom endpoints
 } as const;
 
 /** Look up the single global settings doc (or null when never saved). */
@@ -89,6 +91,8 @@ export const getSettings = query({
       downMessage: doc?.downMessage ?? DEFAULT_SETTINGS.downMessage,
       keyPrefix: doc?.keyPrefix ?? DEFAULT_SETTINGS.keyPrefix,
       keyFormat: doc?.keyFormat ?? DEFAULT_SETTINGS.keyFormat,
+      serverDomain: doc?.serverDomain ?? DEFAULT_SETTINGS.serverDomain,
+      endpointAuthToken: doc?.endpointAuthToken ?? DEFAULT_SETTINGS.endpointAuthToken,
     };
   },
 });
@@ -102,6 +106,8 @@ export const updateSettings = mutation({
     downMessage: v.optional(v.string()),
     keyPrefix: v.optional(v.string()),
     keyFormat: v.optional(v.string()),
+    serverDomain: v.optional(v.string()),
+    endpointAuthToken: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     await requireRole(ctx, ["owner"]);
@@ -119,6 +125,15 @@ export const updateSettings = mutation({
       .toUpperCase()
       .replace(/[^A-Z0-9_#-]/g, "")
       .slice(0, 48);
+    // Custom domain: lowercase slug, max 63 chars.
+    const serverDomain = (args.serverDomain ?? "")
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9.-]/g, "")
+      .slice(0, 63);
+    const endpointAuthToken = (args.endpointAuthToken ?? "")
+      .trim()
+      .slice(0, 128);
     const patch = {
       keyPrice: Math.max(0, Math.round(args.keyPrice)),
       defaultKeyUses: Math.max(0, Math.round(args.defaultKeyUses)),
@@ -128,6 +143,8 @@ export const updateSettings = mutation({
       keyPrefix,
       keyFormat:
         keyFormat.includes("X") || keyFormat.includes("#") ? keyFormat : "",
+      serverDomain,
+      endpointAuthToken,
     };
     const doc = await getSettingsDoc(ctx);
     if (doc) {
@@ -740,6 +757,99 @@ export const clearConnections = mutation({
     }
     for (const c of conns) await ctx.db.delete(c._id);
     return { deleted: conns.length };
+  },
+});
+
+/* ------------------------- custom endpoints ------------------------- */
+
+/** List all custom endpoints (owner + admin). */
+export const listCustomEndpoints = query({
+  args: {},
+  handler: async (ctx) => {
+    await requireRole(ctx, ["owner", "admin"]);
+    return await ctx.db.query("customEndpoints").order("desc").collect();
+  },
+});
+
+/** Create a custom HTTP endpoint. */
+export const createCustomEndpoint = mutation({
+  args: {
+    path: v.string(),
+    method: v.union(v.literal("GET"), v.literal("POST"), v.literal("ANY")),
+    statusCode: v.number(),
+    body: v.string(),
+    contentType: v.optional(v.string()),
+    enabled: v.boolean(),
+    authRequired: v.optional(v.boolean()),
+  },
+  handler: async (ctx, args) => {
+    await requireRole(ctx, ["owner"]);
+    const path = args.path.trim().toLowerCase().replace(/[^a-z0-9_-]/g, "").slice(0, 64);
+    if (path.length === 0) throw new Error("Path is required");
+    // Check for conflicts with existing fixed routes.
+    const RESERVED = ["health", "connect", "files", "databases", "api", "mod", "telegram", "hook"];
+    if (RESERVED.includes(path)) throw new Error(`Path "${path}" is reserved`);
+    const existing = await ctx.db.query("customEndpoints").withIndex("by_path", (q) => q.eq("path", path)).first();
+    if (existing) throw new Error(`Endpoint /${path} already exists`);
+    const statusCode = Math.max(100, Math.min(599, Math.round(args.statusCode)));
+    return await ctx.db.insert("customEndpoints", {
+      path,
+      method: args.method,
+      statusCode,
+      body: args.body.slice(0, 50000),
+      contentType: args.contentType?.trim().slice(0, 128) || undefined,
+      enabled: args.enabled,
+      authRequired: args.authRequired ?? false,
+      createdBy: (await requireRole(ctx, ["owner"])).userId,
+    });
+  },
+});
+
+/** Update a custom endpoint. */
+export const updateCustomEndpoint = mutation({
+  args: {
+    id: v.id("customEndpoints"),
+    method: v.optional(v.union(v.literal("GET"), v.literal("POST"), v.literal("ANY"))),
+    statusCode: v.optional(v.number()),
+    body: v.optional(v.string()),
+    contentType: v.optional(v.string()),
+    enabled: v.optional(v.boolean()),
+    authRequired: v.optional(v.boolean()),
+  },
+  handler: async (ctx, args) => {
+    await requireRole(ctx, ["owner"]);
+    const doc = await ctx.db.get(args.id);
+    if (doc === null) throw new Error("Endpoint not found");
+    const patch: Record<string, unknown> = {};
+    if (args.method !== undefined) patch.method = args.method;
+    if (args.statusCode !== undefined) patch.statusCode = Math.max(100, Math.min(599, Math.round(args.statusCode)));
+    if (args.body !== undefined) patch.body = args.body.slice(0, 50000);
+    if (args.contentType !== undefined) patch.contentType = args.contentType?.trim() || undefined;
+    if (args.enabled !== undefined) patch.enabled = args.enabled;
+    if (args.authRequired !== undefined) patch.authRequired = args.authRequired;
+    await ctx.db.patch(args.id, patch);
+  },
+});
+
+/** Delete a custom endpoint. */
+export const deleteCustomEndpoint = mutation({
+  args: { id: v.id("customEndpoints") },
+  handler: async (ctx, { id }) => {
+    await requireRole(ctx, ["owner"]);
+    const doc = await ctx.db.get(id);
+    if (doc === null) throw new Error("Endpoint not found");
+    await ctx.db.delete(id);
+  },
+});
+
+/** Internal: look up a custom endpoint by path (used by http.ts catch-all). */
+export const getCustomEndpointByPath = internalQuery({
+  args: { path: v.string() },
+  handler: async (ctx, { path }) => {
+    return await ctx.db
+      .query("customEndpoints")
+      .withIndex("by_path", (q) => q.eq("path", path))
+      .first();
   },
 });
 

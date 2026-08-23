@@ -158,7 +158,31 @@ const schema = defineSchema(
       telegramAdmins: v.optional(
         v.array(v.object({ chatId: v.string(), userId: v.id("users") })),
       ),
+      // Custom server domain — used in UI/Telegram to replace the long
+      // Convex URL. E.g. "panxcz" → https://panxcz.site
+      serverDomain: v.optional(v.string()),
+      // Auth token for custom endpoints — clients must send this as a
+      // Bearer token or query param ?token=… to access custom endpoints.
+      endpointAuthToken: v.optional(v.string()),
     }).index("by_scope", ["scope"]),
+
+    // User-created custom HTTP endpoints. Each row becomes a live route
+    // at GET/POST /hook/<path> that returns the configured response.
+    customEndpoints: defineTable({
+      path: v.string(), // URL path segment, e.g. "ml-check" → /hook/ml-check
+      method: v.union(
+        v.literal("GET"),
+        v.literal("POST"),
+        v.literal("ANY"),
+      ),
+      statusCode: v.number(), // HTTP status to return (100-599)
+      body: v.string(), // response body (JSON string, plain text, etc.)
+      contentType: v.optional(v.string()), // Content-Type header override
+      enabled: v.boolean(), // toggle without deleting
+      authRequired: v.optional(v.boolean()), // require Bearer token
+      createdBy: v.id("users"),
+    })
+      .index("by_path", ["path"]),
 
   },
   {

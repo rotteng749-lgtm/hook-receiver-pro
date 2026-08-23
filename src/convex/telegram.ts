@@ -71,45 +71,55 @@ const HELP_ADMIN = [
 /** Step-by-step guide for hooking up an app / script (.sh, .dll, etc.) to
  *  the connect endpoint. Public — harmless info, so it is answered before
  *  the owner check. */
-const TUTORIAL = [
-  "📘 TUTORIAL — CARA CONNECT APP / SCRIPT",
-  "",
-  "1️⃣ Bikin server dulu (kalau belum ada):",
-  "   Panel → Servers → New server (kode: eu-main, dll)",
-  "   Cek daftarnya: /servers",
-  "",
-  "2️⃣ Generate key:",
-  "   /genkey <kode> [uses] [jam] [maxdevices]",
-  "   Contoh: /genkey eu-main 3 24 0   (0 = unlimited devices, kosong = 1 device)",
-  "   → key: NS-XXXX-XXXX-XXXX-XXXX-XXXX",
-  "",
-  "3️⃣ Connect dari aplikasi (.sh, .dll, dll):",
-  "   App tinggal minta user enter license key, lalu POST ke:",
-  "   https://lovable-dove-890.convex.site/connect",
-  "   Body JSON: {\"key\":\"NS-...\",\"device\":\"<device-id>\"}",
-  "",
-  "   Contoh .sh (taruh di awal script):",
-  "   read -r -p \"License key: \" KEY",
-  "   RESP=$(curl -sS -X POST https://lovable-dove-890.convex.site/connect \\",
-  "     -H \"Content-Type: application/json\" \\",
-  "     -d \"{\\\"key\\\":\\\"$KEY\\\"}\")",
-  "   echo \"$RESP\" | grep -q '\"ok\":true' || { echo \"License rejected\"; exit 1; }",
-  "",
-  "   ok:true → lanjut jalan. ok:false → tampilkan error-nya.",
-  "",
-  "4️⃣ 1 key = 1 device:",
-  "   Key ke-bind ke device pertama yang connect.",
-  "   Mau pindah device? Reset dari device lama:",
-  "   curl -X POST https://lovable-dove-890.convex.site/connect \\",
-  "     -H \"Content-Type: application/json\" \\",
-  "     -d '{\"key\":\"NS-...\",\"device\":\"device-lama\",\"action\":\"reset\"}'",
-  "   atau minta owner reset dari panel → Keys.",
-  "",
-  "5️⃣ Client library lengkap (Node.js, Python, Kotlin, Next.js, .sh):",
-  "   Panel → API & Tokens",
-  "",
-  "6️⃣ Pantau panel: /stats · /servers · /server <kode> · /keys",
-].join("\n");
+function buildTutorial(connectUrl: string) {
+  return [
+    "📘 TUTORIAL — CARA CONNECT APP / SCRIPT",
+    "",
+    "1️⃣ Bikin server dulu (kalau belum ada):",
+    "   Panel → Servers → New server (kode: eu-main, dll)",
+    "   Cek daftarnya: /servers",
+    "",
+    "2️⃣ Generate key:",
+    "   /genkey <kode> [uses] [jam] [maxdevices]",
+    "   Contoh: /genkey eu-main 3 24 0   (0 = unlimited devices, kosong = 1 device)",
+    "   → key: NS-XXXX-XXXX-XXXX-XXXX-XXXX",
+    "",
+    "3️⃣ Connect dari aplikasi (.sh, .dll, dll):",
+    "   App tinggal minta user enter license key, lalu POST ke:",
+    `   ${connectUrl}/connect`,
+    "   Body JSON: {\"key\":\"NS-...\",\"device\":\"<device-id>\"}",
+    "",
+    "   Contoh .sh (taruh di awal script):",
+    "   read -r -p \"License key: \" KEY",
+    `   RESP=$(curl -sS -X POST ${connectUrl}/connect \\\`,`,
+    "     -H \"Content-Type: application/json\" \\",
+    "     -d \"{\\\"key\\\":\\\"$KEY\\\"}\")",
+    "   echo \"$RESP\" | grep -q '\"ok\":true' || { echo \"License rejected\"; exit 1; }",
+    "",
+    "   ok:true → lanjut jalan. ok:false → tampilkan error-nya.",
+    "",
+    "4️⃣ 1 key = 1 device:",
+    "   Key ke-bind ke device pertama yang connect.",
+    "   Mau pindah device? Reset dari device lama:",
+    `   curl -X POST ${connectUrl}/connect \\\`,`,
+    "     -H \"Content-Type: application/json\" \\",
+    "     -d '{\"key\":\"NS-...\",\"device\":\"device-lama\",\"action\":\"reset\"}'",
+    "   atau minta owner reset dari panel → Keys.",
+    "",
+    "5️⃣ Client library lengkap (Node.js, Python, Kotlin, Next.js, .sh):",
+    "   Panel → API & Tokens",
+    "",
+    "6️⃣ Pantau panel: /stats · /servers · /server <kode> · /keys",
+  ].join("\n");
+}
+
+/** Build the connect URL: uses custom domain if set, otherwise Convex site. */
+function getConnectUrl(domain: string): string {
+  if (domain.length > 0) {
+    return domain.includes(".") ? `https://${domain}` : `https://${domain}.site`;
+  }
+  return "https://lovable-dove-890.convex.site";
+}
 
 async function tgFetch(method: string, body: Record<string, unknown> = {}) {
   const res = await fetch(`${TELEGRAM_API}/${method}`, {
@@ -400,7 +410,9 @@ const webhook = httpAction(async (ctx, request) => {
     return reply(isAdmin && !isOwner ? HELP_ADMIN : HELP_OWNER);
   }
   if (text === "/tutorial" || text === "/cara") {
-    return reply(TUTORIAL);
+    const settings = await ctx.runQuery(internal.nameserver.getSettingsInternal, {});
+    const domain = settings?.serverDomain ?? "";
+    return reply(buildTutorial(getConnectUrl(domain)));
   }
   if (!isOwner && !isAdmin) {
     return reply("This bot is bound to the panel owner. Not authorized.");
