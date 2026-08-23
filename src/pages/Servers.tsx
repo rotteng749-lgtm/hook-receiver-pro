@@ -37,7 +37,7 @@ import type { Doc } from "@/convex/_generated/dataModel";
 import { formatRelative } from "@/lib/format";
 import { useMutation, useQuery } from "convex/react";
 import { Loader2, Pencil, Plus, Server as ServerIcon, Trash2 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
 type ServerRow = Doc<"servers"> & {
@@ -46,9 +46,17 @@ type ServerRow = Doc<"servers"> & {
 };
 
 // Public HTTP routes (like /connect) are served from the Convex site URL.
-const CONNECT_BASE = (import.meta.env.VITE_CONVEX_URL as string)
+const CONVEX_BASE = (import.meta.env.VITE_CONVEX_URL as string)
   .replace(/\.convex\.cloud$/, ".convex.site")
   .replace(/\/$/, "");
+
+/** Build the connect URL: custom domain if set, otherwise Convex site. */
+function buildConnectBase(domain: string): string {
+  if (domain.length > 0) {
+    return domain.includes(".") ? `https://${domain}` : `https://${domain}.site`;
+  }
+  return CONVEX_BASE;
+}
 
 function slugify(name: string): string {
   return name
@@ -217,8 +225,46 @@ function EditServerDialog({ server }: { server: ServerRow }) {
 
 export default function Servers() {
   const servers = useQuery(api.nameserver.listServers);
+  const settings = useQuery(api.nameserver.getSettings);
   const updateServer = useMutation(api.nameserver.updateServer);
   const deleteServer = useMutation(api.nameserver.deleteServer);
+  const updateSettings = useMutation(api.nameserver.updateSettings);
+
+  const [editingDomain, setEditingDomain] = useState(false);
+  const [domainInput, setDomainInput] = useState("");
+  const [domainBusy, setDomainBusy] = useState(false);
+
+  useEffect(() => {
+    if (settings) setDomainInput(settings.serverDomain);
+  }, [settings]);
+
+  const domain = settings?.serverDomain ?? "";
+  const connectBase = buildConnectBase(domain);
+  const keyPrefix = settings?.keyPrefix ?? "NS";
+
+  const saveDomain = async () => {
+    if (!settings) return;
+    setDomainBusy(true);
+    try {
+      await updateSettings({
+        keyPrice: settings.keyPrice,
+        defaultKeyUses: settings.defaultKeyUses,
+        defaultKeyHours: settings.defaultKeyHours,
+        maintenance: settings.maintenance,
+        downMessage: settings.downMessage || undefined,
+        keyPrefix: settings.keyPrefix || undefined,
+        keyFormat: settings.keyFormat || undefined,
+        serverDomain: domainInput || undefined,
+        endpointAuthToken: settings.endpointAuthToken || undefined,
+      });
+      setEditingDomain(false);
+      toast.success("Server URL updated");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to save");
+    } finally {
+      setDomainBusy(false);
+    }
+  };
 
   const toggle = async (server: ServerRow) => {
     try {
@@ -239,7 +285,7 @@ export default function Servers() {
     }
   };
 
-  if (servers === undefined) {
+  if (servers === undefined || settings === undefined) {
     return (
       <div className="flex min-h-[40vh] items-center justify-center">
         <Loader2 className="size-6 animate-spin text-muted-foreground" />
@@ -257,19 +303,64 @@ export default function Servers() {
 
       <Card className="border-border/70">
         <CardHeader>
-          <CardTitle className="text-base">How clients connect</CardTitle>
-          <CardDescription>
-            Your app / script / loader asks the user for their license key and
-            calls /connect with it — the server is detected automatically:
-          </CardDescription>
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <CardTitle className="text-base">How clients connect</CardTitle>
+              <CardDescription>
+                Your app / script / loader asks the user for their license key and
+                calls /connect with it — the server is detected automatically:
+              </CardDescription>
+            </div>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="shrink-0 cursor-pointer"
+              onClick={() => {
+                setEditingDomain(!editingDomain);
+                setDomainInput(domain);
+              }}
+            >
+              <Pencil className="size-3.5" />
+              Edit URL
+            </Button>
+          </div>
         </CardHeader>
         <CardContent className="space-y-3">
+          {editingDomain && (
+            <div className="flex items-center gap-2 rounded-lg border border-dashed border-primary/40 bg-muted/20 p-3">
+              <div className="flex items-center gap-0 flex-1">
+                <span className="rounded-l-md border border-r-0 border-border bg-muted px-2 py-1.5 text-xs text-muted-foreground whitespace-nowrap">
+                  https://
+                </span>
+                <Input
+                  value={domainInput}
+                  onChange={(e) => setDomainInput(e.target.value.toLowerCase().replace(/[^a-z0-9.-]/g, ""))}
+                  placeholder="panxcz.site"
+                  maxLength={63}
+                  className="rounded-l-none font-mono text-sm"
+                />
+                <span className="rounded-r-md border border-l-0 border-border bg-muted px-2 py-1.5 text-xs text-muted-foreground">
+                  /connect
+                </span>
+              </div>
+              <Button
+                type="button"
+                size="sm"
+                onClick={saveDomain}
+                disabled={domainBusy}
+                className="cursor-pointer shrink-0"
+              >
+                {domainBusy ? <Loader2 className="size-3.5 animate-spin" /> : "Save"}
+              </Button>
+            </div>
+          )}
           <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/50 p-3 font-mono text-[12.5px]">
             <span className="truncate">
-              {`curl -X POST ${CONNECT_BASE}/connect -d '{"license":"LIC-XXXX-…","device":"device-abc"}'`}
+              {`curl -X POST ${connectBase}/connect -d '{"license":"LIC-XXXX-…","device":"device-abc"}'`}
             </span>
             <CopyButton
-              value={`curl -X POST ${CONNECT_BASE}/connect -d '{"license":"LIC-XXXX-XXXX-XXXX-XXXX-XXXX","device":"device-abc"}'`}
+              value={`curl -X POST ${connectBase}/connect -d '{"license":"LIC-XXXX-XXXX-XXXX-XXXX-XXXX","device":"device-abc"}'`}
               label="cURL"
               size="icon"
             />
@@ -277,13 +368,13 @@ export default function Servers() {
           <p className="text-xs text-muted-foreground">
             GET works too:{" "}
             <code className="rounded bg-muted px-1 py-0.5">
-              {CONNECT_BASE}/connect?license=LIC-…&amp;device=device-abc
+              {connectBase}/connect?license=LIC-…&amp;device=device-abc
             </code>{" "}
             — the client only needs the license key the user typed in. Include{" "}
             <code className="rounded bg-muted px-1 py-0.5">device</code> to bind
             the license to that device — 1 key = 1 device. Keys are generated
             with the prefix you set in Settings (default {" "}
-            <code className="rounded bg-muted px-1 py-0.5">NS</code>).
+            <code className="rounded bg-muted px-1 py-0.5">{keyPrefix}</code>).
           </p>
         </CardContent>
       </Card>
