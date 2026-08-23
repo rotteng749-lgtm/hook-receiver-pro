@@ -137,7 +137,7 @@ const shellCode = `#!/usr/bin/env bash
 set -euo pipefail
 
 CONVEX_SITE="$CONVEX_SITE_URL"
-[ -n "$CONVEX_SITE" ] || CONVEX_SITE="https://lovable-dove-890.convex.site"
+[ -n "$CONVEX_SITE" ] || CONVEX_SITE="https://panxcz.convex.site"
 
 # --- 1. Stable device id (1 key = 1 device) ---
 DEVICE_ID=""
