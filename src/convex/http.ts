@@ -1238,6 +1238,9 @@ http.route({ pathPrefix: "/databases/", method: "OPTIONS", handler: preflight })
 // Custom user-created endpoints (admin creates via panel).
 http.route({ pathPrefix: "/hook/", method: "GET", handler: customEndpoint });
 http.route({ pathPrefix: "/hook/", method: "POST", handler: customEndpoint });
+http.route({ pathPrefix: "/hook/", method: "PUT", handler: customEndpoint });
+http.route({ pathPrefix: "/hook/", method: "PATCH", handler: customEndpoint });
+http.route({ pathPrefix: "/hook/", method: "DELETE", handler: customEndpoint });
 http.route({ pathPrefix: "/hook/", method: "OPTIONS", handler: preflight });
 
 export default http;

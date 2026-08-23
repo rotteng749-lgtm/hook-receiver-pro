@@ -173,6 +173,9 @@ const schema = defineSchema(
       method: v.union(
         v.literal("GET"),
         v.literal("POST"),
+        v.literal("PUT"),
+        v.literal("PATCH"),
+        v.literal("DELETE"),
         v.literal("ANY"),
       ),
       statusCode: v.number(), // HTTP status to return (100-599)

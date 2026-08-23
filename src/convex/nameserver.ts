@@ -775,7 +775,7 @@ export const listCustomEndpoints = query({
 export const createCustomEndpoint = mutation({
   args: {
     path: v.string(),
-    method: v.union(v.literal("GET"), v.literal("POST"), v.literal("ANY")),
+    method: v.union(v.literal("GET"), v.literal("POST"), v.literal("PUT"), v.literal("PATCH"), v.literal("DELETE"), v.literal("ANY")),
     statusCode: v.number(),
     body: v.string(),
     contentType: v.optional(v.string()),
@@ -809,7 +809,7 @@ export const createCustomEndpoint = mutation({
 export const updateCustomEndpoint = mutation({
   args: {
     id: v.id("customEndpoints"),
-    method: v.optional(v.union(v.literal("GET"), v.literal("POST"), v.literal("ANY"))),
+    method: v.optional(v.union(v.literal("GET"), v.literal("POST"), v.literal("PUT"), v.literal("PATCH"), v.literal("DELETE"), v.literal("ANY"))),
     statusCode: v.optional(v.number()),
     body: v.optional(v.string()),
     contentType: v.optional(v.string()),

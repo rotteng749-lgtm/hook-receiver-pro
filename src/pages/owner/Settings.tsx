@@ -64,7 +64,7 @@ function CustomEndpointsSection() {
 
   const [showForm, setShowForm] = useState(false);
   const [epPath, setEpPath] = useState("");
-  const [epMethod, setEpMethod] = useState<"GET" | "POST" | "ANY">("POST");
+  const [epMethod, setEpMethod] = useState<"GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "ANY">("POST");
   const [epStatus, setEpStatus] = useState("200");
   const [epBody, setEpBody] = useState('{"ok":true}');
   const [epContentType, setEpContentType] = useState("application/json");
@@ -218,9 +218,12 @@ function CustomEndpointsSection() {
                   onChange={(e) => setEpMethod(e.target.value as any)}
                   className="flex h-9 w-full rounded-md border border-border bg-transparent px-3 text-sm"
                 >
-                  <option value="ANY">ANY (GET + POST)</option>
-                  <option value="POST">POST</option>
+                  <option value="ANY">ANY (all methods)</option>
                   <option value="GET">GET</option>
+                  <option value="POST">POST</option>
+                  <option value="PUT">PUT</option>
+                  <option value="PATCH">PATCH</option>
+                  <option value="DELETE">DELETE</option>
                 </select>
               </div>
               <div className="space-y-1.5">
