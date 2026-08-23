@@ -17,7 +17,6 @@ import {
   ShieldCheck,
   Users,
   Wallet,
-  XCircle,
 } from "lucide-react";
 import { useNavigate } from "react-router";
 

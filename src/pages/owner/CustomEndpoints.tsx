@@ -33,9 +33,8 @@ import { PageHeader } from "@/components/panel/PageHeader";
 import { api } from "@/convex/_generated/api";
 import type { Doc, Id } from "@/convex/_generated/dataModel";
 import { motion, AnimatePresence } from "framer-motion";
-import { useMutation, useQuery } from "convex/react";
+import { useAction, useMutation, useQuery } from "convex/react";
 import {
-  Copy,
   FileCode2,
   FileText,
   Globe,
@@ -76,9 +75,7 @@ const CONTENT_TYPE_PRESETS = [
 
 /** Auto-detect Content-Type from file name + MIME type. */
 function detectContentType(file: File): string {
-  // Prefer browser MIME if it's not the generic octet-stream
   if (file.type && file.type !== "application/octet-stream") return file.type;
-  // Fallback: extension-based detection
   const ext = file.name.split(".").pop()?.toLowerCase() ?? "";
   const EXT_MAP: Record<string, string> = {
     json: "application/json",
@@ -102,9 +99,6 @@ function detectContentType(file: File): string {
     zip: "application/zip",
     sh: "text/x-shellscript",
     py: "text/x-python",
-    rb: "text/x-ruby",
-    java: "text/x-java",
-    kt: "text/x-kotlin",
     ts: "text/typescript",
     tsx: "text/typescript",
     jsx: "text/typescript",
@@ -112,13 +106,6 @@ function detectContentType(file: File): string {
     yaml: "text/yaml",
     md: "text/markdown",
     csv: "text/csv",
-    woff: "font/woff",
-    woff2: "font/woff2",
-    ttf: "font/ttf",
-    otf: "font/otf",
-    mp3: "audio/mpeg",
-    mp4: "video/mp4",
-    webm: "video/webm",
   };
   return EXT_MAP[ext] ?? "application/octet-stream";
 }
@@ -292,7 +279,6 @@ function EndpointForm({
         </DialogHeader>
 
         <div className="space-y-4">
-          {/* Path + Method + Status */}
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             <div className="space-y-1.5">
               <Label className="text-xs font-medium">Path</Label>
@@ -338,7 +324,6 @@ function EndpointForm({
             </div>
           </div>
 
-          {/* Response type toggle */}
           <div className="space-y-1.5">
             <Label className="text-xs font-medium">Response type</Label>
             <div className="flex gap-2">
@@ -415,9 +400,7 @@ function EndpointForm({
                 {file ? (
                   <span className="flex-1">
                     <span className="font-medium text-foreground">{file.name}</span>
-                    <span className="ml-2 text-muted-foreground">
-                      ({formatBytes(file.size)})
-                    </span>
+                    <span className="ml-2 text-muted-foreground">({formatBytes(file.size)})</span>
                   </span>
                 ) : initialFileId && mode === "edit" ? (
                   <span className="flex-1 text-muted-foreground">
@@ -426,23 +409,18 @@ function EndpointForm({
                 ) : (
                   <span>Upload .php, .css, .js, .html, .txt, .xml, .svg, .json, or any file…</span>
                 )}
-                <input
-                  type="file"
-                  className="hidden"
-                  onChange={handleFileChange}
-                />
+                <input type="file" className="hidden" onChange={handleFileChange} />
               </label>
               {detectedContentType && (
                 <div className="flex items-center gap-2 rounded-md bg-blue-500/5 border border-blue-500/20 px-3 py-1.5">
                   <Sparkles className="size-3 text-blue-400" />
                   <span className="text-[11px] text-blue-400">
-                    Auto-detected Content-Type: <code className="font-mono font-medium">{detectedContentType}</code>
+                    Auto-detected: <code className="font-mono font-medium">{detectedContentType}</code>
                   </span>
                 </div>
               )}
               <p className="text-[11px] text-muted-foreground">
-                Content-Type is auto-detected from file extension and MIME type.
-                Supported: PHP, CSS, JavaScript, HTML, JSON, XML, SVG, TXT, images, fonts, and more.
+                Content-Type auto-detected from file extension and MIME type.
               </p>
             </div>
           )}
@@ -474,80 +452,12 @@ function EndpointForm({
   );
 }
 
-/* ========================= Test Endpoint Dialog ========================= */
-
-function TestEndpointDialog({ ep }: { ep: Doc<"customEndpoints"> }) {
-  const [open, setOpen] = useState(false);
-  const [testing, setTesting] = useState(false);
-  const [result, setResult] = useState<{ status: number; body: string; time: number } | null>(null);
-
-  const CONVEX_BASE = (import.meta.env.VITE_CONVEX_URL as string)
-    .replace(/\.convex\.cloud$/, ".convex.site")
-    .replace(/\/$/, "");
-  const url = `${CONVEX_BASE}/hook/${ep.path}`;
-
-  const handleTest = async () => {
-    setTesting(true);
-    setResult(null);
-    const start = Date.now();
-    try {
-      const res = await fetch(url, { method: ep.method === "ANY" ? "GET" : ep.method as string });
-      const body = await res.text();
-      setResult({ status: res.status, body: body.slice(0, 2000), time: Date.now() - start });
-    } catch (err) {
-      setResult({ status: 0, body: err instanceof Error ? err.message : "Request failed", time: Date.now() - start });
-    } finally {
-      setTesting(false);
-    }
-  };
-
-  return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <Button
-        variant="ghost"
-        size="icon"
-        className="size-7 text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100 transition-opacity"
-        onClick={() => { setOpen(true); handleTest(); }}
-      >
-        <TestTube2 className="size-3.5" />
-      </Button>
-      <DialogContent className="sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle>Test endpoint</DialogTitle>
-          <DialogDescription>
-            <code className="font-mono text-xs">{ep.method} /hook/{ep.path}</code>
-          </DialogDescription>
-        </DialogHeader>
-        <div className="space-y-3">
-          <div className="flex items-center gap-2">
-            <Button size="sm" onClick={handleTest} disabled={testing} className="cursor-pointer">
-              {testing ? <Loader2 className="size-3 animate-spin" /> : <TestTube2 className="size-3" />}
-              {testing ? "Testing…" : "Re-test"}
-            </Button>
-            {result && (
-              <span className={`text-xs font-medium ${result.status >= 200 && result.status < 400 ? "text-emerald-500" : "text-destructive"}`}>
-                {result.status > 0 ? `${result.status}` : "Error"} · {result.time}ms
-              </span>
-            )}
-          </div>
-          {result && (
-            <div className="rounded-lg border border-border bg-zinc-950 p-3">
-              <pre className="max-h-[300px] overflow-auto font-mono text-[11px] leading-relaxed text-zinc-200 whitespace-pre-wrap break-all">
-                {result.body}
-              </pre>
-            </div>
-          )}
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
 /* ========================= Endpoint Row ========================= */
 
 function EndpointRow({ ep }: { ep: Doc<"customEndpoints"> }) {
   const toggleEndpoint = useMutation(api.nameserver.updateCustomEndpoint);
   const deleteEndpoint = useMutation(api.nameserver.deleteCustomEndpoint);
+  const duplicateEndpoint = useMutation(api.nameserver.duplicateCustomEndpoint);
   const [editOpen, setEditOpen] = useState(false);
 
   const CONVEX_BASE = (import.meta.env.VITE_CONVEX_URL as string)
@@ -574,11 +484,10 @@ function EndpointRow({ ep }: { ep: Doc<"customEndpoints"> }) {
 
   const handleDuplicate = async () => {
     try {
-      const createEndpoint = (await import("@/convex/_generated/api")).api.nameserver.createCustomEndpoint;
-      // We can't call useMutation here, so we use a different approach
-      toast.info("Use 'New endpoint' and pre-fill from this one");
-    } catch {
-      // fallback
+      const res = await duplicateEndpoint({ id: ep._id });
+      toast.success(`Duplicated as /hook/${res.path}`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Duplicate failed");
     }
   };
 
@@ -632,12 +541,21 @@ function EndpointRow({ ep }: { ep: Doc<"customEndpoints"> }) {
           </div>
         </div>
         <div className="flex items-center gap-1 sm:ml-3">
-          <TestEndpointDialog ep={ep} />
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-7 text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100 transition-opacity"
+            title="Duplicate"
+            onClick={handleDuplicate}
+          >
+            <FileText className="size-3.5" />
+          </Button>
           <Button
             variant="ghost"
             size="icon"
             className="size-7 text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100 transition-opacity"
             onClick={() => setEditOpen(true)}
+            title="Edit"
           >
             <Pencil className="size-3.5" />
           </Button>
@@ -660,16 +578,11 @@ function EndpointRow({ ep }: { ep: Doc<"customEndpoints"> }) {
             <AlertDialogContent>
               <AlertDialogHeader>
                 <AlertDialogTitle>Delete /hook/{ep.path}?</AlertDialogTitle>
-                <AlertDialogDescription>
-                  This endpoint will stop working immediately.
-                </AlertDialogDescription>
+                <AlertDialogDescription>This endpoint will stop working immediately.</AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>
                 <AlertDialogCancel className="cursor-pointer">Cancel</AlertDialogCancel>
-                <AlertDialogAction
-                  className="cursor-pointer bg-destructive text-white hover:bg-destructive/90"
-                  onClick={handleDelete}
-                >
+                <AlertDialogAction className="cursor-pointer bg-destructive text-white hover:bg-destructive/90" onClick={handleDelete}>
                   Delete
                 </AlertDialogAction>
               </AlertDialogFooter>
@@ -678,7 +591,6 @@ function EndpointRow({ ep }: { ep: Doc<"customEndpoints"> }) {
         </div>
       </motion.div>
 
-      {/* Edit dialog */}
       <EndpointForm
         open={editOpen}
         onOpenChange={setEditOpen}
@@ -688,7 +600,7 @@ function EndpointRow({ ep }: { ep: Doc<"customEndpoints"> }) {
         initialStatusCode={ep.statusCode}
         initialBody={ep.body}
         initialContentType={ep.contentType ?? "application/json"}
-        initialResponseType={ep.responseType as "text" | "file" ?? "text"}
+        initialResponseType={(ep.responseType as "text" | "file") ?? "text"}
         initialFileId={ep.fileId}
         initialAuthRequired={ep.authRequired ?? false}
         endpointId={ep._id}
@@ -718,7 +630,6 @@ export default function CustomEndpointsPage() {
         />
       </motion.div>
 
-      {/* Info card */}
       <motion.div initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1, duration: 0.3 }}>
         <Card className="border-violet-500/20 bg-gradient-to-br from-violet-500/5 via-background to-fuchsia-500/5">
           <CardContent className="pt-5">
@@ -732,7 +643,8 @@ export default function CustomEndpointsPage() {
                   Each endpoint lives at <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px]">/hook/&lt;path&gt;</code>.
                   Choose <strong>Text / JSON</strong> for static responses or{" "}
                   <strong>File upload</strong> to serve uploaded files with auto-detected Content-Type.
-                  Hover an endpoint to <strong>test</strong> it, <strong>edit</strong> it, or <strong>delete</strong> it.
+                  Hover an endpoint to <strong>duplicate</strong>, <strong>edit</strong>, or <strong>delete</strong> it.
+                  Test with curl: <code className="font-mono text-[11px]">curl https://.../hook/&lt;path&gt;</code>
                 </p>
               </div>
             </div>
@@ -740,7 +652,6 @@ export default function CustomEndpointsPage() {
         </Card>
       </motion.div>
 
-      {/* Endpoint list */}
       <div className="space-y-3">
         {endpoints === undefined ? (
           <div className="flex min-h-[20vh] items-center justify-center">
@@ -767,7 +678,6 @@ export default function CustomEndpointsPage() {
         )}
       </div>
 
-      {/* Create dialog */}
       <EndpointForm open={createOpen} onOpenChange={setCreateOpen} mode="create" />
     </div>
   );

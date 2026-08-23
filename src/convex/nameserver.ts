@@ -869,6 +869,34 @@ export const deleteCustomEndpoint = mutation({
   },
 });
 
+/** Duplicate a custom endpoint with a new unique path. */
+export const duplicateCustomEndpoint = mutation({
+  args: { id: v.id("customEndpoints"), newPath: v.optional(v.string()) },
+  handler: async (ctx, args) => {
+    await requireRole(ctx, ["owner"]);
+    const src = await ctx.db.get(args.id);
+    if (src === null) throw new Error("Endpoint not found");
+    const newPath = (args.newPath ?? `${src.path}-copy`)
+      .trim().toLowerCase().replace(/[^a-z0-9_-]/g, "").slice(0, 64);
+    if (newPath.length === 0) throw new Error("Path is required");
+    const existing = await ctx.db.query("customEndpoints").withIndex("by_path", (q) => q.eq("path", newPath)).first();
+    if (existing) throw new Error(`Endpoint /${newPath} already exists`);
+    const newId = await ctx.db.insert("customEndpoints", {
+      path: newPath,
+      method: src.method,
+      statusCode: src.statusCode,
+      body: src.body,
+      contentType: src.contentType,
+      responseType: src.responseType,
+      fileId: src.fileId,
+      enabled: false,
+      authRequired: src.authRequired,
+      createdBy: (await requireRole(ctx, ["owner"])).userId,
+    });
+    return { id: newId, path: newPath };
+  },
+});
+
 /** Internal: look up a custom endpoint by path (used by http.ts catch-all). */
 export const getCustomEndpointByPath = internalQuery({
   args: { path: v.string() },
