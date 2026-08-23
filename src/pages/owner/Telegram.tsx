@@ -35,6 +35,7 @@ import {
   Trash2,
   Unplug,
 } from "lucide-react";
+import { motion } from "framer-motion";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 
@@ -155,10 +156,12 @@ export default function TelegramPage() {
 
   return (
     <div className="space-y-8">
+      <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
       <PageHeader
         title="Telegram bot"
         description="Control the panel from Telegram — bound to your chat at owner level."
       />
+      </motion.div>
 
       <Card className="border-border/70">
         <CardHeader>

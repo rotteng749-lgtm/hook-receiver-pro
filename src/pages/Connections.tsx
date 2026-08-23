@@ -1,6 +1,7 @@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -17,8 +18,18 @@ import { api } from "@/convex/_generated/api";
 import type { Doc } from "@/convex/_generated/dataModel";
 import { formatRelative } from "@/lib/format";
 import { useAuth } from "@/hooks/use-auth";
+import { motion, AnimatePresence } from "framer-motion";
 import { useMutation, useQuery } from "convex/react";
-import { Activity, Eraser, Loader2, Trash2 } from "lucide-react";
+import {
+  Activity,
+  Eraser,
+  Filter,
+  Loader2,
+  Search,
+  Trash2,
+  XCircle,
+} from "lucide-react";
+import { useMemo, useState } from "react";
 import { toast } from "sonner";
 
 type ConnRow = Doc<"connections"> & {
@@ -31,12 +42,48 @@ function reasonLabel(reason?: string): string {
   return reason.replace(/_/g, " ");
 }
 
+const listVariants = {
+  hidden: {},
+  visible: { transition: { staggerChildren: 0.03 } },
+};
+
+const itemVariants = {
+  hidden: { opacity: 0, x: -8 },
+  visible: { opacity: 1, x: 0, transition: { duration: 0.2 } },
+};
+
 export default function Connections() {
   const { user } = useAuth();
   const connections = useQuery(api.nameserver.listConnections);
   const deleteConnection = useMutation(api.nameserver.deleteConnection);
   const clearConnections = useMutation(api.nameserver.clearConnections);
   const role = user?.role ?? "user";
+
+  const [search, setSearch] = useState("");
+  const [filter, setFilter] = useState<"all" | "success" | "failed">("all");
+
+  const filtered = useMemo(() => {
+    if (!connections) return [];
+    let result = connections;
+    if (filter === "success") result = result.filter((c) => c.ok);
+    if (filter === "failed") result = result.filter((c) => !c.ok);
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      result = result.filter(
+        (c) =>
+          c.key.toLowerCase().includes(q) ||
+          c.ip.toLowerCase().includes(q) ||
+          (c.deviceId ?? "").toLowerCase().includes(q) ||
+          (c.serverName ?? "").toLowerCase().includes(q) ||
+          (c.serverCode ?? "").toLowerCase().includes(q) ||
+          (c.reason ?? "").toLowerCase().includes(q),
+      );
+    }
+    return result;
+  }, [connections, search, filter]);
+
+  const successCount = connections?.filter((c) => c.ok).length ?? 0;
+  const failedCount = connections?.filter((c) => !c.ok).length ?? 0;
 
   const removeOne = async (id: Doc<"connections">["_id"]) => {
     try {
@@ -86,11 +133,7 @@ export default function Connections() {
             {connections.length > 0 && (
               <AlertDialog>
                 <AlertDialogTrigger asChild>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="cursor-pointer"
-                  >
+                  <Button variant="outline" size="sm" className="cursor-pointer">
                     <Eraser className="size-3.5" />
                     Clear all
                   </Button>
@@ -105,9 +148,7 @@ export default function Connections() {
                     </AlertDialogDescription>
                   </AlertDialogHeader>
                   <AlertDialogFooter>
-                    <AlertDialogCancel className="cursor-pointer">
-                      Cancel
-                    </AlertDialogCancel>
+                    <AlertDialogCancel className="cursor-pointer">Cancel</AlertDialogCancel>
                     <AlertDialogAction
                       className="cursor-pointer bg-destructive text-white hover:bg-destructive/90"
                       onClick={clearAll}
@@ -122,18 +163,67 @@ export default function Connections() {
         }
       />
 
-      {connections.length === 0 ? (
+      {/* Search & filter bar */}
+      <motion.div
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.3 }}
+        className="flex flex-col gap-3 sm:flex-row sm:items-center"
+      >
+        <div className="relative flex-1">
+          <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search by key, IP, device, server, reason…"
+            className="pl-9"
+          />
+          {search.length > 0 && (
+            <button
+              onClick={() => setSearch("")}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+            >
+              <XCircle className="size-3.5" />
+            </button>
+          )}
+        </div>
+        <div className="flex items-center gap-1.5">
+          <Filter className="size-3.5 text-muted-foreground" />
+          {(["all", "success", "failed"] as const).map((f) => (
+            <Button
+              key={f}
+              variant={filter === f ? "default" : "ghost"}
+              size="sm"
+              onClick={() => setFilter(f)}
+              className="cursor-pointer text-xs capitalize"
+            >
+              {f}
+              {f === "success" && <span className="ml-1 text-emerald-400">{successCount}</span>}
+              {f === "failed" && <span className="ml-1 text-destructive">{failedCount}</span>}
+              {f === "all" && <span className="ml-1 text-muted-foreground">{connections.length}</span>}
+            </Button>
+          ))}
+        </div>
+      </motion.div>
+
+      {filtered.length === 0 ? (
         <Card className="border-dashed border-border bg-card/50">
           <CardContent className="flex flex-col items-center gap-3 py-12 text-center">
             <Activity className="size-8 text-muted-foreground/50" />
             <p className="text-sm text-muted-foreground">
-              No connect attempts yet. Share a key and a server code with a
-              client, then watch them land here.
+              {connections.length === 0
+                ? "No connect attempts yet. Share a key and a server code with a client, then watch them land here."
+                : "No results match your search. Try a different query."}
             </p>
           </CardContent>
         </Card>
       ) : (
-        <div className="overflow-x-auto rounded-xl border border-border bg-card">
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.3 }}
+          className="overflow-x-auto rounded-xl border border-border bg-card"
+        >
           <table className="w-full text-left text-sm">
             <thead>
               <tr className="border-b border-border text-xs text-muted-foreground">
@@ -147,103 +237,116 @@ export default function Connections() {
                 <th className="px-4 py-3 font-medium text-right">Actions</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-border">
-              {connections.map((conn) => (
-                <tr key={conn._id} className="hover:bg-muted/30">
-                  <td className="px-4 py-3 text-xs whitespace-nowrap text-muted-foreground">
-                    {formatRelative(conn._creationTime)}
-                  </td>
-                  <td className="px-4 py-3 text-xs">
-                    <p className="font-medium">{conn.serverName}</p>
-                    <p className="font-mono text-[11px] text-muted-foreground">
-                      {conn.serverCode}
-                    </p>
-                  </td>
-                  <td className="max-w-[160px] px-4 py-3">
-                    <code className="truncate font-mono text-xs">{conn.key}</code>
-                  </td>
-                  <td className="max-w-[140px] px-4 py-3">
-                    {conn.deviceId ? (
-                      <code className="truncate font-mono text-[11px] text-muted-foreground">
-                        {conn.deviceId}
-                      </code>
-                    ) : (
-                      <span className="text-xs text-muted-foreground">—</span>
-                    )}
-                    {(conn.resource || conn.game) && (
-                      <p className="mt-0.5 truncate text-[11px] text-muted-foreground/80">
-                        {conn.resource}
-                        {conn.game &&
-                          ` · ${conn.game}${conn.version ? ` v${conn.version}` : ""}`}
+            <AnimatePresence mode="popLayout">
+              <motion.tbody
+                className="divide-y divide-border"
+                variants={listVariants}
+                initial="hidden"
+                animate="visible"
+              >
+                {filtered.map((conn) => (
+                  <motion.tr
+                    key={conn._id}
+                    variants={itemVariants}
+                    exit={{ opacity: 0, x: -20, transition: { duration: 0.15 } }}
+                    layout
+                    className="hover:bg-muted/30"
+                  >
+                    <td className="px-4 py-3 text-xs whitespace-nowrap text-muted-foreground">
+                      {formatRelative(conn._creationTime)}
+                    </td>
+                    <td className="px-4 py-3 text-xs">
+                      <p className="font-medium">{conn.serverName}</p>
+                      <p className="font-mono text-[11px] text-muted-foreground">
+                        {conn.serverCode}
                       </p>
-                    )}
-                  </td>
-                  <td className="px-4 py-3 font-mono text-xs text-muted-foreground">
-                    {conn.ip}
-                  </td>
-                  <td className="px-4 py-3">
-                    {conn.ok ? (
-                      <Badge className="bg-emerald-600/90 text-white hover:bg-emerald-600/90">
-                        connected
-                      </Badge>
-                    ) : (
-                      <Badge variant="destructive" className="text-white">
-                        {reasonLabel(conn.reason)}
-                      </Badge>
-                    )}
-                  </td>
-                  <td className="max-w-[220px] px-4 py-3">
-                    <p className="truncate text-xs text-muted-foreground">
-                      {conn.userAgent ?? "—"}
-                    </p>
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center justify-end">
-                      <AlertDialog>
-                        <AlertDialogTrigger asChild>
-                          <Button
-                            variant="ghost"
-                            size="icon-sm"
-                            className="cursor-pointer text-muted-foreground hover:text-destructive"
-                            aria-label="Delete log entry"
-                            title="Delete this log entry"
-                          >
-                            <Trash2 className="size-4" />
-                          </Button>
-                        </AlertDialogTrigger>
-                        <AlertDialogContent>
-                          <AlertDialogHeader>
-                            <AlertDialogTitle>Delete this log entry?</AlertDialogTitle>
-                            <AlertDialogDescription>
-                              This removes the record of this /connect attempt
-                              permanently. It does not affect the key or its
-                              device binding.
-                            </AlertDialogDescription>
-                          </AlertDialogHeader>
-                          <AlertDialogFooter>
-                            <AlertDialogCancel className="cursor-pointer">
-                              Cancel
-                            </AlertDialogCancel>
-                            <AlertDialogAction
-                              className="cursor-pointer bg-destructive text-white hover:bg-destructive/90"
-                              onClick={() => removeOne(conn._id)}
+                    </td>
+                    <td className="max-w-[160px] px-4 py-3">
+                      <code className="truncate font-mono text-xs">{conn.key}</code>
+                    </td>
+                    <td className="max-w-[140px] px-4 py-3">
+                      {conn.deviceId ? (
+                        <code className="truncate font-mono text-[11px] text-muted-foreground">
+                          {conn.deviceId}
+                        </code>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">—</span>
+                      )}
+                      {(conn.resource || conn.game) && (
+                        <p className="mt-0.5 truncate text-[11px] text-muted-foreground/80">
+                          {conn.resource}
+                          {conn.game &&
+                            ` · ${conn.game}${conn.version ? ` v${conn.version}` : ""}`}
+                        </p>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 font-mono text-xs text-muted-foreground">
+                      {conn.ip}
+                    </td>
+                    <td className="px-4 py-3">
+                      {conn.ok ? (
+                        <Badge className="bg-emerald-600/90 text-white hover:bg-emerald-600/90">
+                          connected
+                        </Badge>
+                      ) : (
+                        <Badge variant="destructive" className="text-white">
+                          {reasonLabel(conn.reason)}
+                        </Badge>
+                      )}
+                    </td>
+                    <td className="max-w-[220px] px-4 py-3">
+                      <p className="truncate text-xs text-muted-foreground">
+                        {conn.userAgent ?? "—"}
+                      </p>
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center justify-end">
+                        <AlertDialog>
+                          <AlertDialogTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="icon-sm"
+                              className="cursor-pointer text-muted-foreground hover:text-destructive"
+                              aria-label="Delete log entry"
+                              title="Delete this log entry"
                             >
-                              Delete
-                            </AlertDialogAction>
-                          </AlertDialogFooter>
-                        </AlertDialogContent>
-                      </AlertDialog>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
+                              <Trash2 className="size-4" />
+                            </Button>
+                          </AlertDialogTrigger>
+                          <AlertDialogContent>
+                            <AlertDialogHeader>
+                              <AlertDialogTitle>Delete this log entry?</AlertDialogTitle>
+                              <AlertDialogDescription>
+                                This removes the record of this /connect attempt
+                                permanently. It does not affect the key or its
+                                device binding.
+                              </AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <AlertDialogFooter>
+                              <AlertDialogCancel className="cursor-pointer">
+                                Cancel
+                              </AlertDialogCancel>
+                              <AlertDialogAction
+                                className="cursor-pointer bg-destructive text-white hover:bg-destructive/90"
+                                onClick={() => removeOne(conn._id)}
+                              >
+                                Delete
+                              </AlertDialogAction>
+                            </AlertDialogFooter>
+                          </AlertDialogContent>
+                        </AlertDialog>
+                      </div>
+                    </td>
+                  </motion.tr>
+                ))}
+              </motion.tbody>
+            </AnimatePresence>
           </table>
-        </div>
+        </motion.div>
       )}
 
       <p className="text-xs text-muted-foreground">
-        Showing the {connections.length} most recent attempts. The connect URL is
+        Showing {filtered.length} of {connections.length} most recent attempts. The connect URL is
         <code className="mx-1 rounded bg-muted px-1 py-0.5">
           POST /connect
         </code>

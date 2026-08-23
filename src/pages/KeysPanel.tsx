@@ -51,6 +51,7 @@ import {
   Trash2,
   XCircle,
 } from "lucide-react";
+import { motion } from "framer-motion";
 import { useState } from "react";
 import { toast } from "sonner";
 
@@ -145,6 +146,7 @@ function GenerateKeyCard({ scope }: { scope: "owner" | "admin" }) {
 
   return (
     <>
+      <motion.div initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
       <Card className="border-border/70">
         <CardHeader>
           <CardTitle className="text-base">Generate a key</CardTitle>
@@ -340,9 +342,15 @@ function GenerateKeyCard({ scope }: { scope: "owner" | "admin" }) {
           </p>
         </DialogContent>
       </Dialog>
+      </motion.div>
     </>
   );
 }
+
+const cardVariants = {
+  hidden: { opacity: 0, y: 20 },
+  visible: { opacity: 1, y: 0, transition: { duration: 0.35, ease: "easeOut" as const } },
+};
 
 export default function KeysPanel({ scope }: { scope: "owner" | "admin" }) {
   const keys = useQuery(api.nameserver.listKeys);
@@ -419,8 +427,8 @@ export default function KeysPanel({ scope }: { scope: "owner" | "admin" }) {
     );
   }
 
-  return (
-    <div className="space-y-8">
+  return (      <div className="space-y-8">
+      <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
       <PageHeader
         title="Keys"
         description={
@@ -429,26 +437,34 @@ export default function KeysPanel({ scope }: { scope: "owner" | "admin" }) {
             : "Your keys. Generating one costs balance from your wallet."
         }
       />
+      </motion.div>
 
       <GenerateKeyCard scope={scope} />
 
       <div className="space-y-4">
-        <h2 className="text-base font-semibold tracking-tight">
+        <motion.h2
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.3 }}
+          className="text-base font-semibold tracking-tight"
+        >
           {scope === "owner" ? "All keys" : "My keys"}
           <span className="ml-2 text-sm font-normal text-muted-foreground">
             {keys.length} total
           </span>
-        </h2>
+        </motion.h2>
 
         {keys.length === 0 ? (
-          <Card className="border-dashed border-border bg-card/50">
-            <CardContent className="flex flex-col items-center gap-3 py-12 text-center">
-              <KeyRound className="size-8 text-muted-foreground/50" />
-              <p className="text-sm text-muted-foreground">
-                No keys yet — generate one above to get a connect key.
-              </p>
-            </CardContent>
-          </Card>
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+            <Card className="border-dashed border-border bg-card/50">
+              <CardContent className="flex flex-col items-center gap-3 py-12 text-center">
+                <KeyRound className="size-8 text-muted-foreground/50" />
+                <p className="text-sm text-muted-foreground">
+                  No keys yet — generate one above to get a connect key.
+                </p>
+              </CardContent>
+            </Card>
+          </motion.div>
         ) : (
           <div className="overflow-x-auto rounded-xl border border-border bg-card">
             <table className="w-full text-left text-sm">

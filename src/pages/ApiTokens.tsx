@@ -34,6 +34,7 @@ import { CodeBlock } from "@/components/panel/CodeBlock";
 import { api } from "@/convex/_generated/api";
 import type { Doc } from "@/convex/_generated/dataModel";
 import { formatDateTime } from "@/lib/format";
+import { motion } from "framer-motion";
 import { useMutation, useQuery } from "convex/react";
 import { AlertTriangle, KeyRound, Loader2, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
@@ -491,11 +492,14 @@ export default function ApiTokens() {
 
   return (
     <div className="space-y-8">
+      <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
       <PageHeader
         title="API & Tokens"
         description="Create API tokens and grab ready-to-use client libraries for your apps and scripts."
       />
+      </motion.div>
 
+      <motion.div initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1, duration: 0.3 }}>
       <Card className="border-border/70">
         <CardHeader>
           <CardTitle className="text-base">Base URL & endpoints</CardTitle>
@@ -536,11 +540,12 @@ export default function ApiTokens() {
                 ))}
               </tbody>
             </table>
-          </div>
-        </CardContent>
+          </div>        </CardContent>
       </Card>
+      </motion.div>
 
       <div className="space-y-4">
+
         <CreateTokenCard />
 
         <Card className="border-border/70">

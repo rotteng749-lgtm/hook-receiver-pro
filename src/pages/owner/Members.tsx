@@ -30,6 +30,7 @@ import {
 import { api } from "@/convex/_generated/api";
 import { formatRelative } from "@/lib/format";
 import { useAuth } from "@/hooks/use-auth";
+import { motion } from "framer-motion";
 import { useMutation, useQuery } from "convex/react";
 import { Coins, Loader2, Plus, Users } from "lucide-react";
 import { useState } from "react";
@@ -310,26 +311,34 @@ export default function Members() {
 
   return (
     <div className="space-y-8">
+      <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
       <PageHeader
         title="Members"
         description="Manage who can do what. Admins create servers and generate keys; the owner controls everything."
         actions={<NewMemberDialog />}
       />
+      </motion.div>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <StatCard icon={Users} label="Members" value={members.length} hint="accounts" />
-        <StatCard
-          icon={Coins}
-          label="Total balance"
-          value={(stats?.totalBalance ?? 0).toLocaleString()}
-          hint="across all members"
-        />
-        <StatCard
-          icon={Coins}
-          label="Key revenue"
-          value={(stats?.revenue ?? 0).toLocaleString()}
-          hint="balance spent on generated keys"
-        />
+        <motion.div initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1, duration: 0.3 }}>
+          <StatCard icon={Users} label="Members" value={members.length} hint="accounts" />
+        </motion.div>
+        <motion.div initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15, duration: 0.3 }}>
+          <StatCard
+            icon={Coins}
+            label="Total balance"
+            value={(stats?.totalBalance ?? 0).toLocaleString()}
+            hint="across all members"
+          />
+        </motion.div>
+        <motion.div initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2, duration: 0.3 }}>
+          <StatCard
+            icon={Coins}
+            label="Key revenue"
+            value={(stats?.revenue ?? 0).toLocaleString()}
+            hint="balance spent on generated keys"
+          />
+        </motion.div>
       </div>
 
       <Card className="border-border/70">

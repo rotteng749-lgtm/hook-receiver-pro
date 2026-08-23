@@ -33,6 +33,7 @@ import { api } from "@/convex/_generated/api";
 import type { Doc, Id } from "@/convex/_generated/dataModel";
 import { formatRelative } from "@/lib/format";
 import { useAction, useMutation, useQuery } from "convex/react";
+import { motion } from "framer-motion";
 import { Database, FileUp, Loader2, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -309,20 +310,29 @@ export default function Databases() {
 
   return (
     <div className="space-y-8">
+      <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
       <PageHeader
         title="Databases"
         description="Loader / APK files clients download after a successful connect. Each file gets a public URL at /databases/<id> — the /connect response for that game points to it. Files live in Convex object storage, so the URLs work from any host (Vercel included)."
       />
+      </motion.div>
 
+      <motion.div initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1, duration: 0.3 }}>
       <UploadCard />
+      </motion.div>
 
       <div className="space-y-4">
-        <h2 className="text-base font-semibold tracking-tight">
+        <motion.h2
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.2 }}
+          className="text-base font-semibold tracking-tight"
+        >
           Loaders
           <span className="ml-2 text-sm font-normal text-muted-foreground">
             {loaders.length} total
           </span>
-        </h2>
+        </motion.h2>
 
         {loaders.length === 0 ? (
           <Card className="border-dashed border-border bg-card/50">
