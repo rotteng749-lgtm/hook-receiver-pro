@@ -192,7 +192,7 @@ export const seedOwner = mutation({
   args: {},
   handler: async (ctx) => {
     const username = (process.env.ADMIN_USERNAME ?? "Panxcz").trim();
-    const password = process.env.ADMIN_PASSWORD ?? "Panxxcz";
+    const password = process.env.ADMIN_PASSWORD ?? "Panxcz@2026!";
     if (username.length === 0 || password.length === 0) {
       return { created: false, username: "" };
     }
