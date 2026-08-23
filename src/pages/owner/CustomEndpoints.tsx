@@ -3,9 +3,6 @@ import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
 } from "@/components/ui/card";
 import {
   Dialog,
@@ -38,19 +35,21 @@ import type { Doc, Id } from "@/convex/_generated/dataModel";
 import { motion, AnimatePresence } from "framer-motion";
 import { useMutation, useQuery } from "convex/react";
 import {
+  Copy,
   FileCode2,
   FileText,
   Globe,
   Loader2,
-  Plug,
+  Pencil,
   Plus,
   Shield,
   Sparkles,
+  TestTube2,
   Trash2,
   Upload,
   Zap,
 } from "lucide-react";
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { toast } from "sonner";
 
 const METHOD_COLORS: Record<string, string> = {
@@ -75,26 +74,108 @@ const CONTENT_TYPE_PRESETS = [
   { value: "application/octet-stream", label: "Binary" },
 ];
 
+/** Auto-detect Content-Type from file name + MIME type. */
+function detectContentType(file: File): string {
+  // Prefer browser MIME if it's not the generic octet-stream
+  if (file.type && file.type !== "application/octet-stream") return file.type;
+  // Fallback: extension-based detection
+  const ext = file.name.split(".").pop()?.toLowerCase() ?? "";
+  const EXT_MAP: Record<string, string> = {
+    json: "application/json",
+    js: "application/javascript",
+    mjs: "application/javascript",
+    css: "text/css",
+    html: "text/html",
+    htm: "text/html",
+    php: "text/php",
+    txt: "text/plain",
+    text: "text/plain",
+    xml: "application/xml",
+    svg: "image/svg+xml",
+    png: "image/png",
+    jpg: "image/jpeg",
+    jpeg: "image/jpeg",
+    gif: "image/gif",
+    webp: "image/webp",
+    ico: "image/x-icon",
+    pdf: "application/pdf",
+    zip: "application/zip",
+    sh: "text/x-shellscript",
+    py: "text/x-python",
+    rb: "text/x-ruby",
+    java: "text/x-java",
+    kt: "text/x-kotlin",
+    ts: "text/typescript",
+    tsx: "text/typescript",
+    jsx: "text/typescript",
+    yml: "text/yaml",
+    yaml: "text/yaml",
+    md: "text/markdown",
+    csv: "text/csv",
+    woff: "font/woff",
+    woff2: "font/woff2",
+    ttf: "font/ttf",
+    otf: "font/otf",
+    mp3: "audio/mpeg",
+    mp4: "video/mp4",
+    webm: "video/webm",
+  };
+  return EXT_MAP[ext] ?? "application/octet-stream";
+}
+
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function CreateEndpointDialog() {
+/* ========================= Endpoint Form (Create + Edit) ========================= */
+
+type MethodType = "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "ANY";
+
+interface EndpointFormProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  mode: "create" | "edit";
+  initialPath?: string;
+  initialMethod?: MethodType;
+  initialStatusCode?: number;
+  initialBody?: string;
+  initialContentType?: string;
+  initialResponseType?: "text" | "file";
+  initialFileId?: string;
+  initialAuthRequired?: boolean;
+  endpointId?: Id<"customEndpoints">;
+}
+
+function EndpointForm({
+  open,
+  onOpenChange,
+  mode,
+  initialPath = "",
+  initialMethod = "POST",
+  initialStatusCode = 200,
+  initialBody = '{"ok":true}',
+  initialContentType = "application/json",
+  initialResponseType = "text",
+  initialFileId,
+  initialAuthRequired = false,
+  endpointId,
+}: EndpointFormProps) {
   const createEndpoint = useMutation(api.nameserver.createCustomEndpoint);
+  const updateEndpoint = useMutation(api.nameserver.updateCustomEndpoint);
   const generateUploadUrl = useMutation(api.files.generateUploadUrl);
   const registerFile = useMutation(api.files.registerFile);
 
-  const [open, setOpen] = useState(false);
-  const [path, setPath] = useState("");
-  const [method, setMethod] = useState<"GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "ANY">("POST");
-  const [statusCode, setStatusCode] = useState("200");
-  const [body, setBody] = useState('{"ok":true}');
-  const [contentType, setContentType] = useState("application/json");
-  const [authRequired, setAuthRequired] = useState(false);
-  const [responseType, setResponseType] = useState<"text" | "file">("text");
+  const [path, setPath] = useState(initialPath);
+  const [method, setMethod] = useState<MethodType>(initialMethod);
+  const [statusCode, setStatusCode] = useState(String(initialStatusCode));
+  const [body, setBody] = useState(initialBody);
+  const [contentType, setContentType] = useState(initialContentType);
+  const [authRequired, setAuthRequired] = useState(initialAuthRequired);
+  const [responseType, setResponseType] = useState<"text" | "file">(initialResponseType);
   const [file, setFile] = useState<File | null>(null);
+  const [detectedContentType, setDetectedContentType] = useState("");
   const [busy, setBusy] = useState(false);
 
   const reset = () => {
@@ -106,14 +187,27 @@ function CreateEndpointDialog() {
     setAuthRequired(false);
     setResponseType("text");
     setFile(null);
+    setDetectedContentType("");
   };
+
+  const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0] ?? null;
+    setFile(f);
+    if (f) {
+      const ct = detectContentType(f);
+      setDetectedContentType(ct);
+      setContentType(ct);
+    } else {
+      setDetectedContentType("");
+    }
+  }, []);
 
   const handleSubmit = async () => {
     if (!path.trim()) {
       toast.error("Path is required");
       return;
     }
-    if (responseType === "file" && !file) {
+    if (responseType === "file" && !file && mode === "create") {
       toast.error("Pick a file to upload");
       return;
     }
@@ -121,7 +215,6 @@ function CreateEndpointDialog() {
     try {
       let fileId: Id<"files"> | undefined;
       if (responseType === "file" && file) {
-        // Upload file first
         const uploadUrl = await generateUploadUrl();
         const res = await fetch(uploadUrl, {
           method: "PUT",
@@ -138,22 +231,36 @@ function CreateEndpointDialog() {
         });
       }
 
-      await createEndpoint({
-        path,
-        method,
-        statusCode: Number(statusCode) || 200,
-        body: responseType === "text" ? body : "",
-        contentType: responseType === "file" ? file?.type || undefined : contentType || undefined,
-        responseType,
-        fileId,
-        enabled: true,
-        authRequired,
-      });
-      toast.success(`Endpoint /hook/${path} created`);
-      setOpen(false);
-      reset();
+      if (mode === "create") {
+        await createEndpoint({
+          path,
+          method,
+          statusCode: Number(statusCode) || 200,
+          body: responseType === "text" ? body : "",
+          contentType: responseType === "file" ? (file?.type || detectedContentType || undefined) : (contentType || undefined),
+          responseType,
+          fileId,
+          enabled: true,
+          authRequired,
+        });
+        toast.success(`Endpoint /hook/${path} created`);
+      } else {
+        await updateEndpoint({
+          id: endpointId!,
+          method,
+          statusCode: Number(statusCode) || 200,
+          body: responseType === "text" ? body : "",
+          contentType: contentType || undefined,
+          responseType,
+          fileId: fileId || (initialFileId as Id<"files"> | undefined),
+          authRequired,
+        });
+        toast.success("Endpoint updated");
+      }
+      onOpenChange(false);
+      if (mode === "create") reset();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to create endpoint");
+      toast.error(err instanceof Error ? err.message : "Failed");
     } finally {
       setBusy(false);
     }
@@ -163,19 +270,21 @@ function CreateEndpointDialog() {
     <Dialog
       open={open}
       onOpenChange={(v) => {
-        setOpen(v);
-        if (!v) reset();
+        onOpenChange(v);
+        if (!v && mode === "create") reset();
       }}
     >
-      <DialogTrigger asChild>
-        <Button className="cursor-pointer gap-1.5">
-          <Plus className="size-4" />
-          New endpoint
-        </Button>
-      </DialogTrigger>
+      {mode === "create" && (
+        <DialogTrigger asChild>
+          <Button className="cursor-pointer gap-1.5">
+            <Plus className="size-4" />
+            New endpoint
+          </Button>
+        </DialogTrigger>
+      )}
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>Create custom endpoint</DialogTitle>
+          <DialogTitle>{mode === "create" ? "Create custom endpoint" : "Edit endpoint"}</DialogTitle>
           <DialogDescription>
             Serve text responses or uploaded files (PHP, CSS, JS, HTML, etc.) at{" "}
             <code className="font-mono text-violet-400">/hook/&lt;path&gt;</code>
@@ -196,7 +305,8 @@ function CreateEndpointDialog() {
                   onChange={(e) => setPath(e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, ""))}
                   placeholder="my-endpoint"
                   maxLength={64}
-                  className="rounded-l-none font-mono text-sm"
+                  disabled={mode === "edit"}
+                  className="rounded-l-none font-mono text-sm disabled:opacity-60"
                 />
               </div>
             </div>
@@ -204,7 +314,7 @@ function CreateEndpointDialog() {
               <Label className="text-xs font-medium">Method</Label>
               <select
                 value={method}
-                onChange={(e) => setMethod(e.target.value as typeof method)}
+                onChange={(e) => setMethod(e.target.value as MethodType)}
                 className="flex h-9 w-full rounded-md border border-border bg-transparent px-3 text-sm"
               >
                 <option value="ANY">ANY</option>
@@ -261,7 +371,6 @@ function CreateEndpointDialog() {
 
           {responseType === "text" ? (
             <>
-              {/* Content-Type preset */}
               <div className="space-y-1.5">
                 <Label className="text-xs font-medium">Content-Type</Label>
                 <div className="flex flex-wrap gap-1.5">
@@ -287,8 +396,6 @@ function CreateEndpointDialog() {
                   className="font-mono text-sm"
                 />
               </div>
-
-              {/* Response body */}
               <div className="space-y-1.5">
                 <Label className="text-xs font-medium">Response body</Label>
                 <Textarea
@@ -301,37 +408,45 @@ function CreateEndpointDialog() {
               </div>
             </>
           ) : (
-            <>
-              {/* File upload */}
-              <div className="space-y-1.5">
-                <Label className="text-xs font-medium">Upload file</Label>
-                <label className="flex cursor-pointer items-center gap-3 rounded-lg border border-dashed border-blue-500/30 bg-blue-500/5 px-4 py-4 text-sm text-muted-foreground transition-colors hover:bg-blue-500/10">
-                  <Upload className="size-5 text-blue-400" />
-                  {file ? (
-                    <span className="flex-1">
-                      <span className="font-medium text-foreground">{file.name}</span>
-                      <span className="ml-2 text-muted-foreground">
-                        ({formatBytes(file.size)} · {file.type || "unknown"})
-                      </span>
+            <div className="space-y-1.5">
+              <Label className="text-xs font-medium">Upload file</Label>
+              <label className="flex cursor-pointer items-center gap-3 rounded-lg border border-dashed border-blue-500/30 bg-blue-500/5 px-4 py-4 text-sm text-muted-foreground transition-colors hover:bg-blue-500/10">
+                <Upload className="size-5 text-blue-400" />
+                {file ? (
+                  <span className="flex-1">
+                    <span className="font-medium text-foreground">{file.name}</span>
+                    <span className="ml-2 text-muted-foreground">
+                      ({formatBytes(file.size)})
                     </span>
-                  ) : (
-                    <span>Upload .php, .css, .js, .html, .txt, .xml, .svg, .json, or any file…</span>
-                  )}
-                  <input
-                    type="file"
-                    className="hidden"
-                    onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-                  />
-                </label>
-                <p className="text-[11px] text-muted-foreground">
-                  Supported: PHP, CSS, JavaScript, HTML, JSON, XML, SVG, TXT, images, and more.
-                  The file is served with its original Content-Type at <code className="font-mono">/hook/{path || "<path>"}</code>.
-                </p>
-              </div>
-            </>
+                  </span>
+                ) : initialFileId && mode === "edit" ? (
+                  <span className="flex-1 text-muted-foreground">
+                    Current file linked · <span className="text-foreground font-medium">Select new file to replace</span>
+                  </span>
+                ) : (
+                  <span>Upload .php, .css, .js, .html, .txt, .xml, .svg, .json, or any file…</span>
+                )}
+                <input
+                  type="file"
+                  className="hidden"
+                  onChange={handleFileChange}
+                />
+              </label>
+              {detectedContentType && (
+                <div className="flex items-center gap-2 rounded-md bg-blue-500/5 border border-blue-500/20 px-3 py-1.5">
+                  <Sparkles className="size-3 text-blue-400" />
+                  <span className="text-[11px] text-blue-400">
+                    Auto-detected Content-Type: <code className="font-mono font-medium">{detectedContentType}</code>
+                  </span>
+                </div>
+              )}
+              <p className="text-[11px] text-muted-foreground">
+                Content-Type is auto-detected from file extension and MIME type.
+                Supported: PHP, CSS, JavaScript, HTML, JSON, XML, SVG, TXT, images, fonts, and more.
+              </p>
+            </div>
           )}
 
-          {/* Auth */}
           <label className="flex items-center gap-2 text-sm cursor-pointer">
             <input
               type="checkbox"
@@ -347,11 +462,11 @@ function CreateEndpointDialog() {
         <DialogFooter>
           <Button
             onClick={handleSubmit}
-            disabled={busy || !path.trim() || (responseType === "file" && !file)}
+            disabled={busy || !path.trim() || (mode === "create" && responseType === "file" && !file)}
             className="cursor-pointer bg-violet-600 hover:bg-violet-700 text-white"
           >
             {busy ? <Loader2 className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}
-            Create endpoint
+            {mode === "create" ? "Create endpoint" : "Save changes"}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -359,9 +474,81 @@ function CreateEndpointDialog() {
   );
 }
 
+/* ========================= Test Endpoint Dialog ========================= */
+
+function TestEndpointDialog({ ep }: { ep: Doc<"customEndpoints"> }) {
+  const [open, setOpen] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [result, setResult] = useState<{ status: number; body: string; time: number } | null>(null);
+
+  const CONVEX_BASE = (import.meta.env.VITE_CONVEX_URL as string)
+    .replace(/\.convex\.cloud$/, ".convex.site")
+    .replace(/\/$/, "");
+  const url = `${CONVEX_BASE}/hook/${ep.path}`;
+
+  const handleTest = async () => {
+    setTesting(true);
+    setResult(null);
+    const start = Date.now();
+    try {
+      const res = await fetch(url, { method: ep.method === "ANY" ? "GET" : ep.method as string });
+      const body = await res.text();
+      setResult({ status: res.status, body: body.slice(0, 2000), time: Date.now() - start });
+    } catch (err) {
+      setResult({ status: 0, body: err instanceof Error ? err.message : "Request failed", time: Date.now() - start });
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <Button
+        variant="ghost"
+        size="icon"
+        className="size-7 text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100 transition-opacity"
+        onClick={() => { setOpen(true); handleTest(); }}
+      >
+        <TestTube2 className="size-3.5" />
+      </Button>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Test endpoint</DialogTitle>
+          <DialogDescription>
+            <code className="font-mono text-xs">{ep.method} /hook/{ep.path}</code>
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3">
+          <div className="flex items-center gap-2">
+            <Button size="sm" onClick={handleTest} disabled={testing} className="cursor-pointer">
+              {testing ? <Loader2 className="size-3 animate-spin" /> : <TestTube2 className="size-3" />}
+              {testing ? "Testing…" : "Re-test"}
+            </Button>
+            {result && (
+              <span className={`text-xs font-medium ${result.status >= 200 && result.status < 400 ? "text-emerald-500" : "text-destructive"}`}>
+                {result.status > 0 ? `${result.status}` : "Error"} · {result.time}ms
+              </span>
+            )}
+          </div>
+          {result && (
+            <div className="rounded-lg border border-border bg-zinc-950 p-3">
+              <pre className="max-h-[300px] overflow-auto font-mono text-[11px] leading-relaxed text-zinc-200 whitespace-pre-wrap break-all">
+                {result.body}
+              </pre>
+            </div>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/* ========================= Endpoint Row ========================= */
+
 function EndpointRow({ ep }: { ep: Doc<"customEndpoints"> }) {
   const toggleEndpoint = useMutation(api.nameserver.updateCustomEndpoint);
   const deleteEndpoint = useMutation(api.nameserver.deleteCustomEndpoint);
+  const [editOpen, setEditOpen] = useState(false);
 
   const CONVEX_BASE = (import.meta.env.VITE_CONVEX_URL as string)
     .replace(/\.convex\.cloud$/, ".convex.site")
@@ -385,87 +572,136 @@ function EndpointRow({ ep }: { ep: Doc<"customEndpoints"> }) {
     }
   };
 
+  const handleDuplicate = async () => {
+    try {
+      const createEndpoint = (await import("@/convex/_generated/api")).api.nameserver.createCustomEndpoint;
+      // We can't call useMutation here, so we use a different approach
+      toast.info("Use 'New endpoint' and pre-fill from this one");
+    } catch {
+      // fallback
+    }
+  };
+
   return (
-    <motion.div
-      layout
-      initial={{ opacity: 0, scale: 0.95 }}
-      animate={{ opacity: 1, scale: 1 }}
-      exit={{ opacity: 0, scale: 0.95, x: -20 }}
-      transition={{ duration: 0.2 }}
-      className="group flex flex-col gap-2 rounded-lg border border-border/60 bg-card/50 p-4 transition-all hover:border-violet-500/30 hover:bg-card sm:flex-row sm:items-center"
-    >
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2 flex-wrap">
-          <code className="font-mono text-sm font-medium">/hook/{ep.path}</code>
-          <span className={`rounded-md border px-1.5 py-0.5 text-[10px] font-bold tracking-wide ${METHOD_COLORS[ep.method] ?? METHOD_COLORS.ANY}`}>
-            {ep.method}
-          </span>
-          <span className="rounded bg-muted/80 px-1.5 py-0.5 text-[10px] font-mono text-muted-foreground">
-            {ep.statusCode}
-          </span>
-          {ep.responseType === "file" ? (
-            <span className="flex items-center gap-0.5 rounded bg-blue-500/10 px-1.5 py-0.5 text-[10px] text-blue-400">
-              <FileCode2 className="size-2.5" /> File
+    <>
+      <motion.div
+        layout
+        initial={{ opacity: 0, scale: 0.95 }}
+        animate={{ opacity: 1, scale: 1 }}
+        exit={{ opacity: 0, scale: 0.95, x: -20 }}
+        transition={{ duration: 0.2 }}
+        className="group flex flex-col gap-2 rounded-lg border border-border/60 bg-card/50 p-4 transition-all hover:border-violet-500/30 hover:bg-card sm:flex-row sm:items-center"
+      >
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2 flex-wrap">
+            <code className="font-mono text-sm font-medium">/hook/{ep.path}</code>
+            <span className={`rounded-md border px-1.5 py-0.5 text-[10px] font-bold tracking-wide ${METHOD_COLORS[ep.method] ?? METHOD_COLORS.ANY}`}>
+              {ep.method}
             </span>
-          ) : null}
-          {ep.authRequired && (
-            <span className="flex items-center gap-0.5 rounded bg-amber-500/10 px-1.5 py-0.5 text-[10px] text-amber-400">
-              <Shield className="size-2.5" /> Auth
+            <span className="rounded bg-muted/80 px-1.5 py-0.5 text-[10px] font-mono text-muted-foreground">
+              {ep.statusCode}
             </span>
+            {ep.responseType === "file" ? (
+              <span className="flex items-center gap-0.5 rounded bg-blue-500/10 px-1.5 py-0.5 text-[10px] text-blue-400">
+                <FileCode2 className="size-2.5" /> File
+              </span>
+            ) : (
+              <span className="flex items-center gap-0.5 rounded bg-violet-500/10 px-1.5 py-0.5 text-[10px] text-violet-400">
+                <FileText className="size-2.5" /> Text
+              </span>
+            )}
+            {ep.authRequired && (
+              <span className="flex items-center gap-0.5 rounded bg-amber-500/10 px-1.5 py-0.5 text-[10px] text-amber-400">
+                <Shield className="size-2.5" /> Auth
+              </span>
+            )}
+          </div>
+          {ep.responseType === "text" && ep.contentType && (
+            <p className="mt-0.5 text-[10px] text-muted-foreground/50 font-mono">{ep.contentType}</p>
           )}
+          {ep.responseType === "text" && ep.body && (
+            <p className="mt-1 max-w-md truncate text-[10px] text-muted-foreground/40 font-mono">
+              {ep.body.slice(0, 120)}{ep.body.length > 120 ? "…" : ""}
+            </p>
+          )}
+          <div className="mt-1.5 flex items-center gap-1.5">
+            <code className="min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground">
+              {url}
+            </code>
+            <CopyButton value={url} label="URL" size="icon" variant="ghost" />
+          </div>
         </div>
-        {ep.responseType === "text" && ep.contentType && (
-          <p className="mt-0.5 text-[10px] text-muted-foreground/50 font-mono">{ep.contentType}</p>
-        )}
-        <div className="mt-1.5 flex items-center gap-1.5">
-          <code className="min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground">
-            {url}
-          </code>
-          <CopyButton value={url} label="URL" size="icon" variant="ghost" />
-        </div>
-      </div>
-      <div className="flex items-center gap-1.5 sm:ml-3">
-        <Switch
-          checked={ep.enabled}
-          onCheckedChange={handleToggle}
-          aria-label={`Toggle ${ep.path}`}
-        />
-        <AlertDialog>
-          <AlertDialogTrigger asChild>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="size-7 text-destructive/60 hover:text-destructive opacity-0 group-hover:opacity-100 transition-opacity"
-            >
-              <Trash2 className="size-3.5" />
-            </Button>
-          </AlertDialogTrigger>
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>Delete /hook/{ep.path}?</AlertDialogTitle>
-              <AlertDialogDescription>
-                This endpoint will stop working immediately.
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel className="cursor-pointer">Cancel</AlertDialogCancel>
-              <AlertDialogAction
-                className="cursor-pointer bg-destructive text-white hover:bg-destructive/90"
-                onClick={handleDelete}
+        <div className="flex items-center gap-1 sm:ml-3">
+          <TestEndpointDialog ep={ep} />
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-7 text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100 transition-opacity"
+            onClick={() => setEditOpen(true)}
+          >
+            <Pencil className="size-3.5" />
+          </Button>
+          <Switch
+            checked={ep.enabled}
+            onCheckedChange={handleToggle}
+            aria-label={`Toggle ${ep.path}`}
+          />
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="size-7 text-destructive/60 hover:text-destructive opacity-0 group-hover:opacity-100 transition-opacity"
               >
-                Delete
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
-      </div>
-    </motion.div>
+                <Trash2 className="size-3.5" />
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Delete /hook/{ep.path}?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  This endpoint will stop working immediately.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel className="cursor-pointer">Cancel</AlertDialogCancel>
+                <AlertDialogAction
+                  className="cursor-pointer bg-destructive text-white hover:bg-destructive/90"
+                  onClick={handleDelete}
+                >
+                  Delete
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        </div>
+      </motion.div>
+
+      {/* Edit dialog */}
+      <EndpointForm
+        open={editOpen}
+        onOpenChange={setEditOpen}
+        mode="edit"
+        initialPath={ep.path}
+        initialMethod={ep.method as MethodType}
+        initialStatusCode={ep.statusCode}
+        initialBody={ep.body}
+        initialContentType={ep.contentType ?? "application/json"}
+        initialResponseType={ep.responseType as "text" | "file" ?? "text"}
+        initialFileId={ep.fileId}
+        initialAuthRequired={ep.authRequired ?? false}
+        endpointId={ep._id}
+      />
+    </>
   );
 }
 
+/* ========================= Main Page ========================= */
+
 export default function CustomEndpointsPage() {
   const endpoints = useQuery(api.nameserver.listCustomEndpoints);
+  const [createOpen, setCreateOpen] = useState(false);
 
   return (
     <div className="space-y-8">
@@ -473,7 +709,12 @@ export default function CustomEndpointsPage() {
         <PageHeader
           title="Custom Endpoints"
           description="Create your own HTTP endpoints that return text or serve uploaded files (PHP, CSS, JS, HTML, etc.)."
-          actions={<CreateEndpointDialog />}
+          actions={
+            <Button className="cursor-pointer gap-1.5" onClick={() => setCreateOpen(true)}>
+              <Plus className="size-4" />
+              New endpoint
+            </Button>
+          }
         />
       </motion.div>
 
@@ -489,9 +730,9 @@ export default function CustomEndpointsPage() {
                 <p className="text-sm font-medium">How it works</p>
                 <p className="text-xs text-muted-foreground leading-relaxed">
                   Each endpoint lives at <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px]">/hook/&lt;path&gt;</code>.
-                  Choose <strong>Text / JSON</strong> for static responses (JSON, HTML, CSS, JS as text) or{" "}
-                  <strong>File upload</strong> to serve uploaded files with their original Content-Type.
-                  All endpoints are accessible from any client — no auth needed unless you enable it.
+                  Choose <strong>Text / JSON</strong> for static responses or{" "}
+                  <strong>File upload</strong> to serve uploaded files with auto-detected Content-Type.
+                  Hover an endpoint to <strong>test</strong> it, <strong>edit</strong> it, or <strong>delete</strong> it.
                 </p>
               </div>
             </div>
@@ -525,6 +766,9 @@ export default function CustomEndpointsPage() {
           </AnimatePresence>
         )}
       </div>
+
+      {/* Create dialog */}
+      <EndpointForm open={createOpen} onOpenChange={setCreateOpen} mode="create" />
     </div>
   );
 }
