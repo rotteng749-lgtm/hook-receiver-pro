@@ -203,13 +203,26 @@ function EndpointForm({
       let fileId: Id<"files"> | undefined;
       if (responseType === "file" && file) {
         const uploadUrl = await generateUploadUrl();
-        // Convex presigned URLs reject PUT requests with a Content-Type header
-        // that differs from the one used at generation time. Send the raw body
-        // without setting Content-Type to avoid signature mismatches.
-        const res = await fetch(uploadUrl, {
-          method: "PUT",
-          body: file,
-        });
+        // Convert File → ArrayBuffer → Blob with no type so the browser
+        // does NOT auto-set a Content-Type header.  Convex presigned URLs
+        // reject uploads where the Content-Type doesn't match what was used
+        // at generation time, and the browser always injects one when you
+        // pass a File directly.
+        const bytes = await file.arrayBuffer();
+        const rawBlob = new Blob([bytes], { type: "application/octet-stream" });
+        // 60-second timeout so the request can't hang forever.
+        const ac = new AbortController();
+        const timer = setTimeout(() => ac.abort(), 60_000);
+        let res: Response;
+        try {
+          res = await fetch(uploadUrl, {
+            method: "PUT",
+            body: rawBlob,
+            signal: ac.signal,
+          });
+        } finally {
+          clearTimeout(timer);
+        }
         if (!res.ok) {
           const detail = await res.text().catch(() => "");
           throw new Error(`File upload failed (${res.status}): ${detail}`);
