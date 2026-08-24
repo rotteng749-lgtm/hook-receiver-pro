@@ -164,6 +164,10 @@ function EndpointForm({
   const [file, setFile] = useState<File | null>(null);
   const [detectedContentType, setDetectedContentType] = useState("");
   const [busy, setBusy] = useState(false);
+  const [uploadPhase, setUploadPhase] = useState<"" | "uploading" | "registering">("");
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploadSpeed, setUploadSpeed] = useState("");
+  const [uploadEta, setUploadEta] = useState("");
 
   const reset = () => {
     setPath("");
@@ -175,6 +179,10 @@ function EndpointForm({
     setResponseType("text");
     setFile(null);
     setDetectedContentType("");
+    setUploadPhase("");
+    setUploadProgress(0);
+    setUploadSpeed("");
+    setUploadEta("");
   };
 
   const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
@@ -203,37 +211,64 @@ function EndpointForm({
       let fileId: Id<"files"> | undefined;
       if (responseType === "file" && file) {
         const uploadUrl = await generateUploadUrl();
-        // Convert File → ArrayBuffer → Blob with no type so the browser
-        // does NOT auto-set a Content-Type header.  Convex presigned URLs
-        // reject uploads where the Content-Type doesn't match what was used
-        // at generation time, and the browser always injects one when you
-        // pass a File directly.
-        const bytes = await file.arrayBuffer();
-        const rawBlob = new Blob([bytes], { type: "application/octet-stream" });
-        // 60-second timeout so the request can't hang forever.
-        const ac = new AbortController();
-        const timer = setTimeout(() => ac.abort(), 60_000);
-        let res: Response;
-        try {
-          res = await fetch(uploadUrl, {
-            method: "PUT",
-            body: rawBlob,
-            signal: ac.signal,
-          });
-        } finally {
-          clearTimeout(timer);
-        }
-        if (!res.ok) {
-          const detail = await res.text().catch(() => "");
-          throw new Error(`File upload failed (${res.status}): ${detail}`);
-        }
-        const { storageId } = (await res.json()) as { storageId: string };
+        setUploadPhase("uploading");
+        setUploadProgress(0);
+        // Use XHR for upload progress tracking
+        const storageId = await new Promise<string>((resolve, reject) => {
+          const xhr = new XMLHttpRequest();
+          xhr.open("POST", uploadUrl, true);
+          xhr.setRequestHeader("Content-Type", file.type || "application/octet-stream");
+          let lastLoaded = 0;
+          let lastTime = Date.now();
+          xhr.upload.onprogress = (ev) => {
+            if (ev.lengthComputable) {
+              const pct = Math.round((ev.loaded / ev.total) * 100);
+              setUploadProgress(pct);
+              const now = Date.now();
+              const dt = (now - lastTime) / 1000;
+              if (dt > 0.3) {
+                const bytesPerSec = (ev.loaded - lastLoaded) / dt;
+                lastLoaded = ev.loaded;
+                lastTime = now;
+                setUploadSpeed(formatBytes(bytesPerSec) + "/s");
+                const remaining = ev.total - ev.loaded;
+                const etaSec = bytesPerSec > 0 ? Math.ceil(remaining / bytesPerSec) : 0;
+                setUploadEta(etaSec > 0 ? `${etaSec}s left` : "");
+              }
+            }
+          };
+          xhr.onload = () => {
+            if (xhr.status >= 200 && xhr.status < 300) {
+              try {
+                const data = JSON.parse(xhr.responseText);
+                if (data.storageId) resolve(data.storageId);
+                else reject(new Error("No storageId in response"));
+              } catch {
+                reject(new Error(`Invalid response: ${xhr.responseText.slice(0, 200)}`));
+              }
+            } else {
+              const detail = xhr.responseText?.slice(0, 200) ?? "";
+              console.error("[upload] POST failed:", xhr.status, detail);
+              reject(new Error(`File upload failed (${xhr.status}): ${detail}`));
+            }
+          };
+          xhr.onerror = () => reject(new Error("Network error during upload"));
+          xhr.ontimeout = () => reject(new Error("Upload timed out (2 min limit)"));
+          xhr.timeout = 120_000;
+          xhr.send(file);
+        });
+        setUploadPhase("registering");
+        setUploadProgress(100);
+        setUploadSpeed("");
+        setUploadEta("");
         fileId = await registerFile({
           storageId: storageId as Id<"_storage">,
           name: file.name,
           size: file.size,
           contentType: detectContentType(file),
         });
+        setUploadPhase("");
+        setUploadProgress(0);
       }
 
       if (mode === "create") {
@@ -453,6 +488,46 @@ function EndpointForm({
             <Shield className="size-3.5 text-amber-400" />
             Require auth token
           </label>
+
+          {/* Upload progress bar */}
+          {uploadPhase && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: "auto" }}
+              exit={{ opacity: 0, height: 0 }}
+              className="space-y-2"
+            >
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-muted-foreground">
+                  {uploadPhase === "uploading" && (
+                    <span className="flex items-center gap-2">
+                      <Loader2 className="size-3 animate-spin text-violet-400" />
+                      Uploading to storage…
+                    </span>
+                  )}
+                  {uploadPhase === "registering" && "Saving file metadata…"}
+                </span>
+                <span className="tabular-nums font-mono text-muted-foreground">
+                  {uploadProgress}%
+                  {uploadSpeed && ` · ${uploadSpeed}`}
+                  {uploadEta && ` · ${uploadEta}`}
+                </span>
+              </div>
+              <div className="relative h-2 w-full overflow-hidden rounded-full bg-muted/60">
+                <motion.div
+                  className="absolute inset-y-0 left-0 rounded-full bg-gradient-to-r from-violet-500 to-fuchsia-500"
+                  initial={{ width: 0 }}
+                  animate={{ width: `${uploadProgress}%` }}
+                  transition={{ duration: 0.3, ease: "easeOut" }}
+                />
+              </div>
+              {file && uploadPhase === "uploading" && (
+                <p className="text-[10px] text-muted-foreground/60">
+                  {file.name} · {formatBytes(file.size)}
+                </p>
+              )}
+            </motion.div>
+          )}
         </div>
 
         <DialogFooter>
