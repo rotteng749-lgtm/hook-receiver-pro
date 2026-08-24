@@ -230,6 +230,25 @@ function fileLabel(name: string): string {
   return EXT_LABELS[ext] ?? (ext.toUpperCase() || "File");
 }
 
+/** Auto-detect recommended HTTP status code from file content type + name. */
+function autoDetectStatus(ct: string, name: string): number {
+  const ext = name.split(".").pop()?.toLowerCase() ?? "";
+  // Redirect / rewrite pages
+  if (ext === "redirect" || ext === "301" || ext === "302") return 302;
+  // Error / deny pages
+  if (ext === "403" || ext === "denied" || ext === "banned") return 403;
+  if (ext === "404" || ext === "notfound") return 404;
+  if (ext === "500" || ext === "error") return 500;
+  if (ext === "410" || ext === "expired") return 410;
+  if (ext === "429" || ext === "ratelimit") return 429;
+  // JSON API payloads → 200 (success response)
+  if (ct.includes("json")) return 200;
+  // Web assets served inline → 200
+  if (ct.startsWith("text/") || ct.startsWith("image/") || ct.startsWith("font/") || ct.startsWith("audio/") || ct.startsWith("video/")) return 200;
+  // Archives / binaries → 200
+  return 200;
+}
+
 /** Get the file-type category icon color for badge styling. */
 function fileTypeColor(ct: string): string {
   if (ct.startsWith("image/")) return "text-pink-400 bg-pink-500/10 border-pink-500/30";
@@ -332,10 +351,15 @@ function EndpointForm({
       const ct = detectContentType(f);
       setDetectedContentType(ct);
       setContentType(ct);
+      // Auto-detect status code based on file type + name
+      const suggestedStatus = autoDetectStatus(ct, f.name);
+      setStatusCode(String(suggestedStatus));
+      // Auto-set method: GET for serving files
+      if (method === "POST") setMethod("GET");
     } else {
       setDetectedContentType("");
     }
-  }, []);
+  }, [method]);
 
   const handleSubmit = async () => {
     if (!path.trim()) {
@@ -514,6 +538,22 @@ function EndpointForm({
                 max={599}
                 className="font-mono text-sm"
               />
+              <div className="flex flex-wrap gap-1">
+                {[{ v: 200, l: "200 OK" }, { v: 201, l: "201 Created" }, { v: 301, l: "301" }, { v: 302, l: "302" }, { v: 400, l: "400" }, { v: 401, l: "401" }, { v: 403, l: "403" }, { v: 404, l: "404" }, { v: 410, l: "410" }, { v: 429, l: "429" }, { v: 500, l: "500" }].map((s) => (
+                  <button
+                    key={s.v}
+                    type="button"
+                    onClick={() => setStatusCode(String(s.v))}
+                    className={`rounded border px-1.5 py-0.5 text-[9px] font-mono transition-colors ${
+                      statusCode === String(s.v)
+                        ? "border-violet-500/40 bg-violet-500/10 text-violet-400"
+                        : "border-border bg-muted/30 text-muted-foreground hover:bg-muted/60"
+                    }`}
+                  >
+                    {s.l}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
 
@@ -613,7 +653,7 @@ function EndpointForm({
                 )}
                 <input type="file" className="hidden" onChange={handleFileChange} />
               </label>
-              {/* Auto-detect badge with file type info */}
+              {/* Auto-detect badge with file type + status info */}
               {file && detectedContentType && (
                 <motion.div
                   initial={{ opacity: 0, y: -4 }}
@@ -627,8 +667,12 @@ function EndpointForm({
                       <span className={`rounded border px-1.5 py-0.5 text-[10px] font-mono font-medium ${fileTypeColor(detectedContentType)}`}>
                         {fileLabel(file.name)}
                       </span>
+                      <span className="rounded border border-emerald-500/30 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-mono text-emerald-400">
+                        {statusCode}
+                      </span>
                     </div>
                     <code className="text-[10px] font-mono text-muted-foreground/70">{detectedContentType}</code>
+                    <p className="text-[9px] text-muted-foreground/50 mt-0.5">Status {statusCode} · Content-Type auto-set · Response served inline (not download)</p>
                   </div>
                 </motion.div>
               )}
