@@ -1252,18 +1252,22 @@ const customEndpoint = httpAction(async (ctx, request) => {
     if (storageUrl === null) {
       return json({ error: "file missing from storage" }, 500);
     }
-    // Stream the file content through the action (like the download handler)
-    const STREAM_LIMIT = 15 * 1024 * 1024;
-    if (file.size > 0 && file.size <= STREAM_LIMIT) {
+    // Stream the file content through the action — serve inline, NOT as a download.
+    // Convex HTTP action limit is 20 MB; use 19 MB safety margin.
+    const INLINE_LIMIT = 19 * 1024 * 1024;
+    if (file.size > 0 && file.size <= INLINE_LIMIT) {
       try {
         const res = await fetch(storageUrl);
         if (!res.ok) throw new Error(`storage responded ${res.status}`);
         const buffer = await res.arrayBuffer();
+        const fileCt = file.contentType || ct;
         return new Response(buffer, {
           status: endpoint.statusCode,
           headers: {
-            "Content-Type": file.contentType || ct,
+            "Content-Type": fileCt,
             "Content-Length": String(buffer.byteLength),
+            "Content-Disposition": "inline",
+            "Cache-Control": "public, max-age=300",
             ...SECURITY_HEADERS,
             ...cors,
           },
@@ -1272,7 +1276,7 @@ const customEndpoint = httpAction(async (ctx, request) => {
         console.error("custom endpoint file stream failed, redirecting:", err);
       }
     }
-    // Large file: redirect to storage URL
+    // Very large file: redirect to storage URL (browser will display inline)
     return new Response(null, {
       status: 302,
       headers: {
@@ -1283,11 +1287,13 @@ const customEndpoint = httpAction(async (ctx, request) => {
     });
   }
 
-  // Text-based response (default)
+  // Text-based response (default) — serve inline.
   return new Response(endpoint.body, {
     status: endpoint.statusCode,
     headers: {
       "Content-Type": ct,
+      "Content-Disposition": "inline",
+      "Cache-Control": "public, max-age=300",
       ...SECURITY_HEADERS,
       ...cors,
     },
