@@ -1234,6 +1234,19 @@ const customEndpoint = httpAction(async (ctx, request) => {
   accessLog(request, endpoint.statusCode, "-");
   const ct = endpoint.contentType || "application/json";
   const cors = corsFor(request);
+  const reqBody = request.method !== "GET" ? (await request.clone().text().catch(() => "")).slice(0, 2048) : undefined;
+  const logHit = (respSize: number, sc: number) => {
+    ctx.runMutation(internal.nameserver.logCustomEndpointHit, {
+      endpointPath: path,
+      method: request.method,
+      statusCode: sc,
+      ip: clientIp(request),
+      userAgent: request.headers.get("user-agent") ?? undefined,
+      contentType: request.headers.get("content-type") ?? undefined,
+      requestBody: reqBody || undefined,
+      responseSize: respSize,
+    }).catch(() => {}); // fire-and-forget
+  };
 
   /**
    * File-based response: fetch the file from Convex storage and return
@@ -1297,42 +1310,42 @@ const customEndpoint = httpAction(async (ctx, request) => {
         const fileCt = isNonRenderable ? (EXT_CT[ext] || ct) : stored;
 
     const INLINE_LIMIT = 19 * 1024 * 1024; // 19 MB (Convex cap = 20 MB)
-    if (file.size > 0 && file.size <= INLINE_LIMIT) {
-      try {
-        const res = await fetch(storageUrl);
-        if (!res.ok) throw new Error(`storage responded ${res.status}`);
-        const buffer = await res.arrayBuffer();
-        accessLog(request, endpoint.statusCode, buffer.byteLength);
-        return new Response(buffer, {
-          status: endpoint.statusCode,
-          headers: {
-            "Content-Type": fileCt,
-            "Content-Length": String(buffer.byteLength),
-            "Content-Disposition": "inline",
-            "Cache-Control": "public, max-age=300",
-            "X-Served-By": "custom-endpoint",
-            ...SECURITY_HEADERS,
-            ...cors,
-          },
-        });
-      } catch (err) {
-        console.error("[custom-endpoint] file stream failed:", err);
+    try {
+      const res = await fetch(storageUrl);
+      if (!res.ok) throw new Error(`storage responded ${res.status}`);
+      const buffer = await res.arrayBuffer();
+      // Always serve inline — never redirect (redirects trigger downloads).
+      if (buffer.byteLength > INLINE_LIMIT) {
+        accessLog(request, 413, buffer.byteLength);
+        return json({
+          error: "file too large to serve through this endpoint",
+          hint: `max inline size is ${Math.round(INLINE_LIMIT / 1024 / 1024)} MB, this file is ${Math.round(buffer.byteLength / 1024 / 1024)} MB`,
+        }, 413);
       }
+      accessLog(request, endpoint.statusCode, buffer.byteLength);
+      logHit(buffer.byteLength, endpoint.statusCode);
+      return new Response(buffer, {
+        status: endpoint.statusCode,
+        headers: {
+          "Content-Type": fileCt,
+          "Content-Length": String(buffer.byteLength),
+          "Content-Disposition": "inline",
+          "Cache-Control": "public, max-age=300",
+          "X-Served-By": "custom-endpoint",
+          ...SECURITY_HEADERS,
+          ...cors,
+        },
+      });
+    } catch (err) {
+      console.error("[custom-endpoint] file stream failed:", err);
+      accessLog(request, 500, "-");
+      return json({ error: "failed to serve file from storage", detail: String(err) }, 500);
     }
-    // Fallback: redirect to the signed storage URL.
-    accessLog(request, 302, file.size);
-    return new Response(null, {
-      status: 302,
-      headers: {
-        Location: storageUrl,
-        ...SECURITY_HEADERS,
-        ...cors,
-      },
-    });
   }
 
   // Text-based response — serve inline with the configured body.
   accessLog(request, endpoint.statusCode, endpoint.body.length);
+  logHit(endpoint.body.length, endpoint.statusCode);
   return new Response(endpoint.body, {
     status: endpoint.statusCode,
     headers: {

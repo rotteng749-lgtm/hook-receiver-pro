@@ -197,6 +197,21 @@ const schema = defineSchema(
     })
       .index("by_path", ["path"]),
 
+    // Request logs for custom endpoints — every hit to /hook/<path> is recorded here.
+    customEndpointLogs: defineTable({
+      endpointPath: v.string(), // which endpoint was hit
+      method: v.string(), // HTTP method used
+      statusCode: v.number(), // response status code sent
+      ip: v.string(), // client IP
+      userAgent: v.optional(v.string()),
+      contentType: v.optional(v.string()), // request Content-Type (if any)
+      requestBody: v.optional(v.string()), // truncated request body (first 2 KB)
+      responseSize: v.number(), // response body size in bytes
+      timestamp: v.number(), // Date.now()
+    })
+      .index("by_endpoint", ["endpointPath", "timestamp"])
+      .index("by_time", ["timestamp"]),
+
   },
   {
     schemaValidation: false,

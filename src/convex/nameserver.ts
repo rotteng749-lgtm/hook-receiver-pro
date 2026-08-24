@@ -1146,6 +1146,78 @@ export const overviewStats = query({
   },
 });
 
+/* ------------------- custom endpoint request logs ------------------- */
+
+/** Internal: record a custom endpoint hit (called from http.ts). */
+export const logCustomEndpointHit = internalMutation({
+  args: {
+    endpointPath: v.string(),
+    method: v.string(),
+    statusCode: v.number(),
+    ip: v.string(),
+    userAgent: v.optional(v.string()),
+    contentType: v.optional(v.string()),
+    requestBody: v.optional(v.string()),
+    responseSize: v.number(),
+  },
+  handler: async (ctx, args) => {
+    await ctx.db.insert("customEndpointLogs", {
+      endpointPath: args.endpointPath,
+      method: args.method,
+      statusCode: args.statusCode,
+      ip: args.ip.slice(0, 64),
+      userAgent: args.userAgent?.slice(0, 200),
+      contentType: args.contentType?.slice(0, 128),
+      requestBody: args.requestBody?.slice(0, 2048),
+      responseSize: args.responseSize,
+      timestamp: Date.now(),
+    });
+  },
+});
+
+/** Owner/admin: list recent custom endpoint logs. */
+export const listCustomEndpointLogs = query({
+  args: {
+    endpointPath: v.optional(v.string()),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    await requireRole(ctx, ["owner", "admin"]);
+    const limit = Math.max(1, Math.min(200, args.limit ?? 50));
+    if (args.endpointPath) {
+      return await ctx.db
+        .query("customEndpointLogs")
+        .withIndex("by_endpoint", (q) => q.eq("endpointPath", args.endpointPath!))
+        .order("desc")
+        .take(limit);
+    }
+    return await ctx.db
+      .query("customEndpointLogs")
+      .withIndex("by_time")
+      .order("desc")
+      .take(limit);
+  },
+});
+
+/** Clear logs for a specific endpoint or all. */
+export const clearCustomEndpointLogs = mutation({
+  args: { endpointPath: v.optional(v.string()) },
+  handler: async (ctx, args) => {
+    await requireRole(ctx, ["owner"]);
+    let logs: Doc<"customEndpointLogs">[];
+    if (args.endpointPath) {
+      logs = await ctx.db
+        .query("customEndpointLogs")
+        .withIndex("by_endpoint", (q) => q.eq("endpointPath", args.endpointPath!))
+        .collect();
+    } else {
+      logs = await ctx.db.query("customEndpointLogs").collect();
+    }
+    for (const l of logs) await ctx.db.delete(l._id);
+    return { deleted: logs.length };
+  },
+});
+
 /* -------------------- internal helpers (http.ts /connect) -------------------- */
 
 export const getServerByCode = internalQuery({

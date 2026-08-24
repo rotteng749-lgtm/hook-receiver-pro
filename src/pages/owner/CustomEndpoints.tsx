@@ -35,12 +35,14 @@ import type { Doc, Id } from "@/convex/_generated/dataModel";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAction, useMutation, useQuery } from "convex/react";
 import {
+  Clock,
   FileCode2,
   FileText,
   Globe,
   Loader2,
   Pencil,
   Plus,
+  RefreshCw,
   Shield,
   Sparkles,
   TestTube2,
@@ -249,6 +251,63 @@ function autoDetectStatus(ct: string, name: string): number {
   return 200;
 }
 
+/** Auto-detect recommended HTTP method from file type. */
+function autoDetectMethod(ct: string, ext: string): MethodType {
+  // Script / server-side files are usually POST (they read form data)
+  if (ext === "php" || ext === "phtml" || ct.includes("php")) return "POST";
+  if (ext === "py" || ct.includes("python") || ext === "rb" || ext === "pl") return "POST";
+  // JSON / text API responses are usually GET
+  if (ct.includes("json") || ct === "text/plain" || ct.includes("xml")) return "GET";
+  // Web assets are GET
+  if (ct.startsWith("text/css") || ct.startsWith("text/html") || ct.startsWith("application/javascript") || ct.startsWith("image/")) return "GET";
+  // Archives / binaries are GET (download)
+  if (ct.includes("zip") || ct.includes("archive") || ct.includes("octet-stream") || ext === "apk") return "GET";
+  return "GET";
+}
+
+/** Auto-detect suggested endpoint path from file name. */
+function autoDetectPath(name: string): string {
+  const base = name.split(".")[0]?.toLowerCase() ?? "";
+  // Clean: only lowercase alphanumeric + dashes
+  return base.replace(/[^a-z0-9]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "").slice(0, 32);
+}
+
+/** Full auto-check result for a file. */
+interface AutoCheckResult {
+  contentType: string;
+  statusCode: number;
+  method: MethodType;
+  suggestedPath: string;
+  fileType: string;
+  renderable: boolean; // can the browser display this inline?
+  notes: string[]; // warnings / info
+}
+
+function autoCheckFile(file: File): AutoCheckResult {
+  const ct = detectContentType(file);
+  const ext = file.name.split(".").pop()?.toLowerCase() ?? "";
+  const status = autoDetectStatus(ct, file.name);
+  const method = autoDetectMethod(ct, ext);
+  const path = autoDetectPath(file.name);
+  const fileType = fileLabel(file.name);
+
+  // Can the browser display this inline?
+  const renderable = ct.startsWith("text/") || ct.startsWith("image/")
+    || ct.startsWith("font/") || ct.startsWith("audio/")
+    || ct.startsWith("video/") || ct === "application/json"
+    || ct === "application/xml" || ct === "application/javascript"
+    || ct === "application/pdf" || ct === "application/wasm"
+    || ct === "application/svg+xml";
+
+  const notes: string[] = [];
+  if (!renderable) notes.push("This file type may prompt a download in some browsers");
+  if (file.size > 19 * 1024 * 1024) notes.push(`File is ${formatBytes(file.size)} — max inline size is 19 MB`);
+  if (ext === "php" || ext === "py" || ext === "rb") notes.push("Server-side scripts are served as text (not executed)");
+  if (ct.includes("octet-stream")) notes.push("Content-Type auto-detected as binary — may need override");
+
+  return { contentType: ct, statusCode: status, method, suggestedPath: path, fileType, renderable, notes };
+}
+
 /** Get the file-type category icon color for badge styling. */
 function fileTypeColor(ct: string): string {
   if (ct.startsWith("image/")) return "text-pink-400 bg-pink-500/10 border-pink-500/30";
@@ -344,22 +403,24 @@ function EndpointForm({
     setUploadEta("");
   };
 
+  const [autoCheck, setAutoCheck] = useState<AutoCheckResult | null>(null);
+
   const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0] ?? null;
     setFile(f);
     if (f) {
-      const ct = detectContentType(f);
-      setDetectedContentType(ct);
-      setContentType(ct);
-      // Auto-detect status code based on file type + name
-      const suggestedStatus = autoDetectStatus(ct, f.name);
-      setStatusCode(String(suggestedStatus));
-      // Auto-set method: GET for serving files
-      if (method === "POST") setMethod("GET");
+      const check = autoCheckFile(f);
+      setAutoCheck(check);
+      setDetectedContentType(check.contentType);
+      setContentType(check.contentType);
+      setStatusCode(String(check.statusCode));
+      setMethod(check.method);
+      if (!path.trim()) setPath(check.suggestedPath);
     } else {
       setDetectedContentType("");
+      setAutoCheck(null);
     }
-  }, [method]);
+  }, [path]);
 
   const handleSubmit = async () => {
     if (!path.trim()) {
@@ -653,27 +714,52 @@ function EndpointForm({
                 )}
                 <input type="file" className="hidden" onChange={handleFileChange} />
               </label>
-              {/* Auto-detect badge with file type + status info */}
-              {file && detectedContentType && (
+              {/* Full auto-check panel with file requirements */}
+              {file && autoCheck && (
                 <motion.div
                   initial={{ opacity: 0, y: -4 }}
                   animate={{ opacity: 1, y: 0 }}
-                  className="flex items-center gap-2 rounded-md border border-emerald-500/20 bg-emerald-500/5 px-3 py-2"
+                  className="rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-3 space-y-2"
                 >
-                  <Sparkles className="size-3.5 text-emerald-400 shrink-0" />
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-[11px] font-medium text-emerald-400">Auto-detected</span>
-                      <span className={`rounded border px-1.5 py-0.5 text-[10px] font-mono font-medium ${fileTypeColor(detectedContentType)}`}>
-                        {fileLabel(file.name)}
-                      </span>
-                      <span className="rounded border border-emerald-500/30 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-mono text-emerald-400">
-                        {statusCode}
-                      </span>
-                    </div>
-                    <code className="text-[10px] font-mono text-muted-foreground/70">{detectedContentType}</code>
-                    <p className="text-[9px] text-muted-foreground/50 mt-0.5">Status {statusCode} · Content-Type auto-set · Response served inline (not download)</p>
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="size-3.5 text-emerald-400 shrink-0" />
+                    <span className="text-[11px] font-semibold text-emerald-400">Auto-check results</span>
+                    <span className={`ml-auto rounded border px-1.5 py-0.5 text-[10px] font-mono font-medium ${fileTypeColor(autoCheck.contentType)}`}>
+                      {autoCheck.fileType}
+                    </span>
                   </div>
+                  {/* Requirements table */}
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[10px]">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-muted-foreground/60 w-16">Status</span>
+                      <span className="rounded border border-emerald-500/30 bg-emerald-500/10 px-1.5 py-0.5 font-mono text-emerald-400">{autoCheck.statusCode}</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-muted-foreground/60 w-16">Method</span>
+                      <span className={`rounded border px-1.5 py-0.5 font-mono font-bold ${METHOD_COLORS[autoCheck.method] ?? METHOD_COLORS.ANY}`}>{autoCheck.method}</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-muted-foreground/60 w-16">Path</span>
+                      <span className="font-mono text-foreground">/hook/{autoCheck.suggestedPath || path}</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-muted-foreground/60 w-16">Type</span>
+                      <span className="font-mono text-foreground">{autoCheck.renderable ? "✓ Inline" : "⬇ May download"}</span>
+                    </div>
+                    <div className="col-span-2 flex items-start gap-1.5">
+                      <span className="text-muted-foreground/60 w-16 shrink-0">Content</span>
+                      <code className="font-mono text-muted-foreground/70 break-all">{autoCheck.contentType}</code>
+                    </div>
+                  </div>
+                  {/* Notes / warnings */}
+                  {autoCheck.notes.length > 0 && (
+                    <div className="space-y-0.5">
+                      {autoCheck.notes.map((n, i) => (
+                        <p key={i} className="text-[9px] text-amber-400/80">⚠ {n}</p>
+                      ))}
+                    </div>
+                  )}
+                  <p className="text-[9px] text-muted-foreground/50">Response served inline (not download) · All settings auto-filled above</p>
                 </motion.div>
               )}
               {/* Content-Type override (for edge cases where auto-detect is wrong) */}
@@ -936,6 +1022,104 @@ function EndpointRow({ ep }: { ep: Doc<"customEndpoints"> }) {
   );
 }
 
+/* ========================= Request History ========================= */
+
+function RequestHistoryPanel() {
+  const logs = useQuery(api.nameserver.listCustomEndpointLogs, { limit: 50 });
+  const endpoints = useQuery(api.nameserver.listCustomEndpoints);
+  const clearLogs = useMutation(api.nameserver.clearCustomEndpointLogs);
+  const [filterPath, setFilterPath] = useState("");
+  const [expanded, setExpanded] = useState(false);
+
+  const filtered = logs?.filter((l) => !filterPath || l.endpointPath === filterPath);
+  const displayLogs = expanded ? filtered : filtered?.slice(0, 10);
+
+  return (
+    <motion.div initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2, duration: 0.3 }}>
+      <Card className="border-border/60 bg-card/50">
+        <CardContent className="pt-5">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <Clock className="size-4 text-muted-foreground" />
+              <p className="text-sm font-medium">Request History</p>
+              {logs && (
+                <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-mono text-muted-foreground">
+                  {logs.length}
+                </span>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              {endpoints && endpoints.length > 0 && (
+                <select
+                  value={filterPath}
+                  onChange={(e) => setFilterPath(e.target.value)}
+                  className="h-7 rounded-md border border-border bg-transparent px-2 text-[11px]"
+                >
+                  <option value="">All endpoints</option>
+                  {endpoints.map((ep) => (
+                    <option key={ep._id} value={ep.path}>/{ep.path}</option>
+                  ))}
+                </select>
+              )}
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 text-[11px] text-muted-foreground"
+                onClick={() => clearLogs({ endpointPath: filterPath || undefined })}
+              >
+                <Trash2 className="size-3 mr-1" /> Clear
+              </Button>
+            </div>
+          </div>
+
+          {logs === undefined ? (
+            <div className="flex items-center justify-center py-8">
+              <Loader2 className="size-5 animate-spin text-muted-foreground" />
+            </div>
+          ) : displayLogs?.length === 0 ? (
+            <p className="text-xs text-muted-foreground text-center py-8">
+              No requests yet — hit an endpoint to see logs here.
+            </p>
+          ) : (
+            <div className="space-y-1">
+              {displayLogs?.map((log) => (
+                <div
+                  key={log._id}
+                  className="flex items-center gap-2 rounded-md border border-border/40 bg-muted/20 px-3 py-2 text-[11px]"
+                >
+                  <span className={`rounded border px-1.5 py-0.5 text-[9px] font-bold font-mono ${METHOD_COLORS[log.method] ?? METHOD_COLORS.ANY}`}>
+                    {log.method}
+                  </span>
+                  <code className="font-mono text-foreground truncate">/{log.endpointPath}</code>
+                  <span className={`rounded px-1.5 py-0.5 text-[9px] font-mono ${
+                    log.statusCode >= 200 && log.statusCode < 300 ? "bg-emerald-500/10 text-emerald-400" :
+                    log.statusCode >= 400 ? "bg-red-500/10 text-red-400" :
+                    "bg-amber-500/10 text-amber-400"
+                  }`}>
+                    {log.statusCode}
+                  </span>
+                  <span className="text-muted-foreground/50 truncate">{log.ip}</span>
+                  <span className="text-muted-foreground/40 ml-auto shrink-0">
+                    {new Date(log.timestamp).toLocaleTimeString()}
+                  </span>
+                </div>
+              ))}
+              {!expanded && (filtered?.length ?? 0) > 10 && (
+                <button
+                  onClick={() => setExpanded(true)}
+                  className="w-full text-center text-[11px] text-muted-foreground hover:text-foreground py-2"
+                >
+                  Show all {filtered?.length} requests
+                </button>
+              )}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </motion.div>
+  );
+}
+
 /* ========================= Main Page ========================= */
 
 export default function CustomEndpointsPage() {
@@ -1006,6 +1190,9 @@ export default function CustomEndpointsPage() {
       </div>
 
       <EndpointForm open={createOpen} onOpenChange={setCreateOpen} mode="create" />
+
+      {/* Request History */}
+      <RequestHistoryPanel />
     </div>
   );
 }
