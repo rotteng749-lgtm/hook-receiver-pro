@@ -555,7 +555,8 @@ function EndpointForm({
           </Button>
         </DialogTrigger>
       )}
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="sm:max-w-lg max-h-[90vh] flex flex-col">
+        <div className="overflow-y-auto flex-1 pr-1 -mr-1 space-y-4">
         <DialogHeader>
           <DialogTitle>{mode === "create" ? "Create custom endpoint" : "Edit endpoint"}</DialogTitle>
           <DialogDescription>
@@ -889,8 +890,9 @@ function EndpointForm({
             </motion.div>
           )}
         </div>
+        </div>{/* end scrollable area */}
 
-        <DialogFooter>
+        <DialogFooter className="shrink-0">
           <Button
             onClick={handleSubmit}
             disabled={busy || !path.trim() || (mode === "create" && responseType === "file" && !file)}
