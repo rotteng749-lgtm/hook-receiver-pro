@@ -39,6 +39,7 @@ import {
   FileCode2,
   FileText,
   Globe,
+  KeyRound,
   Loader2,
   Pencil,
   Plus,
@@ -904,6 +905,138 @@ function EndpointForm({
   );
 }
 
+/* ========================= Key Generator Dialog ========================= */
+
+function KeyGenerateDialog({ open, onOpenChange, endpointPath }: { open: boolean; onOpenChange: (v: boolean) => void; endpointPath: string }) {
+  const servers = useQuery(api.nameserver.listServers) ?? [];
+  const settings = useQuery(api.nameserver.getSettings);
+  const generateKey = useMutation(api.nameserver.generateKey);
+
+  const [serverId, setServerId] = useState("");
+  const [customKey, setCustomKey] = useState("");
+  const [note, setNote] = useState("");
+  const [uses, setUses] = useState("");
+  const [hours, setHours] = useState("");
+  const [maxDevices, setMaxDevices] = useState("");
+  const [game, setGame] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<{ key: string } | null>(null);
+
+  const activeServers = servers.filter((s) => s.status === "active");
+  const keyFormat = settings?.keyFormat || `${settings?.keyPrefix ?? "NS"}-XXXX-XXXX-XXXX-XXXX-XXXX`;
+  const CONVEX_BASE = (import.meta.env.VITE_CONVEX_URL as string)
+    .replace(/\.convex\.cloud$/, ".convex.site")
+    .replace(/\/$/, "");
+  const url = `${CONVEX_BASE}/hook/${endpointPath}`;
+
+  const GAMES = ["", "MLBB", "FREEFIRE", "PUBG", "CODM", "GENSHIN", "OTHER"];
+
+  const handleSubmit = async () => {
+    if (!serverId) { toast.error("Pick a server"); return; }
+    setBusy(true);
+    try {
+      const res = await generateKey({
+        serverId: serverId as Doc<"servers">["_id"],
+        note: note || `endpoint: /hook/${endpointPath}`,
+        uses: uses === "" ? undefined : Number(uses),
+        hours: hours === "" ? undefined : Number(hours),
+        maxDevices: maxDevices === "" ? undefined : Number(maxDevices),
+        game: game || undefined,
+        customKey: customKey.trim() || undefined,
+      });
+      setResult({ key: res.key });
+      setNote(""); setUses(""); setHours(""); setMaxDevices(""); setGame(""); setCustomKey("");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => { onOpenChange(v); if (!v) setResult(null); }}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <KeyRound className="size-4 text-violet-400" />
+            Generate Key
+          </DialogTitle>
+          <DialogDescription>
+            Create a key for <code className="font-mono text-violet-400">/hook/{endpointPath}</code>
+          </DialogDescription>
+        </DialogHeader>
+
+        {result ? (
+          <div className="space-y-3">
+            <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-3">
+              <p className="text-xs text-emerald-400 font-medium mb-1">Key generated!</p>
+              <div className="flex items-center gap-2 rounded bg-muted/50 p-2">
+                <code className="flex-1 font-mono text-xs break-all">{result.key}</code>
+                <CopyButton value={result.key} label="Key" />
+              </div>
+            </div>
+            <div className="rounded-lg border border-border/60 bg-muted/30 p-3">
+              <p className="text-[10px] text-muted-foreground mb-1">How to use with this endpoint:</p>
+              <code className="block font-mono text-[10px] text-muted-foreground/70 break-all">
+                curl -d "key={result.key}&amp;device=DEVICE_ID" {url}
+              </code>
+            </div>
+            <Button variant="outline" className="w-full cursor-pointer" onClick={() => setResult(null)}>
+              Generate another
+            </Button>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <Label className="text-xs">Server</Label>
+              <select value={serverId} onChange={(e) => setServerId(e.target.value)} className="flex h-9 w-full rounded-md border border-border bg-transparent px-3 text-sm">
+                <option value="">Select server…</option>
+                {activeServers.map((s) => (
+                  <option key={s._id} value={s._id}>{s.name} · {s.code}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label className="text-xs">Custom key <span className="text-muted-foreground font-normal">(optional)</span></Label>
+              <Input value={customKey} onChange={(e) => setCustomKey(e.target.value.toUpperCase())} placeholder={keyFormat} maxLength={80} className="font-mono text-xs" />
+            </div>
+
+            <div className="grid grid-cols-3 gap-2">
+              <div className="space-y-1">
+                <Label className="text-[10px] text-muted-foreground">Max uses</Label>
+                <Input type="number" min={0} value={uses} onChange={(e) => setUses(e.target.value)} placeholder="0" className="text-xs" />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-[10px] text-muted-foreground">Hours</Label>
+                <Input type="number" min={0} value={hours} onChange={(e) => setHours(e.target.value)} placeholder="0" className="text-xs" />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-[10px] text-muted-foreground">Max devices</Label>
+                <Input type="number" min={0} value={maxDevices} onChange={(e) => setMaxDevices(e.target.value)} placeholder="1" className="text-xs" />
+              </div>
+            </div>
+
+            <div className="space-y-1">
+              <Label className="text-[10px] text-muted-foreground">Game</Label>
+              <select value={game} onChange={(e) => setGame(e.target.value)} className="flex h-8 w-full rounded-md border border-border bg-transparent px-2 text-xs">
+                <option value="">All games</option>
+                {GAMES.filter(Boolean).map((g) => (
+                  <option key={g} value={g}>{g}</option>
+                ))}
+              </select>
+            </div>
+
+            <Button onClick={handleSubmit} disabled={busy || !serverId} className="w-full cursor-pointer bg-violet-600 hover:bg-violet-700 text-white">
+              {busy ? <Loader2 className="size-3.5 animate-spin" /> : <Plus className="size-3.5" />} Generate key
+            </Button>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 /* ========================= Endpoint Row ========================= */
 
 function EndpointRow({ ep }: { ep: Doc<"customEndpoints"> }) {
@@ -911,6 +1044,7 @@ function EndpointRow({ ep }: { ep: Doc<"customEndpoints"> }) {
   const deleteEndpoint = useMutation(api.nameserver.deleteCustomEndpoint);
   const duplicateEndpoint = useMutation(api.nameserver.duplicateCustomEndpoint);
   const [editOpen, setEditOpen] = useState(false);
+  const [keyGenOpen, setKeyGenOpen] = useState(false);
 
   const CONVEX_BASE = (import.meta.env.VITE_CONVEX_URL as string)
     .replace(/\.convex\.cloud$/, ".convex.site")
@@ -993,6 +1127,17 @@ function EndpointRow({ ep }: { ep: Doc<"customEndpoints"> }) {
           </div>
         </div>
         <div className="flex items-center gap-1 sm:ml-3">
+          {ep.authRequired && (ep.authType === "key" || ep.authType === "any") && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-7 text-amber-400 hover:text-amber-300 opacity-0 group-hover:opacity-100 transition-opacity"
+              title="Generate key for this endpoint"
+              onClick={() => setKeyGenOpen(true)}
+            >
+              <KeyRound className="size-3.5" />
+            </Button>
+          )}
           <Button
             variant="ghost"
             size="icon"
@@ -1043,6 +1188,9 @@ function EndpointRow({ ep }: { ep: Doc<"customEndpoints"> }) {
         </div>
       </motion.div>
 
+      {ep.authRequired && (ep.authType === "key" || ep.authType === "any") && (
+        <KeyGenerateDialog open={keyGenOpen} onOpenChange={setKeyGenOpen} endpointPath={ep.path} />
+      )}
       <EndpointForm
         open={editOpen}
         onOpenChange={setEditOpen}
