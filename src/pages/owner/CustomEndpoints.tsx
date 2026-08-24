@@ -203,18 +203,23 @@ function EndpointForm({
       let fileId: Id<"files"> | undefined;
       if (responseType === "file" && file) {
         const uploadUrl = await generateUploadUrl();
+        // Convex presigned URLs reject PUT requests with a Content-Type header
+        // that differs from the one used at generation time. Send the raw body
+        // without setting Content-Type to avoid signature mismatches.
         const res = await fetch(uploadUrl, {
           method: "PUT",
-          headers: { "Content-Type": file.type || "application/octet-stream" },
           body: file,
         });
-        if (!res.ok) throw new Error("File upload failed");
+        if (!res.ok) {
+          const detail = await res.text().catch(() => "");
+          throw new Error(`File upload failed (${res.status}): ${detail}`);
+        }
         const { storageId } = (await res.json()) as { storageId: string };
         fileId = await registerFile({
           storageId: storageId as Id<"_storage">,
           name: file.name,
           size: file.size,
-          contentType: file.type || "application/octet-stream",
+          contentType: detectContentType(file),
         });
       }
 

@@ -101,14 +101,17 @@ function UploadCard() {
     setBusy(true);
     try {
       const uploadUrl = await generateUploadUrl();
+      // Convex presigned URLs reject PUT requests with a Content-Type header
+      // that differs from the one used at generation time. Send the raw body
+      // without setting Content-Type to avoid signature mismatches.
       const res = await fetch(uploadUrl, {
         method: "PUT",
-        headers: {
-          "Content-Type": file.type || "application/octet-stream",
-        },
         body: file,
       });
-      if (!res.ok) throw new Error("Upload to storage failed");
+      if (!res.ok) {
+        const detail = await res.text().catch(() => "");
+        throw new Error(`Upload to storage failed (${res.status}): ${detail}`);
+      }
       const { storageId } = (await res.json()) as { storageId: string };
       const fileId = await registerFile({
         storageId: storageId as Id<"_storage">,
