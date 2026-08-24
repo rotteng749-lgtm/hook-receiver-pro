@@ -60,54 +60,194 @@ const METHOD_COLORS: Record<string, string> = {
   ANY: "bg-purple-500/15 text-purple-400 border-purple-500/30",
 };
 
-const CONTENT_TYPE_PRESETS = [
-  { value: "application/json", label: "JSON" },
-  { value: "text/plain", label: "Text" },
-  { value: "text/html", label: "HTML" },
-  { value: "text/css", label: "CSS" },
-  { value: "application/javascript", label: "JavaScript" },
-  { value: "text/php", label: "PHP" },
-  { value: "application/xml", label: "XML" },
-  { value: "text/xml", label: "XML (text)" },
-  { value: "image/svg+xml", label: "SVG" },
-  { value: "application/octet-stream", label: "Binary" },
+/** Organized content-type presets grouped by category for multi-response support. */
+const CONTENT_TYPE_PRESETS: { value: string; label: string; group: string }[] = [
+  // Web
+  { value: "application/json", label: "JSON", group: "Web" },
+  { value: "text/html", label: "HTML", group: "Web" },
+  { value: "text/css", label: "CSS", group: "Web" },
+  { value: "application/javascript", label: "JavaScript", group: "Web" },
+  { value: "text/javascript", label: "JS (text)", group: "Web" },
+  { value: "text/php", label: "PHP", group: "Web" },
+  { value: "text/xml", label: "XML", group: "Web" },
+  { value: "application/xml", label: "XML (app)", group: "Web" },
+  { value: "text/x-python", label: "Python", group: "Web" },
+  { value: "text/x-ruby", label: "Ruby", group: "Web" },
+  { value: "text/x-perl", label: "Perl", group: "Web" },
+  { value: "text/x-csrc", label: "C Source", group: "Web" },
+  { value: "text/x-c++src", label: "C++ Source", group: "Web" },
+  { value: "text/x-java", label: "Java", group: "Web" },
+  { value: "text/x-go", label: "Go", group: "Web" },
+  { value: "text/x-rust", label: "Rust", group: "Web" },
+  // Data
+  { value: "text/plain", label: "Plain Text", group: "Data" },
+  { value: "text/markdown", label: "Markdown", group: "Data" },
+  { value: "text/csv", label: "CSV", group: "Data" },
+  { value: "text/yaml", label: "YAML", group: "Data" },
+  { value: "text/toml", label: "TOML", group: "Data" },
+  { value: "application/toml", label: "TOML (app)", group: "Data" },
+  { value: "text/x-ini", label: "INI Config", group: "Data" },
+  { value: "application/x-ndjson", label: "NDJSON", group: "Data" },
+  { value: "application/ld+json", label: "JSON-LD", group: "Data" },
+  // Images
+  { value: "image/png", label: "PNG", group: "Image" },
+  { value: "image/jpeg", label: "JPEG", group: "Image" },
+  { value: "image/gif", label: "GIF", group: "Image" },
+  { value: "image/webp", label: "WebP", group: "Image" },
+  { value: "image/svg+xml", label: "SVG", group: "Image" },
+  { value: "image/avif", label: "AVIF", group: "Image" },
+  { value: "image/bmp", label: "BMP", group: "Image" },
+  { value: "image/x-icon", label: "ICO (icon)", group: "Image" },
+  { value: "image/tiff", label: "TIFF", group: "Image" },
+  { value: "image/vnd.microsoft.icon", label: "MS ICO", group: "Image" },
+  // Fonts
+  { value: "font/woff", label: "WOFF", group: "Font" },
+  { value: "font/woff2", label: "WOFF2", group: "Font" },
+  { value: "font/ttf", label: "TTF", group: "Font" },
+  { value: "font/otf", label: "OTF", group: "Font" },
+  { value: "application/font-woff", label: "WOFF (app)", group: "Font" },
+  { value: "application/font-woff2", label: "WOFF2 (app)", group: "Font" },
+  // Documents
+  { value: "application/pdf", label: "PDF", group: "Doc" },
+  { value: "application/msword", label: "Word (.doc)", group: "Doc" },
+  { value: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", label: "DOCX", group: "Doc" },
+  { value: "application/vnd.ms-excel", label: "Excel (.xls)", group: "Doc" },
+  { value: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", label: "XLSX", group: "Doc" },
+  // Archives
+  { value: "application/zip", label: "ZIP", group: "Archive" },
+  { value: "application/x-tar", label: "TAR", group: "Archive" },
+  { value: "application/gzip", label: "GZIP", group: "Archive" },
+  { value: "application/x-7z-compressed", label: "7-Zip", group: "Archive" },
+  { value: "application/x-rar-compressed", label: "RAR", group: "Archive" },
+  { value: "application/x-bzip2", label: "BZ2", group: "Archive" },
+  { value: "application/java-archive", label: "JAR", group: "Archive" },
+  // Audio / Video
+  { value: "audio/mpeg", label: "MP3", group: "Media" },
+  { value: "audio/wav", label: "WAV", group: "Media" },
+  { value: "audio/ogg", label: "OGG Audio", group: "Media" },
+  { value: "audio/flac", label: "FLAC", group: "Media" },
+  { value: "audio/aac", label: "AAC", group: "Media" },
+  { value: "video/mp4", label: "MP4", group: "Media" },
+  { value: "video/webm", label: "WebM", group: "Media" },
+  { value: "video/ogg", label: "OGG Video", group: "Media" },
+  { value: "video/quicktime", label: "MOV", group: "Media" },
+  { value: "video/x-msvideo", label: "AVI", group: "Media" },
+  // Misc / Binary
+  { value: "application/octet-stream", label: "Binary", group: "Binary" },
+  { value: "application/wasm", label: "WebAssembly", group: "Binary" },
+  { value: "application/typescript", label: "TypeScript", group: "Binary" },
+  { value: "application/vnd.android.package-archive", label: "APK", group: "Binary" },
+  { value: "application/x-executable", label: "Executable", group: "Binary" },
+  { value: "application/x-sharedlib", label: "Shared Lib", group: "Binary" },
+  { value: "application/x-dll", label: "DLL", group: "Binary" },
+  { value: "application/x-shellscript", label: "Shell Script", group: "Binary" },
+  { value: "text/x-shellscript", label: "Shell (.sh)", group: "Binary" },
 ];
+
+/** Group labels in display order. */
+const TYPE_GROUPS = ["Web", "Data", "Image", "Font", "Doc", "Archive", "Media", "Binary"];
+
+/** Extension → human label for the auto-detect badge. */
+const EXT_LABELS: Record<string, string> = {
+  json: "JSON", js: "JavaScript", mjs: "ES Module", cjs: "CommonJS",
+  css: "CSS", scss: "SCSS", less: "Less",
+  html: "HTML", htm: "HTML",
+  php: "PHP", phtml: "PHP",
+  txt: "Plain Text", text: "Plain Text",
+  xml: "XML", svg: "SVG",
+  png: "PNG", jpg: "JPEG", jpeg: "JPEG", gif: "GIF", webp: "WebP", avif: "AVIF", bmp: "BMP", ico: "ICO", tiff: "TIFF",
+  pdf: "PDF", doc: "Word", docx: "Word", xls: "Excel", xlsx: "Excel",
+  zip: "ZIP", tar: "TAR", gz: "GZIP", "7z": "7-Zip", rar: "RAR", bz2: "BZ2", xz: "XZ",
+  sh: "Shell Script", bash: "Bash", zsh: "Zsh",
+  py: "Python", rb: "Ruby", pl: "Perl",
+  ts: "TypeScript", tsx: "TSX", jsx: "JSX",
+  yml: "YAML", yaml: "YAML", toml: "TOML", ini: "INI", cfg: "Config", conf: "Config",
+  md: "Markdown", mdx: "MDX",
+  csv: "CSV", tsv: "TSV",
+  woff: "WOFF", woff2: "WOFF2", ttf: "TTF", otf: "OTF",
+  mp3: "MP3", wav: "WAV", ogg: "OGG", flac: "FLAC", aac: "AAC",
+  mp4: "MP4", webm: "WebM", mov: "MOV", avi: "AVI",
+  java: "Java", kt: "Kotlin", go: "Go", rs: "Rust", c: "C", cpp: "C++", h: "C Header",
+  wasm: "WebAssembly", so: "Shared Lib", dll: "DLL", exe: "Executable",
+  apk: "APK", aab: "Android Bundle",
+  jar: "JAR", war: "WAR", ear: "EAR",
+  sql: "SQL", graphql: "GraphQL", gql: "GraphQL",
+  env: "Env Config", gitignore: "Git Config",
+};
 
 /** Auto-detect Content-Type from file name + MIME type. */
 function detectContentType(file: File): string {
+  // Prefer browser-provided MIME type if it's reliable
   if (file.type && file.type !== "application/octet-stream") return file.type;
   const ext = file.name.split(".").pop()?.toLowerCase() ?? "";
   const EXT_MAP: Record<string, string> = {
-    json: "application/json",
-    js: "application/javascript",
-    mjs: "application/javascript",
-    css: "text/css",
-    html: "text/html",
-    htm: "text/html",
-    php: "text/php",
-    txt: "text/plain",
-    text: "text/plain",
-    xml: "application/xml",
+    // Web
+    json: "application/json", js: "application/javascript", mjs: "application/javascript", cjs: "application/javascript",
+    css: "text/css", scss: "text/x-scss", less: "text/x-less",
+    html: "text/html", htm: "text/html",
+    php: "text/php", phtml: "text/php",
     svg: "image/svg+xml",
-    png: "image/png",
-    jpg: "image/jpeg",
-    jpeg: "image/jpeg",
-    gif: "image/gif",
-    webp: "image/webp",
-    ico: "image/x-icon",
+    // Data
+    txt: "text/plain", text: "text/plain", md: "text/markdown", mdx: "text/markdown",
+    csv: "text/csv", tsv: "text/tab-separated-values",
+    xml: "application/xml", yml: "text/yaml", yaml: "text/yaml",
+    toml: "text/toml", ini: "text/x-ini", cfg: "text/plain", conf: "text/plain",
+    sql: "application/sql", graphql: "application/graphql", gql: "application/graphql",
+    env: "text/plain",
+    // Images
+    png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif",
+    webp: "image/webp", avif: "image/avif", bmp: "image/bmp", ico: "image/x-icon", tiff: "image/tiff",
+    // Fonts
+    woff: "font/woff", woff2: "font/woff2", ttf: "font/ttf", otf: "font/otf",
+    // Documents
     pdf: "application/pdf",
-    zip: "application/zip",
-    sh: "text/x-shellscript",
-    py: "text/x-python",
-    ts: "text/typescript",
-    tsx: "text/typescript",
-    jsx: "text/typescript",
-    yml: "text/yaml",
-    yaml: "text/yaml",
-    md: "text/markdown",
-    csv: "text/csv",
+    doc: "application/msword", docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    xls: "application/vnd.ms-excel", xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    // Archives
+    zip: "application/zip", tar: "application/x-tar", gz: "application/gzip",
+    "7z": "application/x-7z-compressed", rar: "application/x-rar-compressed", bz2: "application/x-bzip2", xz: "application/x-xz",
+    jar: "application/java-archive", war: "application/java-archive", ear: "application/java-archive",
+    // Audio / Video
+    mp3: "audio/mpeg", wav: "audio/wav", ogg: "audio/ogg", flac: "audio/flac", aac: "audio/aac",
+    mp4: "video/mp4", webm: "video/webm", mov: "video/quicktime", avi: "video/x-msvideo",
+    // Programming
+    sh: "text/x-shellscript", bash: "text/x-shellscript", zsh: "text/x-shellscript",
+    py: "text/x-python", rb: "text/x-ruby", pl: "text/x-perl",
+    ts: "text/typescript", tsx: "text/typescript", jsx: "text/typescript",
+    java: "text/x-java", kt: "text/x-kotlin", go: "text/x-go", rs: "text/x-rust",
+    c: "text/x-csrc", cpp: "text/x-c++src", h: "text/x-csrc",
+    // Misc
+    wasm: "application/wasm",
+    so: "application/x-sharedlib", dll: "application/x-dll", exe: "application/x-executable",
+    apk: "application/vnd.android.package-archive", aab: "application/vnd.android.package-archive",
   };
   return EXT_MAP[ext] ?? "application/octet-stream";
+}
+
+/** Get a human-readable label for a file by extension. */
+function fileLabel(name: string): string {
+  const ext = name.split(".").pop()?.toLowerCase() ?? "";
+  return EXT_LABELS[ext] ?? (ext.toUpperCase() || "File");
+}
+
+/** Get the file-type category icon color for badge styling. */
+function fileTypeColor(ct: string): string {
+  if (ct.startsWith("image/")) return "text-pink-400 bg-pink-500/10 border-pink-500/30";
+  if (ct.startsWith("video/")) return "text-red-400 bg-red-500/10 border-red-500/30";
+  if (ct.startsWith("audio/")) return "text-orange-400 bg-orange-500/10 border-orange-500/30";
+  if (ct.startsWith("font/") || ct.includes("woff") || ct.includes("ttf") || ct.includes("otf"))
+    return "text-cyan-400 bg-cyan-500/10 border-cyan-500/30";
+  if (ct.includes("zip") || ct.includes("tar") || ct.includes("gzip") || ct.includes("rar") || ct.includes("7z") || ct.includes("jar"))
+    return "text-amber-400 bg-amber-500/10 border-amber-500/30";
+  if (ct.includes("pdf")) return "text-rose-400 bg-rose-500/10 border-rose-500/30";
+  if (ct.includes("json")) return "text-yellow-400 bg-yellow-500/10 border-yellow-500/30";
+  if (ct.includes("html")) return "text-orange-400 bg-orange-500/10 border-orange-500/30";
+  if (ct.includes("css")) return "text-blue-400 bg-blue-500/10 border-blue-500/30";
+  if (ct.includes("javascript") || ct.includes("typescript")) return "text-emerald-400 bg-emerald-500/10 border-emerald-500/30";
+  if (ct.includes("php")) return "text-indigo-400 bg-indigo-500/10 border-indigo-500/30";
+  if (ct.includes("xml") || ct.includes("yaml") || ct.includes("toml"))
+    return "text-violet-400 bg-violet-500/10 border-violet-500/30";
+  return "text-muted-foreground bg-muted/50 border-border";
 }
 
 function formatBytes(bytes: number): string {
@@ -411,22 +551,31 @@ function EndpointForm({
             <>
               <div className="space-y-1.5">
                 <Label className="text-xs font-medium">Content-Type</Label>
-                <div className="flex flex-wrap gap-1.5">
-                  {CONTENT_TYPE_PRESETS.map((preset) => (
-                    <button
-                      key={preset.value}
-                      type="button"
-                      onClick={() => setContentType(preset.value)}
-                      className={`rounded-md border px-2 py-1 text-[10px] font-medium transition-colors ${
-                        contentType === preset.value
-                          ? "border-violet-500/40 bg-violet-500/10 text-violet-400"
-                          : "border-border bg-muted/30 text-muted-foreground hover:bg-muted/60"
-                      }`}
-                    >
-                      {preset.label}
-                    </button>
-                  ))}
-                </div>
+                {TYPE_GROUPS.map((group) => {
+                  const presets = CONTENT_TYPE_PRESETS.filter((p) => p.group === group);
+                  if (presets.length === 0) return null;
+                  return (
+                    <div key={group} className="space-y-1">
+                      <p className="text-[10px] font-medium text-muted-foreground/60 uppercase tracking-wider">{group}</p>
+                      <div className="flex flex-wrap gap-1">
+                        {presets.map((preset) => (
+                          <button
+                            key={preset.value}
+                            type="button"
+                            onClick={() => setContentType(preset.value)}
+                            className={`rounded-md border px-2 py-0.5 text-[10px] font-medium transition-colors ${
+                              contentType === preset.value
+                                ? "border-violet-500/40 bg-violet-500/10 text-violet-400"
+                                : "border-border bg-muted/30 text-muted-foreground hover:bg-muted/60"
+                            }`}
+                          >
+                            {preset.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
                 <Input
                   value={contentType}
                   onChange={(e) => setContentType(e.target.value)}
@@ -446,7 +595,7 @@ function EndpointForm({
               </div>
             </>
           ) : (
-            <div className="space-y-1.5">
+            <div className="space-y-2">
               <Label className="text-xs font-medium">Upload file</Label>
               <label className="flex cursor-pointer items-center gap-3 rounded-lg border border-dashed border-blue-500/30 bg-blue-500/5 px-4 py-4 text-sm text-muted-foreground transition-colors hover:bg-blue-500/10">
                 <Upload className="size-5 text-blue-400" />
@@ -460,21 +609,62 @@ function EndpointForm({
                     Current file linked · <span className="text-foreground font-medium">Select new file to replace</span>
                   </span>
                 ) : (
-                  <span>Upload .php, .css, .js, .html, .txt, .xml, .svg, .json, or any file…</span>
+                  <span>Upload any file: .php, .css, .js, .html, .sh, .py, .json, .xml, .apk, .zip, images…</span>
                 )}
                 <input type="file" className="hidden" onChange={handleFileChange} />
               </label>
-              {detectedContentType && (
-                <div className="flex items-center gap-2 rounded-md bg-blue-500/5 border border-blue-500/20 px-3 py-1.5">
-                  <Sparkles className="size-3 text-blue-400" />
-                  <span className="text-[11px] text-blue-400">
-                    Auto-detected: <code className="font-mono font-medium">{detectedContentType}</code>
-                  </span>
+              {/* Auto-detect badge with file type info */}
+              {file && detectedContentType && (
+                <motion.div
+                  initial={{ opacity: 0, y: -4 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="flex items-center gap-2 rounded-md border border-emerald-500/20 bg-emerald-500/5 px-3 py-2"
+                >
+                  <Sparkles className="size-3.5 text-emerald-400 shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-[11px] font-medium text-emerald-400">Auto-detected</span>
+                      <span className={`rounded border px-1.5 py-0.5 text-[10px] font-mono font-medium ${fileTypeColor(detectedContentType)}`}>
+                        {fileLabel(file.name)}
+                      </span>
+                    </div>
+                    <code className="text-[10px] font-mono text-muted-foreground/70">{detectedContentType}</code>
+                  </div>
+                </motion.div>
+              )}
+              {/* Content-Type override (for edge cases where auto-detect is wrong) */}
+              {file && (
+                <div className="space-y-1">
+                  <Label className="text-[10px] text-muted-foreground/60">Override Content-Type (optional)</Label>
+                  <div className="flex flex-wrap gap-1">
+                    {["application/json", "text/html", "text/css", "application/javascript", "text/php", "text/plain", "application/xml", "image/svg+xml", "application/octet-stream"].map((ct) => (
+                      <button
+                        key={ct}
+                        type="button"
+                        onClick={() => setContentType(ct)}
+                        className={`rounded border px-1.5 py-0.5 text-[9px] font-mono transition-colors ${
+                          contentType === ct
+                            ? "border-violet-500/40 bg-violet-500/10 text-violet-400"
+                            : "border-border bg-muted/30 text-muted-foreground hover:bg-muted/60"
+                        }`}
+                      >
+                        {ct.split("/").pop()}
+                      </button>
+                    ))}
+                  </div>
+                  <Input
+                    value={contentType}
+                    onChange={(e) => setContentType(e.target.value)}
+                    placeholder="auto-detect"
+                    className="font-mono text-[11px] h-7"
+                  />
                 </div>
               )}
-              <p className="text-[11px] text-muted-foreground">
-                Content-Type auto-detected from file extension and MIME type.
-              </p>
+              {!file && (
+                <p className="text-[11px] text-muted-foreground">
+                  Content-Type auto-detected from file extension and MIME type. Override available after upload.
+                </p>
+              )}
             </div>
           )}
 
@@ -604,12 +794,12 @@ function EndpointRow({ ep }: { ep: Doc<"customEndpoints"> }) {
               {ep.statusCode}
             </span>
             {ep.responseType === "file" ? (
-              <span className="flex items-center gap-0.5 rounded bg-blue-500/10 px-1.5 py-0.5 text-[10px] text-blue-400">
-                <FileCode2 className="size-2.5" /> File
+              <span className={`flex items-center gap-0.5 rounded border px-1.5 py-0.5 text-[10px] font-medium ${fileTypeColor(ep.contentType ?? "")}`}>
+                <FileCode2 className="size-2.5" /> {ep.contentType?.split("/").pop()?.toUpperCase() ?? "FILE"}
               </span>
             ) : (
-              <span className="flex items-center gap-0.5 rounded bg-violet-500/10 px-1.5 py-0.5 text-[10px] text-violet-400">
-                <FileText className="size-2.5" /> Text
+              <span className={`flex items-center gap-0.5 rounded border px-1.5 py-0.5 text-[10px] font-medium ${fileTypeColor(ep.contentType ?? "")}`}>
+                <FileText className="size-2.5" /> {ep.contentType?.split("/").pop()?.toUpperCase() ?? "TEXT"}
               </span>
             )}
             {ep.authRequired && (
