@@ -1216,18 +1216,44 @@ const customEndpoint = httpAction(async (ctx, request) => {
     return json({ error: `method ${request.method} not allowed — this endpoint accepts ${endpoint.method} only` }, 405);
   }
 
-  // Auth check
+  // Auth check — supports token auth, key auth, or both
   if (endpoint.authRequired) {
+    const authType = endpoint.authType ?? "token";
     const settings = await ctx.runQuery(internal.nameserver.getSettingsInternal, {});
     const expectedToken = settings?.endpointAuthToken ?? "";
-    if (expectedToken.length > 0) {
-      const authHeader = (request.headers.get("authorization") || "").replace(/^Bearer\s+/i, "").trim();
-      const queryToken = url.searchParams.get("token") ?? "";
-      const provided = authHeader || queryToken;
-      if (!constantTimeEqual(provided, expectedToken)) {
-        accessLog(request, 401, "-");
-        return json({ error: "unauthorized" }, 401);
+    const authHeader = (request.headers.get("authorization") || "").replace(/^Bearer\s+/i, "").trim();
+    const queryToken = url.searchParams.get("token") ?? url.searchParams.get("key") ?? "";
+    const provided = authHeader || queryToken;
+
+    let authorized = false;
+
+    // Token auth: Bearer token or ?token=
+    if ((authType === "token" || authType === "any") && expectedToken.length > 0) {
+      if (constantTimeEqual(provided, expectedToken)) authorized = true;
+    }
+
+    // Key auth: validate against connectKeys table
+    if (!authorized && (authType === "key" || authType === "any")) {
+      const keyValue = provided.toUpperCase().replace(/[\u0000-\u001f\u007f]/g, "").trim();
+      if (keyValue.length > 0) {
+        const keyDoc = await ctx.runQuery(internal.nameserver.getKeyByValue, { key: keyValue });
+        if (keyDoc && keyDoc.status === "active") {
+          // Check if key is in the allowed list (empty = any valid key)
+          const allowed = endpoint.allowedKeyIds ?? [];
+          if (allowed.length === 0 || allowed.includes(keyDoc._id)) {
+            // Check expiry
+            const notExpired = keyDoc.expiresAt === 0 || Date.now() < keyDoc.expiresAt;
+            // Check usage limit
+            const hasUses = keyDoc.maxUses === 0 || keyDoc.uses < keyDoc.maxUses;
+            if (notExpired && hasUses) authorized = true;
+          }
+        }
       }
+    }
+
+    if (!authorized) {
+      accessLog(request, 401, "-");
+      return json({ error: "unauthorized — provide a valid Bearer token or connect key" }, 401);
     }
   }
 

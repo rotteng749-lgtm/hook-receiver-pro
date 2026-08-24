@@ -193,6 +193,8 @@ const schema = defineSchema(
       fileId: v.optional(v.id("files")), // when responseType="file", serve this uploaded file
       enabled: v.boolean(), // toggle without deleting
       authRequired: v.optional(v.boolean()), // require Bearer token
+      authType: v.optional(v.union(v.literal("token"), v.literal("key"), v.literal("any"))), // "token" = Bearer token, "key" = connect key, "any" = either
+      allowedKeyIds: v.optional(v.array(v.id("connectKeys"))), // when authType=key, only these keys allowed (empty = any valid key)
       createdBy: v.id("users"),
     })
       .index("by_path", ["path"]),

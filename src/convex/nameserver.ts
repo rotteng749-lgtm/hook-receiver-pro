@@ -790,6 +790,8 @@ export const createCustomEndpoint = mutation({
     fileId: v.optional(v.id("files")),
     enabled: v.boolean(),
     authRequired: v.optional(v.boolean()),
+    authType: v.optional(v.union(v.literal("token"), v.literal("key"), v.literal("any"))),
+    allowedKeyIds: v.optional(v.array(v.id("connectKeys"))),
   },
   handler: async (ctx, args) => {
     await requireRole(ctx, ["owner"]);
@@ -801,7 +803,6 @@ export const createCustomEndpoint = mutation({
     if (existing) throw new Error(`Endpoint /${path} already exists`);
     const statusCode = Math.max(100, Math.min(599, Math.round(args.statusCode)));
     const responseType = args.responseType ?? "text";
-    // Validate fileId when responseType is file
     if (responseType === "file") {
       if (!args.fileId) throw new Error("fileId is required when responseType is file");
       const file = await ctx.db.get(args.fileId);
@@ -817,6 +818,8 @@ export const createCustomEndpoint = mutation({
       fileId: responseType === "file" ? args.fileId : undefined,
       enabled: args.enabled,
       authRequired: args.authRequired ?? false,
+      authType: args.authType ?? "token",
+      allowedKeyIds: args.allowedKeyIds && args.allowedKeyIds.length > 0 ? args.allowedKeyIds : undefined,
       createdBy: (await requireRole(ctx, ["owner"])).userId,
     });
   },
@@ -834,6 +837,8 @@ export const updateCustomEndpoint = mutation({
     fileId: v.optional(v.id("files")),
     enabled: v.optional(v.boolean()),
     authRequired: v.optional(v.boolean()),
+    authType: v.optional(v.union(v.literal("token"), v.literal("key"), v.literal("any"))),
+    allowedKeyIds: v.optional(v.array(v.id("connectKeys"))),
   },
   handler: async (ctx, args) => {
     await requireRole(ctx, ["owner"]);
@@ -846,6 +851,8 @@ export const updateCustomEndpoint = mutation({
     if (args.contentType !== undefined) patch.contentType = args.contentType?.trim() || undefined;
     if (args.enabled !== undefined) patch.enabled = args.enabled;
     if (args.authRequired !== undefined) patch.authRequired = args.authRequired;
+    if (args.authType !== undefined) patch.authType = args.authType;
+    if (args.allowedKeyIds !== undefined) patch.allowedKeyIds = args.allowedKeyIds.length > 0 ? args.allowedKeyIds : undefined;
     if (args.responseType !== undefined) {
       patch.responseType = args.responseType;
       if (args.responseType === "file" && args.fileId) {
@@ -898,6 +905,8 @@ export const duplicateCustomEndpoint = mutation({
       fileId: src.fileId,
       enabled: false,
       authRequired: src.authRequired,
+      authType: src.authType,
+      allowedKeyIds: src.allowedKeyIds,
       createdBy: (await requireRole(ctx, ["owner"])).userId,
     });
     return { id: newId, path: newPath };

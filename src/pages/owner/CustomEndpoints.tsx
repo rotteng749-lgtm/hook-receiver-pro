@@ -350,6 +350,7 @@ interface EndpointFormProps {
   initialResponseType?: "text" | "file";
   initialFileId?: string;
   initialAuthRequired?: boolean;
+  initialAuthType?: "token" | "key" | "any";
   endpointId?: Id<"customEndpoints">;
 }
 
@@ -365,6 +366,7 @@ function EndpointForm({
   initialResponseType = "text",
   initialFileId,
   initialAuthRequired = false,
+  initialAuthType = "token",
   endpointId,
 }: EndpointFormProps) {
   const createEndpoint = useMutation(api.nameserver.createCustomEndpoint);
@@ -378,6 +380,7 @@ function EndpointForm({
   const [body, setBody] = useState(initialBody);
   const [contentType, setContentType] = useState(initialContentType);
   const [authRequired, setAuthRequired] = useState(initialAuthRequired);
+  const [authType, setAuthType] = useState<"token" | "key" | "any">(initialAuthType);
   const [responseType, setResponseType] = useState<"text" | "file">(initialResponseType);
   const [file, setFile] = useState<File | null>(null);
   const [detectedContentType, setDetectedContentType] = useState("");
@@ -394,9 +397,11 @@ function EndpointForm({
     setBody('{"ok":true}');
     setContentType("application/json");
     setAuthRequired(false);
+    setAuthType("token");
     setResponseType("text");
     setFile(null);
     setDetectedContentType("");
+    setAutoCheck(null);
     setUploadPhase("");
     setUploadProgress(0);
     setUploadSpeed("");
@@ -507,6 +512,7 @@ function EndpointForm({
           fileId,
           enabled: true,
           authRequired,
+          authType: authRequired ? authType : undefined,
         });
         toast.success(`Endpoint /hook/${path} created`);
       } else {
@@ -519,6 +525,7 @@ function EndpointForm({
           responseType,
           fileId: fileId || (initialFileId as Id<"files"> | undefined),
           authRequired,
+          authType: authRequired ? authType : undefined,
         });
         toast.success("Endpoint updated");
       }
@@ -798,16 +805,48 @@ function EndpointForm({
             </div>
           )}
 
-          <label className="flex items-center gap-2 text-sm cursor-pointer">
-            <input
-              type="checkbox"
-              checked={authRequired}
-              onChange={(e) => setAuthRequired(e.target.checked)}
-              className="rounded border-border"
-            />
-            <Shield className="size-3.5 text-amber-400" />
-            Require auth token
-          </label>
+          <div className="space-y-2">
+            <label className="flex items-center gap-2 text-sm cursor-pointer">
+              <input
+                type="checkbox"
+                checked={authRequired}
+                onChange={(e) => setAuthRequired(e.target.checked)}
+                className="rounded border-border"
+              />
+              <Shield className="size-3.5 text-amber-400" />
+              Require authentication
+            </label>
+            {authRequired && (
+              <motion.div
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: "auto" }}
+                className="ml-6 space-y-2"
+              >
+                <div className="flex gap-2">
+                  {[{ v: "token" as const, l: "Token", d: "Bearer token" }, { v: "key" as const, l: "Key", d: "Connect key" }, { v: "any" as const, l: "Both", d: "Token or key" }].map((t) => (
+                    <button
+                      key={t.v}
+                      type="button"
+                      onClick={() => setAuthType(t.v)}
+                      className={`rounded-lg border px-3 py-1.5 text-[11px] font-medium transition-all ${
+                        authType === t.v
+                          ? "border-amber-500/50 bg-amber-500/10 text-amber-400"
+                          : "border-border bg-muted/30 text-muted-foreground hover:bg-muted/60"
+                      }`}
+                    >
+                      <span className="font-semibold">{t.l}</span>
+                      <span className="ml-1 opacity-60">{t.d}</span>
+                    </button>
+                  ))}
+                </div>
+                <p className="text-[10px] text-muted-foreground/60">
+                  {authType === "token" && "Client must send Authorization: Bearer <token> or ?token="}
+                  {authType === "key" && "Client must send a valid connect key as ?key= or Authorization: Bearer <key>"}
+                  {authType === "any" && "Client can use either a Bearer token or a connect key"}
+                </p>
+              </motion.div>
+            )}
+          </div>
 
           {/* Upload progress bar */}
           {uploadPhase && (
@@ -934,7 +973,7 @@ function EndpointRow({ ep }: { ep: Doc<"customEndpoints"> }) {
             )}
             {ep.authRequired && (
               <span className="flex items-center gap-0.5 rounded bg-amber-500/10 px-1.5 py-0.5 text-[10px] text-amber-400">
-                <Shield className="size-2.5" /> Auth
+                <Shield className="size-2.5" /> {ep.authType === "key" ? "Key" : ep.authType === "any" ? "Token+Key" : "Token"}
               </span>
             )}
           </div>
@@ -1016,6 +1055,7 @@ function EndpointRow({ ep }: { ep: Doc<"customEndpoints"> }) {
         initialResponseType={(ep.responseType as "text" | "file") ?? "text"}
         initialFileId={ep.fileId}
         initialAuthRequired={ep.authRequired ?? false}
+        initialAuthType={(ep.authType as "token" | "key" | "any") ?? "token"}
         endpointId={ep._id}
       />
     </>
