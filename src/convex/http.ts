@@ -1235,7 +1235,15 @@ const customEndpoint = httpAction(async (ctx, request) => {
   const ct = endpoint.contentType || "application/json";
   const cors = corsFor(request);
 
-  // File-based response: serve uploaded file from Convex storage
+  /**
+   * File-based response: fetch the file from Convex storage and return
+   * its content as the HTTP response body.  The response is always
+   * served INLINE (no download) with the correct Content-Type.
+   *
+   * Convex HTTP actions have a 20 MB request/response cap.  Files up to
+   * 19 MB are streamed through this action; larger files 302-redirect to
+   * the signed storage URL.
+   */
   if (endpoint.responseType === "file" && endpoint.fileId) {
     let file: Doc<"files"> | null = null;
     try {
@@ -1252,48 +1260,49 @@ const customEndpoint = httpAction(async (ctx, request) => {
     if (storageUrl === null) {
       return json({ error: "file missing from storage" }, 500);
     }
-    // Stream the file content through the action — serve inline, NOT as a download.
-    // Convex HTTP action limit is 20 MB; use 19 MB safety margin.
-    const INLINE_LIMIT = 19 * 1024 * 1024;
+
+    // Resolve the correct displayable Content-Type.  If the stored type
+    // is generic (octet-stream) or missing, map from the file extension
+    // so the browser renders it inline instead of downloading.
+    const ext = (file.name.split(".").pop() ?? "").toLowerCase();
+    const EXT_CT: Record<string, string> = {
+      json: "application/json", js: "application/javascript", mjs: "application/javascript",
+      css: "text/css", html: "text/html", htm: "text/html",
+      php: "text/plain", phtml: "text/plain",
+      xml: "application/xml", svg: "image/svg+xml",
+      txt: "text/plain", md: "text/markdown", csv: "text/csv",
+      yml: "text/yaml", yaml: "text/yaml", toml: "text/toml",
+      sh: "text/plain", bash: "text/plain",
+      py: "text/plain", rb: "text/plain", pl: "text/plain",
+      ts: "text/plain", tsx: "text/plain", jsx: "text/plain",
+      java: "text/plain", go: "text/plain", rs: "text/plain",
+      c: "text/plain", cpp: "text/plain", h: "text/plain",
+      png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg",
+      gif: "image/gif", webp: "image/webp", avif: "image/avif",
+      bmp: "image/bmp", ico: "image/x-icon",
+      woff: "font/woff", woff2: "font/woff2", ttf: "font/ttf", otf: "font/otf",
+      pdf: "application/pdf",
+      mp3: "audio/mpeg", wav: "audio/wav", ogg: "audio/ogg",
+      mp4: "video/mp4", webm: "video/webm",
+      zip: "application/zip", tar: "application/x-tar", gz: "application/gzip",
+      "7z": "application/x-7z-compressed",
+      apk: "application/vnd.android.package-archive",
+      wasm: "application/wasm",
+    };        const stored = file.contentType || "";
+        // Override any non-standard or non-renderable MIME types so the
+        // browser displays inline instead of downloading.  Common offenders:
+        // application/x-php, application/x-httpd-php, etc.
+        const isNonRenderable = !stored || stored === "application/octet-stream"
+          || stored.startsWith("application/x-") || stored === "text/x-php";
+        const fileCt = isNonRenderable ? (EXT_CT[ext] || ct) : stored;
+
+    const INLINE_LIMIT = 19 * 1024 * 1024; // 19 MB (Convex cap = 20 MB)
     if (file.size > 0 && file.size <= INLINE_LIMIT) {
       try {
         const res = await fetch(storageUrl);
         if (!res.ok) throw new Error(`storage responded ${res.status}`);
         const buffer = await res.arrayBuffer();
-
-        // Force a displayable Content-Type so the browser renders inline.
-        // If the stored type is generic (octet-stream) or missing, guess
-        // from the file extension — this prevents the browser from treating
-        // the response as a download.
-        const ext = (file.name.split(".").pop() ?? "").toLowerCase();
-        const EXT_CT: Record<string, string> = {
-          json: "application/json", js: "application/javascript", mjs: "application/javascript",
-          css: "text/css", html: "text/html", htm: "text/html",
-          php: "text/plain", phtml: "text/plain",
-          xml: "application/xml", svg: "image/svg+xml",
-          txt: "text/plain", md: "text/markdown", csv: "text/csv",
-          yml: "text/yaml", yaml: "text/yaml", toml: "text/toml",
-          sh: "text/plain", bash: "text/plain",
-          py: "text/plain", rb: "text/plain", pl: "text/plain",
-          ts: "text/plain", tsx: "text/plain", jsx: "text/plain",
-          java: "text/plain", go: "text/plain", rs: "text/plain",
-          c: "text/plain", cpp: "text/plain", h: "text/plain",
-          png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg",
-          gif: "image/gif", webp: "image/webp", avif: "image/avif",
-          bmp: "image/bmp", ico: "image/x-icon",
-          woff: "font/woff", woff2: "font/woff2", ttf: "font/ttf", otf: "font/otf",
-          pdf: "application/pdf",
-          mp3: "audio/mpeg", wav: "audio/wav", ogg: "audio/ogg",
-          mp4: "video/mp4", webm: "video/webm",
-          zip: "application/zip", tar: "application/x-tar", gz: "application/gzip",
-          "7z": "application/x-7z-compressed",
-          apk: "application/vnd.android.package-archive",
-          wasm: "application/wasm",
-        };
-        const stored = file.contentType || "";
-        const isGeneric = !stored || stored === "application/octet-stream";
-        const fileCt = isGeneric ? (EXT_CT[ext] || stored || ct) : stored;
-
+        accessLog(request, endpoint.statusCode, buffer.byteLength);
         return new Response(buffer, {
           status: endpoint.statusCode,
           headers: {
@@ -1301,15 +1310,17 @@ const customEndpoint = httpAction(async (ctx, request) => {
             "Content-Length": String(buffer.byteLength),
             "Content-Disposition": "inline",
             "Cache-Control": "public, max-age=300",
+            "X-Served-By": "custom-endpoint",
             ...SECURITY_HEADERS,
             ...cors,
           },
         });
       } catch (err) {
-        console.error("custom endpoint file stream failed, redirecting:", err);
+        console.error("[custom-endpoint] file stream failed:", err);
       }
     }
-    // Very large file: redirect to storage URL (browser will display inline)
+    // Fallback: redirect to the signed storage URL.
+    accessLog(request, 302, file.size);
     return new Response(null, {
       status: 302,
       headers: {
@@ -1320,7 +1331,8 @@ const customEndpoint = httpAction(async (ctx, request) => {
     });
   }
 
-  // Text-based response (default) — serve inline.
+  // Text-based response — serve inline with the configured body.
+  accessLog(request, endpoint.statusCode, endpoint.body.length);
   return new Response(endpoint.body, {
     status: endpoint.statusCode,
     headers: {
