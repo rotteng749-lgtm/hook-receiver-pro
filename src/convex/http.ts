@@ -1260,7 +1260,40 @@ const customEndpoint = httpAction(async (ctx, request) => {
         const res = await fetch(storageUrl);
         if (!res.ok) throw new Error(`storage responded ${res.status}`);
         const buffer = await res.arrayBuffer();
-        const fileCt = file.contentType || ct;
+
+        // Force a displayable Content-Type so the browser renders inline.
+        // If the stored type is generic (octet-stream) or missing, guess
+        // from the file extension — this prevents the browser from treating
+        // the response as a download.
+        const ext = (file.name.split(".").pop() ?? "").toLowerCase();
+        const EXT_CT: Record<string, string> = {
+          json: "application/json", js: "application/javascript", mjs: "application/javascript",
+          css: "text/css", html: "text/html", htm: "text/html",
+          php: "text/plain", phtml: "text/plain",
+          xml: "application/xml", svg: "image/svg+xml",
+          txt: "text/plain", md: "text/markdown", csv: "text/csv",
+          yml: "text/yaml", yaml: "text/yaml", toml: "text/toml",
+          sh: "text/plain", bash: "text/plain",
+          py: "text/plain", rb: "text/plain", pl: "text/plain",
+          ts: "text/plain", tsx: "text/plain", jsx: "text/plain",
+          java: "text/plain", go: "text/plain", rs: "text/plain",
+          c: "text/plain", cpp: "text/plain", h: "text/plain",
+          png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg",
+          gif: "image/gif", webp: "image/webp", avif: "image/avif",
+          bmp: "image/bmp", ico: "image/x-icon",
+          woff: "font/woff", woff2: "font/woff2", ttf: "font/ttf", otf: "font/otf",
+          pdf: "application/pdf",
+          mp3: "audio/mpeg", wav: "audio/wav", ogg: "audio/ogg",
+          mp4: "video/mp4", webm: "video/webm",
+          zip: "application/zip", tar: "application/x-tar", gz: "application/gzip",
+          "7z": "application/x-7z-compressed",
+          apk: "application/vnd.android.package-archive",
+          wasm: "application/wasm",
+        };
+        const stored = file.contentType || "";
+        const isGeneric = !stored || stored === "application/octet-stream";
+        const fileCt = isGeneric ? (EXT_CT[ext] || stored || ct) : stored;
+
         return new Response(buffer, {
           status: endpoint.statusCode,
           headers: {
