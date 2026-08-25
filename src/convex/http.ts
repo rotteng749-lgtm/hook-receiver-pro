@@ -73,8 +73,10 @@ function corsFor(request: Request): Record<string, string> {
   const allowed =
     origin.includes(host) ||
     /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin) ||
+    /^https?:\/\/(\d{1,3}\.){3}\d{1,3}(:\d+)?$/.test(origin) ||
     origin.endsWith(".convex.site") ||
-    origin.endsWith(".vercel.app");
+    origin.endsWith(".vercel.app") ||
+    origin.endsWith(".freebuff.com");
   if (!allowed) return {};
   return { "Access-Control-Allow-Origin": origin };
 }
@@ -413,9 +415,13 @@ const deleteFile = httpAction(async (ctx, request) => {
  * license key — the server is optional and inferred from the key.
  *
  * Accepted request styles — the response satisfies every client family at
- * once (see the `send` formatter below). POST only (GET /connect → 405):
+ * once (see the `send` formatter below). Supports both POST and GET:
  *
- *   JSON body (key/license/device/hwid/action):
+ *   GET (query params — best for IP-based clients):
+ *     GET /connect?license=NS-…&device=device-abc
+ *     GET /connect?key=NS-…&hwid=android-id&game=Free_Fire
+ *
+ *   POST JSON body (key/license/device/hwid/action):
  *     POST /connect  { "license": "NS-…", "device": "device-abc" }
  *     POST /connect  { "key": "NS-…", "hwid": "android-id", "game": "Free Fire" }
  *       (primebit-style FF_KERNEL / ML-KERNEL loaders — `hwid` binds the device)
@@ -460,7 +466,25 @@ const connect = httpAction(async (ctx, request) => {
 
   const contentType = (request.headers.get("content-type") || "").toLowerCase();
   const isForm = contentType.includes("application/x-www-form-urlencoded");
-  if (isForm) {
+  if (request.method === "GET") {
+    // GET /connect?license=NS-…&device=DEVICE-ID — supports IP-based clients
+    const qp = url.searchParams;
+    key = normalizeKey(
+      qp.get("license") ?? qp.get("key") ?? qp.get("user_key") ?? qp.get("license_key") ?? "",
+    );
+    serverRef = (qp.get("server") ?? "").trim();
+    rawSerial = (
+      qp.get("device") ?? qp.get("hwid") ?? qp.get("serial") ?? ""
+    ).trim();
+    device = normalizeDevice(rawSerial);
+    wantsReset =
+      qp.get("action") === "reset" ||
+      qp.get("reset") === "true" ||
+      qp.get("reset") === "1";
+    game = (qp.get("game") ?? "").trim().slice(0, 32);
+    version = (qp.get("version") ?? "").trim().slice(0, 32);
+    resource = (qp.get("resource") ?? "").trim().slice(0, 128);
+  } else if (isForm) {
     // Havest-style: game=MLBB&version=1.0&user_key=…&serial=…&resource=…
     const params = new URLSearchParams(await request.text());
     key = normalizeKey(
@@ -1389,7 +1413,7 @@ const customEndpoint = httpAction(async (ctx, request) => {
 http.route({ path: "/health", method: "GET", handler: health });
 
 http.route({ path: "/connect", method: "POST", handler: connect });
-http.route({ path: "/connect", method: "GET", handler: methodNotAllowed });
+http.route({ path: "/connect", method: "GET", handler: connect });
 http.route({ path: "/connect", method: "PUT", handler: methodNotAllowed });
 http.route({ path: "/connect", method: "PATCH", handler: methodNotAllowed });
 http.route({ path: "/connect", method: "DELETE", handler: methodNotAllowed });
