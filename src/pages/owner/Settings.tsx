@@ -15,10 +15,12 @@ import { api } from "@/convex/_generated/api";
 import { useMutation, useQuery } from "convex/react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
+  Copy,
   Globe,
   KeyRound,
   Loader2,
   Save,
+  Wifi,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
@@ -138,6 +140,58 @@ export default function SettingsPage() {
 
       <form onSubmit={submit} className="space-y-6">
         <motion.div variants={stagger} initial="hidden" animate="visible" className="space-y-6">
+          {/* ─── Access URLs ─── */}
+          <motion.div variants={cardVariants}>
+            <Card className="border-border/70 overflow-hidden">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <Wifi className="size-4 text-emerald-400" />
+                  Access URLs
+                </CardTitle>
+                <CardDescription>
+                  Your panel is accessible via the URLs below. IP-based access works on the local network.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {(() => {
+                  const host = typeof window !== "undefined" ? window.location.hostname : "";
+                  const port = typeof window !== "undefined" ? window.location.port : "";
+                  const protocol = typeof window !== "undefined" ? window.location.protocol : "https:";
+                  const isLocal = host === "localhost" || host === "127.0.0.1" || /^10\.|^172\.(1[6-9]|2\d|3[01])\.|^192\.168\./.test(host);
+                  const baseUrl = `${protocol}//${host}${port ? `:${port}` : ""}`;
+                  const convexUrl = import.meta.env.VITE_CONVEX_URL as string;
+                  const urls = [
+                    { label: "Current session", url: baseUrl, isCurrent: true },
+                    ...(convexUrl ? [{ label: "Convex backend", url: convexUrl, isCurrent: false }] : []),
+                  ];
+                  if (isLocal) {
+                    urls.push({ label: "Network access (share this)", url: `${protocol}//${host}${port ? `:${port}` : ""}`, isCurrent: false });
+                  }
+                  return urls.map((u) => (
+                    <div key={u.url} className="flex items-center gap-2 rounded-lg border border-border bg-muted/40 px-3 py-2.5">
+                      <Globe className="size-3.5 shrink-0 text-muted-foreground" />
+                      <div className="min-w-0 flex-1">
+                        <p className="text-[11px] text-muted-foreground">{u.label}</p>
+                        <p className="truncate font-mono text-xs">{u.url}</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => { navigator.clipboard.writeText(u.url); toast.success("Copied!"); }}
+                        className="cursor-pointer rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+                        title="Copy URL"
+                      >
+                        <Copy className="size-3.5" />
+                      </button>
+                    </div>
+                  ));
+                })()}
+                <p className="text-[11px] text-muted-foreground pt-1">
+                  The /connect endpoint is always public. Access the panel at <code className="rounded bg-muted px-1 py-0.5 font-mono text-[10px]">/owner</code> (owner) or <code className="rounded bg-muted px-1 py-0.5 font-mono text-[10px]">/admin</code> (admin) after sign-in.
+                </p>
+              </CardContent>
+            </Card>
+          </motion.div>
+
           {/* ─── Server Domain ─── */}
           <motion.div variants={cardVariants}>
             <Card className="border-border/70 overflow-hidden">

@@ -15,7 +15,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { roleHome } from "@/lib/roles";
 import logo from "@/assets/logo.svg";
 import { useMutation } from "convex/react";
-import { ArrowRight, Loader2, Lock, User } from "lucide-react";
+import { ArrowRight, Loader2, Lock, User, ExternalLink } from "lucide-react";
 import { Suspense, useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 
@@ -42,14 +42,15 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
     searchParams.get("returnTo"),
     user?.role,
   );
+  const mode = searchParams.get("mode");
+  const isRegister = mode === "register";
 
   const seedOwner = useMutation(api.nameserver.seedOwner);
+  const createMember = useMutation(api.nameserver.createMember);
   const [seeding, setSeeding] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Make sure the owner account (ADMIN_USERNAME / ADMIN_PASSWORD env vars)
-  // exists before the first login attempt.
   useEffect(() => {
     void seedOwner()
       .catch((err) => console.warn("seedOwner failed:", err))
@@ -74,75 +75,185 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
         flow: "signIn",
       });
       navigate(redirect);
-    } catch (error) {
-      console.error("Sign-in error:", error);
+    } catch {
       setError("Invalid username or password.");
+      setIsLoading(false);
+    }
+  };
+
+  const handleRegister = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setIsLoading(true);
+    setError(null);
+    try {
+      const formData = new FormData(event.currentTarget);
+      const username = (formData.get("username") as string).trim();
+      const password = formData.get("password") as string;
+      const confirmPassword = formData.get("confirmPassword") as string;
+
+      if (username.length < 3) {
+        setError("Username must be at least 3 characters.");
+        setIsLoading(false);
+        return;
+      }
+      if (password.length < 4) {
+        setError("Password must be at least 4 characters.");
+        setIsLoading(false);
+        return;
+      }
+      if (password !== confirmPassword) {
+        setError("Passwords do not match.");
+        setIsLoading(false);
+        return;
+      }
+
+      await createMember({
+        username,
+        password,
+        role: "user",
+        balance: 0,
+      });
+
+      // Auto sign-in after registration
+      await signIn("password", {
+        username,
+        password,
+        flow: "signIn",
+      });
+      navigate(redirect);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Registration failed.");
       setIsLoading(false);
     }
   };
 
   return (
     <div className="min-h-screen flex flex-col">
-      <div className="absolute top-4 right-4">
+      <div className="absolute top-4 right-4 z-10">
         <ThemeToggle />
       </div>
-      {/* Auth Content */}
-      <div className="flex-1 flex items-center justify-center">
-        <div className="flex items-center justify-center h-full flex-col">
-          <Card className="min-w-[350px] pb-0 border shadow-md">
-            <CardHeader className="text-center">
+
+      {/* Background gradient */}
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-[400px] bg-[radial-gradient(ellipse_70%_50%_at_50%_-15%,oklch(0.46_0.1_178/0.12),transparent)]" />
+
+      <div className="flex-1 flex items-center justify-center relative">
+        <div className="flex items-center justify-center h-full flex-col w-full max-w-md px-4">
+          <Card className="w-full border shadow-lg overflow-hidden">
+            <CardHeader className="text-center pb-2">
               <div className="flex justify-center">
                 <img
                   src={logo}
-                  alt="Lock Icon"
-                  width={64}
-                  height={64}
-                  className="rounded-lg mb-4 mt-4 cursor-pointer"
+                  alt="Logo"
+                  width={56}
+                  height={56}
+                  className="rounded-xl mb-3 cursor-pointer"
                   onClick={() => navigate("/")}
                 />
               </div>
-              <CardTitle className="text-xl">Sign in to the panel</CardTitle>
+              <CardTitle className="text-xl font-bold">
+                {isRegister ? "Create Account" : "Sign in to your account"}
+              </CardTitle>
               <CardDescription>
-                Username &amp; password — no email required
+                {isRegister
+                  ? "Join the platform — create an account below"
+                  : "Sign in with your username & password"}
               </CardDescription>
             </CardHeader>
-            <form onSubmit={handleSignIn}>
-              <CardContent className="space-y-4">
+
+            {/* Tabs */}
+            <div className="flex border-b border-border/70">
+              <button
+                type="button"
+                onClick={() => navigate(isRegister ? "/auth" : "/auth?mode=register", { replace: true })}
+                className={`flex-1 py-2.5 text-sm font-medium transition-colors cursor-pointer ${
+                  !isRegister
+                    ? "text-primary border-b-2 border-primary"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                Sign In
+              </button>
+              <button
+                type="button"
+                onClick={() => navigate(isRegister ? "/auth?mode=register" : "/auth?mode=register", { replace: true })}
+                className={`flex-1 py-2.5 text-sm font-medium transition-colors cursor-pointer ${
+                  isRegister
+                    ? "text-primary border-b-2 border-primary"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                Register
+              </button>
+            </div>
+
+            <form onSubmit={isRegister ? handleRegister : handleSignIn}>
+              <CardContent className="space-y-4 pt-5">
                 <div className="space-y-2">
-                  <Label htmlFor="username">Username</Label>
+                  <Label htmlFor="auth-username" className="text-sm font-medium">
+                    Username
+                  </Label>
                   <div className="relative">
-                    <User className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                    <User className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                     <Input
-                      id="username"
+                      id="auth-username"
                       name="username"
-                      placeholder="Username"
+                      placeholder="Enter your username"
                       autoComplete="username"
-                      className="pl-9"
+                      className="pl-10 h-11"
                       disabled={isLoading || seeding}
                       required
                     />
                   </div>
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="password">Password</Label>
+                  <Label htmlFor="auth-password" className="text-sm font-medium">
+                    Password
+                  </Label>
                   <div className="relative">
-                    <Lock className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                    <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                     <Input
-                      id="password"
+                      id="auth-password"
                       name="password"
                       type="password"
                       placeholder="••••••••"
-                      autoComplete="current-password"
-                      className="pl-9"
+                      autoComplete={isRegister ? "new-password" : "current-password"}
+                      className="pl-10 h-11"
                       disabled={isLoading || seeding}
                       required
                     />
                   </div>
                 </div>
-                {error && <p className="text-sm text-red-500">{error}</p>}
+
+                {isRegister && (
+                  <div className="space-y-2">
+                    <Label htmlFor="auth-confirm" className="text-sm font-medium">
+                      Confirm Password
+                    </Label>
+                    <div className="relative">
+                      <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                      <Input
+                        id="auth-confirm"
+                        name="confirmPassword"
+                        type="password"
+                        placeholder="••••••••"
+                        autoComplete="new-password"
+                        className="pl-10 h-11"
+                        disabled={isLoading || seeding}
+                        required
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {error && (
+                  <p className="text-sm text-destructive bg-destructive/10 px-3 py-2 rounded-md">
+                    {error}
+                  </p>
+                )}
+
                 <Button
                   type="submit"
-                  className="w-full cursor-pointer"
+                  className="w-full h-11 cursor-pointer font-semibold"
                   disabled={isLoading || seeding}
                 >
                   {isLoading || seeding ? (
@@ -151,31 +262,38 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                     <ArrowRight className="mr-2 h-4 w-4" />
                   )}
                   {seeding
-                    ? "Preparing owner account…"
+                    ? "Preparing account…"
                     : isLoading
-                      ? "Signing in…"
-                      : "Sign in"}
+                      ? isRegister ? "Creating account…" : "Signing in…"
+                      : isRegister ? "Create Account" : "Sign In"}
                 </Button>
               </CardContent>
             </form>
 
-            <div className="py-4 px-6 text-xs text-center text-muted-foreground bg-muted border-t rounded-b-lg">
-              Secured by{" "}
-              <a
-                href="https://freebuff.com"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="underline hover:text-primary transition-colors"
-              >
-                freebuff.com
-              </a>
+            <div className="border-t border-border/70 bg-muted/50 px-6 py-3 text-center text-xs text-muted-foreground">
+              <div className="flex items-center justify-center gap-3">
+                <a
+                  href="https://t.me/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="hover:text-primary transition-colors flex items-center gap-1"
+                >
+                  Support Channel <ExternalLink className="size-3" />
+                </a>
+              </div>
             </div>
           </Card>
 
-          <p className="mx-auto mt-4 max-w-[350px] text-center text-xs leading-relaxed text-muted-foreground">
-            Use the username &amp; password given to you by the owner. The owner
-            panel is at <code className="rounded bg-muted px-1 py-0.5">/owner</code>;
-            admins are created by the owner in Members.
+          <p className="mt-4 text-center text-xs text-muted-foreground">
+            (c) {new Date().getFullYear()} Panxcz — Secured by{" "}
+            <a
+              href="https://freebuff.com"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="underline hover:text-primary transition-colors"
+            >
+              freebuff.com
+            </a>
           </p>
         </div>
       </div>

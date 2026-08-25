@@ -49,7 +49,7 @@ function SidebarContent({
         className="flex items-center gap-2.5 px-5 pt-6 pb-5"
       >
         <img src={logo} alt="nameserver" width={28} height={28} className="rounded-md" />
-        <span className="text-[15px] font-bold tracking-tight">nameserver</span>
+        <span className="text-[15px] font-bold tracking-tight">Panxcz</span>
         <span className="ml-auto inline-flex items-center rounded-md border border-border px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
           {roleLabel}
         </span>
@@ -186,7 +186,7 @@ export function PanelShell({
           </button>
           <NavLink to="/" className="flex items-center gap-2">
             <img src={logo} alt="nameserver" width={24} height={24} className="rounded" />
-            <span className="text-sm font-bold tracking-tight">nameserver</span>
+            <span className="text-sm font-bold tracking-tight">Panxcz</span>
           </NavLink>
           <div className="ml-auto">
             <ThemeToggle />
