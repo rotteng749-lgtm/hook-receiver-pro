@@ -66,7 +66,7 @@ async function getAuthUser(ctx: QueryCtx | MutationCtx) {
 }
 
 function roleOf(user: Doc<"users"> | null | undefined): PanelRole {
-  return ((user?.role ?? "user") as PanelRole) ?? "user";
+  return (user?.role ?? "user") as PanelRole;
 }
 
 async function requireRole(ctx: QueryCtx | MutationCtx, roles: PanelRole[]) {
@@ -792,6 +792,7 @@ export const createCustomEndpoint = mutation({
     authRequired: v.optional(v.boolean()),
     authType: v.optional(v.union(v.literal("token"), v.literal("key"), v.literal("any"))),
     allowedKeyIds: v.optional(v.array(v.id("connectKeys"))),
+    game: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     await requireRole(ctx, ["owner"]);
@@ -820,6 +821,7 @@ export const createCustomEndpoint = mutation({
       authRequired: args.authRequired ?? false,
       authType: args.authType ?? "token",
       allowedKeyIds: args.allowedKeyIds && args.allowedKeyIds.length > 0 ? args.allowedKeyIds : undefined,
+      game: args.game?.trim() || undefined,
       createdBy: (await requireRole(ctx, ["owner"])).userId,
     });
   },
@@ -839,6 +841,7 @@ export const updateCustomEndpoint = mutation({
     authRequired: v.optional(v.boolean()),
     authType: v.optional(v.union(v.literal("token"), v.literal("key"), v.literal("any"))),
     allowedKeyIds: v.optional(v.array(v.id("connectKeys"))),
+    game: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     await requireRole(ctx, ["owner"]);
@@ -853,6 +856,7 @@ export const updateCustomEndpoint = mutation({
     if (args.authRequired !== undefined) patch.authRequired = args.authRequired;
     if (args.authType !== undefined) patch.authType = args.authType;
     if (args.allowedKeyIds !== undefined) patch.allowedKeyIds = args.allowedKeyIds.length > 0 ? args.allowedKeyIds : undefined;
+    if (args.game !== undefined) patch.game = args.game?.trim() || undefined;
     if (args.responseType !== undefined) {
       patch.responseType = args.responseType;
       if (args.responseType === "file" && args.fileId) {

@@ -335,6 +335,46 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+/** Supported games for license server endpoints. */
+const SUPPORTED_GAMES = [
+  "", "MLBB", "FREEFIRE", "PUBG", "CODM", "GENSHIN",
+  "APEX", "VALORANT", "FORTNITE", "MINECRAFT",
+  "ROBLOX", "MOBILELEGENDS", "ARENAOFVALOR",
+  "LEAGUEOFLEGENDS", "DOTA2", "CS2", "GTA5",
+  "EFT", "DAYZ", "RUST", "ARK",
+  "OTHER",
+];
+
+/** Default license server response body — matches the PHP pattern. */
+const DEFAULT_LICENSE_BODY = JSON.stringify({
+  "ok": true,
+  "status": true,
+  "reason": "success",
+  "seal": "",
+  "data": {
+    "server": {
+      "name": "panxcz-main",
+      "code": "panxcz-main",
+    },
+    "key": {
+      "expiresAt": 0,
+      "uses": 1,
+      "maxUses": 0,
+      "maxDevices": 0,
+      "devicesCount": 1,
+    },
+    "url": null,
+    "token": "",
+    "rng": 0,
+    "tittle": "Game Name",
+    "expired": "25 - Des - 2030 12:00:00",
+  },
+  "token": "",
+  "rng": 0,
+  "tittle": "Game Name",
+  "expired": "25 - Des - 2030 12:00:00",
+}, null, 2);
+
 /* ========================= Endpoint Form (Create + Edit) ========================= */
 
 type MethodType = "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "ANY";
@@ -352,6 +392,7 @@ interface EndpointFormProps {
   initialFileId?: string;
   initialAuthRequired?: boolean;
   initialAuthType?: "token" | "key" | "any";
+  initialGame?: string;
   endpointId?: Id<"customEndpoints">;
 }
 
@@ -362,12 +403,13 @@ function EndpointForm({
   initialPath = "",
   initialMethod = "POST",
   initialStatusCode = 200,
-  initialBody = '{"ok":true}',
+  initialBody = DEFAULT_LICENSE_BODY,
   initialContentType = "application/json",
   initialResponseType = "text",
   initialFileId,
   initialAuthRequired = false,
   initialAuthType = "token",
+  initialGame = "",
   endpointId,
 }: EndpointFormProps) {
   const createEndpoint = useMutation(api.nameserver.createCustomEndpoint);
@@ -385,6 +427,7 @@ function EndpointForm({
   const [responseType, setResponseType] = useState<"text" | "file">(initialResponseType);
   const [file, setFile] = useState<File | null>(null);
   const [detectedContentType, setDetectedContentType] = useState("");
+  const [game, setGame] = useState(initialGame);
   const [busy, setBusy] = useState(false);
   const [uploadPhase, setUploadPhase] = useState<"" | "uploading" | "registering">("");
   const [uploadProgress, setUploadProgress] = useState(0);
@@ -395,7 +438,7 @@ function EndpointForm({
     setPath("");
     setMethod("POST");
     setStatusCode("200");
-    setBody('{"ok":true}');
+    setBody(DEFAULT_LICENSE_BODY);
     setContentType("application/json");
     setAuthRequired(false);
     setAuthType("token");
@@ -407,6 +450,7 @@ function EndpointForm({
     setUploadProgress(0);
     setUploadSpeed("");
     setUploadEta("");
+    setGame("");
   };
 
   const [autoCheck, setAutoCheck] = useState<AutoCheckResult | null>(null);
@@ -514,6 +558,7 @@ function EndpointForm({
           enabled: true,
           authRequired,
           authType: authRequired ? authType : undefined,
+          game: game || undefined,
         });
         toast.success(`Endpoint /hook/${path} created`);
       } else {
@@ -527,6 +572,7 @@ function EndpointForm({
           fileId: fileId || (initialFileId as Id<"files"> | undefined),
           authRequired,
           authType: authRequired ? authType : undefined,
+          game: game || undefined,
         });
         toast.success("Endpoint updated");
       }
@@ -625,6 +671,20 @@ function EndpointForm({
               </div>
             </div>
           </div>
+
+          <div className="space-y-1.5">
+              <Label className="text-xs font-medium">Game</Label>
+              <select
+                value={game}
+                onChange={(e) => setGame(e.target.value)}
+                className="flex h-9 w-full rounded-md border border-border bg-transparent px-3 text-sm"
+              >
+                <option value="">All games (generic)</option>
+                {SUPPORTED_GAMES.filter(Boolean).map((g) => (
+                  <option key={g} value={g}>{g}</option>
+                ))}
+              </select>
+            </div>
 
           <div className="space-y-1.5">
             <Label className="text-xs font-medium">Response type</Label>
@@ -1110,6 +1170,11 @@ function EndpointRow({ ep }: { ep: Doc<"customEndpoints"> }) {
                 <Shield className="size-2.5" /> {ep.authType === "key" ? "Key" : ep.authType === "any" ? "Token+Key" : "Token"}
               </span>
             )}
+            {ep.game && (
+              <span className="rounded bg-blue-500/10 px-1.5 py-0.5 text-[10px] font-medium text-blue-400">
+                {ep.game}
+              </span>
+            )}
           </div>
           {ep.responseType === "text" && ep.contentType && (
             <p className="mt-0.5 text-[10px] text-muted-foreground/50 font-mono">{ep.contentType}</p>
@@ -1204,6 +1269,7 @@ function EndpointRow({ ep }: { ep: Doc<"customEndpoints"> }) {
         initialFileId={ep.fileId}
         initialAuthRequired={ep.authRequired ?? false}
         initialAuthType={(ep.authType as "token" | "key" | "any") ?? "token"}
+        initialGame={ep.game ?? ""}
         endpointId={ep._id}
       />
     </>
