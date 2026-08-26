@@ -1211,7 +1211,7 @@ function EndpointRow({ ep }: { ep: Doc<"customEndpoints"> }) {
             <Button
               variant="ghost"
               size="icon"
-              className="size-7 text-amber-400 hover:text-amber-300 opacity-0 group-hover:opacity-100 transition-opacity"
+              className="size-7 text-amber-400 hover:text-amber-300 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity"
               title="Generate key for this endpoint"
               onClick={() => setKeyGenOpen(true)}
             >
@@ -1221,7 +1221,7 @@ function EndpointRow({ ep }: { ep: Doc<"customEndpoints"> }) {
           <Button
             variant="ghost"
             size="icon"
-            className="size-7 text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100 transition-opacity"
+            className="size-7 text-muted-foreground hover:text-foreground opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity"
             title="Duplicate"
             onClick={handleDuplicate}
           >
@@ -1230,7 +1230,7 @@ function EndpointRow({ ep }: { ep: Doc<"customEndpoints"> }) {
           <Button
             variant="ghost"
             size="icon"
-            className="size-7 text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100 transition-opacity"
+            className="size-7 text-muted-foreground hover:text-foreground opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity"
             onClick={() => setEditOpen(true)}
             title="Edit"
           >
@@ -1247,7 +1247,7 @@ function EndpointRow({ ep }: { ep: Doc<"customEndpoints"> }) {
                 type="button"
                 variant="ghost"
                 size="icon"
-                className="size-7 text-destructive/60 hover:text-destructive opacity-0 group-hover:opacity-100 transition-opacity"
+                className="size-7 text-destructive/60 hover:text-destructive opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity"
               >
                 <Trash2 className="size-3.5" />
               </Button>
