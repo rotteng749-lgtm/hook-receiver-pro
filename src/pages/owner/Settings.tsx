@@ -20,6 +20,8 @@ import {
   KeyRound,
   Loader2,
   Save,
+  User,
+  Lock,
   Wifi,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
@@ -69,6 +71,22 @@ const stagger = {
 export default function SettingsPage() {
   const settings = useQuery(api.nameserver.getSettings);
   const updateSettings = useMutation(api.nameserver.updateSettings);
+  const profile = useQuery(api.nameserver.getMyProfile);
+  const updateMyProfile = useMutation(api.nameserver.updateMyProfile);
+  const changeMyPassword = useMutation(api.nameserver.changeMyPassword);
+
+  const [profileName, setProfileName] = useState("");
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [profileBusy, setProfileBusy] = useState(false);
+  const [passwordBusy, setPasswordBusy] = useState(false);
+
+  useEffect(() => {
+    if (profile) {
+      setProfileName(profile.name ?? "");
+    }
+  }, [profile]);
 
   const [keyPrice, setKeyPrice] = useState("10");
   const [defaultKeyUses, setDefaultKeyUses] = useState("0");
@@ -107,6 +125,45 @@ export default function SettingsPage() {
     );
   }
 
+  const handleProfileSave = async () => {
+    setProfileBusy(true);
+    try {
+      await updateMyProfile({ name: profileName });
+      toast.success("Profile updated");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to update profile");
+    } finally {
+      setProfileBusy(false);
+    }
+  };
+
+  const handlePasswordChange = async () => {
+    if (!currentPassword || !newPassword) {
+      toast.error("Please fill in all password fields");
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      toast.error("New passwords do not match");
+      return;
+    }
+    if (newPassword.length < 4) {
+      toast.error("New password must be at least 4 characters");
+      return;
+    }
+    setPasswordBusy(true);
+    try {
+      await changeMyPassword({ currentPassword, newPassword });
+      toast.success("Password changed — sign in again with the new password");
+      setCurrentPassword("");
+      setNewPassword("");
+      setConfirmPassword("");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to change password");
+    } finally {
+      setPasswordBusy(false);
+    }
+  };
+
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setBusy(true);
@@ -140,6 +197,110 @@ export default function SettingsPage() {
 
       <form onSubmit={submit} className="space-y-6">
         <motion.div variants={stagger} initial="hidden" animate="visible" className="space-y-6">
+          {/* ─── Profile ─── */}
+          <motion.div variants={cardVariants}>
+            <Card className="border-border/70 overflow-hidden">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <User className="size-4 text-primary" />
+                  My Profile
+                </CardTitle>
+                <CardDescription>
+                  Manage your display name and login credentials.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-5">
+                {/* Name */}
+                <div className="flex items-end gap-3">
+                  <div className="flex-1 space-y-2">
+                    <Label htmlFor="profile-name">Display name</Label>
+                    <Input
+                      id="profile-name"
+                      value={profileName}
+                      onChange={(e) => setProfileName(e.target.value)}
+                      placeholder="Your name"
+                      maxLength={80}
+                    />
+                  </div>
+                  <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={profileBusy || profileName === (profile?.name ?? "")}
+                      onClick={handleProfileSave}
+                      className="cursor-pointer gap-1.5"
+                    >
+                      {profileBusy ? <Loader2 className="size-3.5 animate-spin" /> : <Save className="size-3.5" />}
+                      Save
+                    </Button>
+                  </motion.div>
+                </div>
+                {/* Role & info */}
+                <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/40 px-3 py-2.5">
+                  <Lock className="size-3.5 shrink-0 text-muted-foreground" />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[11px] text-muted-foreground">Username / Role</p>
+                    <p className="truncate font-mono text-xs">
+                      {profile?.email ?? "—"} <span className="ml-2 rounded-full bg-primary/15 px-2 py-0.5 text-[10px] text-primary">{profile?.role ?? "—"}</span>
+                    </p>
+                  </div>
+                </div>
+                {/* Change password */}
+                <div className="space-y-3 border-t border-border/70 pt-5">
+                  <p className="text-sm font-medium">Change password</p>
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                    <div className="space-y-1.5">
+                      <Label htmlFor="current-pw">Current password</Label>
+                      <Input
+                        id="current-pw"
+                        type="password"
+                        value={currentPassword}
+                        onChange={(e) => setCurrentPassword(e.target.value)}
+                        placeholder="••••••••"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="new-pw">New password</Label>
+                      <Input
+                        id="new-pw"
+                        type="password"
+                        value={newPassword}
+                        onChange={(e) => setNewPassword(e.target.value)}
+                        placeholder="••••••••"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="confirm-pw">Confirm</Label>
+                      <div className="flex gap-2">
+                        <Input
+                          id="confirm-pw"
+                          type="password"
+                          value={confirmPassword}
+                          onChange={(e) => setConfirmPassword(e.target.value)}
+                          placeholder="••••••••"
+                        />
+                        <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            disabled={passwordBusy || !currentPassword || !newPassword}
+                            onClick={handlePasswordChange}
+                            className="cursor-pointer gap-1.5 shrink-0"
+                          >
+                            {passwordBusy ? <Loader2 className="size-3.5 animate-spin" /> : <Lock className="size-3.5" />}
+                            Update
+                          </Button>
+                        </motion.div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </motion.div>
+
           {/* ─── Access URLs ─── */}
           <motion.div variants={cardVariants}>
             <Card className="border-border/70 overflow-hidden">

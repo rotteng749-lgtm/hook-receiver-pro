@@ -13,7 +13,7 @@
  * The public connect endpoint lives in convex/http.ts and calls the
  * internal helpers at the bottom of this file.
  */
-import { createAccount, getAuthUserId } from "@convex-dev/auth/server";
+import { createAccount, getAuthUserId, modifyAccountCredentials } from "@convex-dev/auth/server";
 import type { GenericActionCtx, GenericDataModel } from "convex/server";
 import { v } from "convex/values";
 import {
@@ -675,6 +675,117 @@ export const setBalance = mutation({
     await ctx.db.patch(args.userId, {
       balance: Math.max(0, Math.round(args.balance)),
     });
+  },
+});
+
+/* ------------------------------ profile ------------------------------ */
+
+/** Get the current user's profile. */
+export const getMyProfile = query({
+  args: {},
+  handler: async (ctx) => {
+    const { userId, user } = await getAuthUser(ctx);
+    void userId;
+    return {
+      _id: user._id,
+      name: user.name ?? null,
+      email: user.email ?? null,
+      role: roleOf(user),
+      balance: user.balance ?? 0,
+      createdAt: user._creationTime,
+    };
+  },
+});
+
+/** Update display name and/or email for the current user. */
+export const updateMyProfile = mutation({
+  args: {
+    name: v.optional(v.string()),
+    email: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const { userId } = await getAuthUser(ctx);
+    const patch: Record<string, unknown> = {};
+    if (args.name !== undefined) {
+      const name = args.name.trim().slice(0, 80);
+      if (name.length < 1) throw new Error("Name cannot be empty");
+      patch.name = name;
+    }
+    if (args.email !== undefined) {
+      const email = args.email.trim().slice(0, 120);
+      if (email.length < 3) throw new Error("Email must be at least 3 characters");
+      patch.email = email;
+      // Also update the auth account identifier so the next login uses the new username
+      const account = await ctx.db
+        .query("authAccounts")
+        .withIndex("userIdAndProvider", (q) => q.eq("userId", userId).eq("provider", "password"))
+        .first();
+      if (account) {
+        const oldId = account.providerAccountId;
+        if (oldId !== email) {
+          // Check that the new username is not already taken
+          const dup = await ctx.db
+            .query("authAccounts")
+            .withIndex("providerAndAccountId", (q) =>
+              q.eq("provider", "password").eq("providerAccountId", email),
+            )
+            .first();
+          if (dup) throw new Error(`Username "${email}" is already taken`);
+          // Delete old account entry and create new one with updated id
+          await ctx.db.delete(account._id);
+          await createAccount(asActionCtx(ctx), {
+            provider: "password",
+            account: { id: email, secret: account.secret! },
+            profile: { email, name: patch.name as string ?? email },
+          });
+        }
+      }
+    }
+    if (Object.keys(patch).length > 0 && patch.email === undefined) {
+      await ctx.db.patch(userId, patch);
+    } else if (Object.keys(patch).length > 0 && patch.name !== undefined) {
+      // name updated separately if email also changed (createAccount sets it)
+      await ctx.db.patch(userId, { name: patch.name as string });
+    }
+    return { ok: true };
+  },
+});
+
+/** Change the current user's password. Requires the current password for verification. */
+export const changeMyPassword = mutation({
+  args: {
+    currentPassword: v.string(),
+    newPassword: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const { userId, user } = await getAuthUser(ctx);
+    if (user.isAnonymous) throw new Error("Anonymous users cannot change password");
+    if (args.newPassword.length < 4) throw new Error("New password must be at least 4 characters");
+    if (args.currentPassword === args.newPassword) throw new Error("New password must be different from current password");
+
+    // Find the user's password account
+    const account = await ctx.db
+      .query("authAccounts")
+      .withIndex("userIdAndProvider", (q) => q.eq("userId", userId).eq("provider", "password"))
+      .first();
+    if (!account) {
+      throw new Error("No password account found");
+    }
+    if (!account.secret) throw new Error("Account credentials are corrupted");
+
+    // Update password via modifyAccountCredentials. The user is already
+    // authenticated with a valid session, so we only need to provide the
+    // new credentials. The provider's server-side hashing handles the rest.
+    try {
+      await modifyAccountCredentials(asActionCtx(ctx), {
+        provider: "password",
+        account: { id: account.providerAccountId, secret: args.newPassword },
+      });
+    } catch (_err) {
+      throw new Error("Failed to update password — please try again");
+    }
+
+    return { ok: true };
   },
 });
 
