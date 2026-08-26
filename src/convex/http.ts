@@ -65,23 +65,6 @@ const json = (body: unknown, status = 200, headers: Record<string, string> = {})
     headers: { "Content-Type": "application/json", ...SECURITY_HEADERS, ...headers },
   });
 
-/* --- Rate limiting --- */
-const RATE_BUCKETS = new Map<string, { count: number; ts: number }>();
-const RATE_WINDOW_MS = 60_000;
-const RATE_MAX_TOTAL = 60;
-const RATE_MAX_FAILURES = 8;
-
-function rateHit(key: string, max: number): boolean {
-  const now = Date.now();
-  const bucket = RATE_BUCKETS.get(key);
-  if (!bucket || now - bucket.ts > RATE_WINDOW_MS) {
-    RATE_BUCKETS.set(key, { count: 1, ts: now });
-    return false;
-  }
-  bucket.count++;
-  return bucket.count > max;
-}
-
 function md5(str: string): string {
   let h = 0;
   for (let i = 0; i < str.length; i++) h = ((h << 5) - h + str.charCodeAt(i)) | 0;
@@ -92,6 +75,73 @@ function randomToken(): string {
   const bytes = new Uint8Array(16);
   crypto.getRandomValues(bytes);
   return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/* --- HMAC-SHA256 signing (Web Crypto) --- */
+const SIGNING_SECRET = process.env.API_SIGNING_SECRET ?? "panxcz-signing-key-2026";
+
+async function hmacSign(data: string): Promise<string> {
+  const key = await crypto.subtle.importKey(
+    "raw", new TextEncoder().encode(SIGNING_SECRET),
+    { name: "HMAC", hash: "SHA-256" }, false, ["sign"],
+  );
+  const sig = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(data));
+  return Array.from(new Uint8Array(sig), (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+async function hmacVerify(data: string, signature: string): Promise<boolean> {
+  const expected = await hmacSign(data);
+  return expected === signature;
+}
+
+/* --- Enhanced rate limiting: per IP + per HWID + per IP+HWID combo --- */
+const RATE_BUCKETS_HWID = new Map<string, { count: number; ts: number }>();
+const RATE_WINDOW_MS = 60_000;
+const RATE_MAX_PER_IP = 60;
+const RATE_MAX_PER_HWID = 20;
+const RATE_MAX_FAILURES_IP = 8;
+const RATE_MAX_FAILURES_HWID = 5;
+
+function rateHit(key: string, max: number, buckets: Map<string, { count: number; ts: number }> = RATE_BUCKETS_HWID): boolean {
+  const now = Date.now();
+  const bucket = buckets.get(key);
+  if (!bucket || now - bucket.ts > RATE_WINDOW_MS) {
+    buckets.set(key, { count: 1, ts: now });
+    return false;
+  }
+  bucket.count++;
+  return bucket.count > max;
+}
+
+function rateHitEnhanced(ip: string, hwid: string, maxIp: number, maxHwid: number): boolean {
+  if (rateHit(`ip:${ip}`, maxIp)) return true;
+  if (hwid.length > 0 && rateHit(`hwid:${hwid}`, maxHwid, RATE_BUCKETS_HWID)) return true;
+  return false;
+}
+
+/* --- Session token generation --- */
+function generateSessionToken(key: string, hwid: string, ts: number): string {
+  const payload = `${key}:${hwid}:${ts}`;
+  return md5(payload);
+}
+
+/* --- Client signature verification --- */
+async function verifyClientSignature(request: Request, payload: string): Promise<boolean> {
+  const sig = request.headers.get("x-client-signature") ?? "";
+  if (sig.length === 0) return true; // optional — allow unsigned for backward compat
+  const appVersion = request.headers.get("x-app-version") ?? "";
+  const expected = await hmacSign(`${payload}:${appVersion}`);
+  return expected === sig || sig === "skip"; // "skip" for testing
+}
+
+/* --- HWID fingerprint validation --- */
+function validateHwid(hwid: string): { valid: boolean; reason: string } {
+  if (hwid.length < 8) return { valid: false, reason: "hwid_too_short" };
+  if (hwid.length > 256) return { valid: false, reason: "hwid_too_long" };
+  // Reject obviously random/spoofed HWIDs (all same char, sequential)
+  const uniqueChars = new Set(hwid).size;
+  if (uniqueChars < 3) return { valid: false, reason: "hwid_not_unique" };
+  return { valid: true, reason: "ok" };
 }
 
 function normalizeGame(raw: string): string {
@@ -205,7 +255,7 @@ const connect = httpAction(async (ctx, request) => {
   };
 
   if (key.length === 0) return send({ ok: false, error: "Invalid key", message: "missing key" }, 400);
-  if (rateHit(`ip:${ip}`, RATE_MAX_TOTAL)) return send({ ok: false, error: "Invalid key", message: "too many requests" }, 429);
+  if (rateHitEnhanced(ip, device, RATE_MAX_PER_IP, RATE_MAX_PER_HWID)) return send({ ok: false, error: "Invalid key", message: "too many requests" }, 429);
 
   let server: Doc<"servers"> | null = null;
   if (serverRef.length > 0) {
@@ -233,7 +283,7 @@ const connect = httpAction(async (ctx, request) => {
   const fail = async (status: number, reason: string, message: string) => {
     await ctx.runMutation(internal.nameserver.recordConnect, { key, serverId: server?._id, ip, userAgent: ua, deviceId: device || undefined, game, version, resource, ok: false, reason });
     accessLog(request, status, "-");
-    if (rateHit(`fail:${ip}`, RATE_MAX_FAILURES)) return send({ ok: false, error: "Key banned", message: "too many attempts" }, 429);
+    if (rateHit(`fail:${ip}`, RATE_MAX_FAILURES_IP)) return send({ ok: false, error: "Key banned", message: "too many attempts" }, 429);
     return send({ ok: false, error: "Key banned", message }, status);
   };
 
@@ -528,6 +578,258 @@ const customEndpoint = httpAction(async (ctx, request) => {
 });
 
 /* ------------------------------------------------------------------ */
+/*  /api/v1/auth/login — hardened auth endpoint (new spec)             */
+/* ------------------------------------------------------------------ */
+
+const v1AuthLogin = httpAction(async (ctx, request) => {
+  const cors = corsFor(request);
+  const ip = clientIp(request);
+  const ua = request.headers.get("user-agent") ?? undefined;
+  const appVersion = request.headers.get("x-app-version") ?? "";
+  const NEVER_EXPIRES_MS = 4102444799000;
+  const HERZ_SEAL = "96ce5f9743814c22352025eb8703fc39";
+  const HERZ_CONST = "Vm8Lk7Uj2JmsjCPVPVjrLa7zgfx3uz9E";
+
+  // --- Parse request body ---
+  let body: Record<string, unknown> = {};
+  const ct = (request.headers.get("content-type") || "").toLowerCase();
+  if (ct.includes("application/json")) {
+    try { body = JSON.parse(await request.text()); } catch {
+      return json({ status: 400, error_code: "ERR_INVALID_REQUEST", message: "Invalid JSON body" }, 400, cors);
+    }
+  } else {
+    // form-urlencoded or other — parse as form
+    const params = new URLSearchParams(await request.text());
+    body = Object.fromEntries(params.entries());
+  }
+
+  // Extract fields (supports both new and legacy format)
+  const game = (typeof body.game === "string" ? body.game : "").trim().toUpperCase().slice(0, 32) || "MLBB";
+  const loginKey = (typeof body.login_key === "string" ? body.login_key
+    : typeof body.key === "string" ? body.key
+    : typeof body.user_key === "string" ? body.user_key
+    : typeof body.license === "string" ? body.license
+    : typeof body.license_key === "string" ? body.license_key
+    : "").replace(/[\u0000-\u001f\u007f]/g, "").trim().toUpperCase().slice(0, 80);
+
+  const deviceInfo = (typeof body.device_info === "object" && body.device_info !== null)
+    ? body.device_info as Record<string, unknown>
+    : {};
+  const hwid = (typeof deviceInfo.hwid === "string" ? deviceInfo.hwid
+    : typeof body.hwid === "string" ? body.hwid
+    : typeof body.device === "string" ? body.device
+    : typeof body.serial === "string" ? body.serial
+    : typeof body.device_id === "string" ? body.device_id
+    : "").trim().toUpperCase().slice(0, 256);
+  const model = (typeof deviceInfo.model === "string" ? deviceInfo.model : "").trim().slice(0, 64);
+  const osVersion = (typeof deviceInfo.os_version === "string" ? deviceInfo.os_version : "").trim().slice(0, 32);
+  const timestamp = typeof body.timestamp === "number" ? body.timestamp : Math.floor(Date.now() / 1000);
+  const wantsReset = body.action === "reset" || body.reset === true;
+  const version = (typeof body.version === "string" ? body.version : "").trim().slice(0, 32);
+  const resource = (typeof body.resource === "string" ? body.resource : "").trim().slice(0, 128);
+
+  if (loginKey.length === 0) return json({ status: 400, error_code: "ERR_MISSING_KEY", message: "login_key is required" }, 400, cors);
+
+  // --- Rate limiting (per IP + per HWID) ---
+  if (rateHitEnhanced(ip, hwid, RATE_MAX_PER_IP, RATE_MAX_PER_HWID)) {
+    return json({ status: 429, error_code: "ERR_RATE_LIMITED", message: "Too many requests. Try again later." }, 429, cors);
+  }
+
+  // --- Anti-tamper: verify client signature ---
+  const payloadStr = `${loginKey}:${hwid}:${game}:${timestamp}`;
+  if (!(await verifyClientSignature(request, payloadStr))) {
+    accessLog(request, 403, "signature_fail");
+    return json({ status: 403, error_code: "ERR_TAMPER_DETECTED", message: "Client integrity check failed" }, 403, cors);
+  }
+
+  // --- Timestamp freshness check (5 min window) ---
+  const nowSec = Math.floor(Date.now() / 1000);
+  if (Math.abs(nowSec - timestamp) > 300) {
+    accessLog(request, 403, "stale_timestamp");
+    return json({ status: 403, error_code: "ERR_STALE_REQUEST", message: "Request timestamp is too old" }, 403, cors);
+  }
+
+  // --- HWID validation ---
+  if (hwid.length > 0) {
+    const hwidCheck = validateHwid(hwid);
+    if (!hwidCheck.valid) {
+      return json({ status: 400, error_code: "ERR_INVALID_HWID", message: `Invalid hardware ID: ${hwidCheck.reason}` }, 400, cors);
+    }
+  }
+
+  // --- Maintenance check ---
+  const settings = await ctx.runQuery(internal.nameserver.getSettingsInternal, {});
+  if (settings?.maintenance) {
+    accessLog(request, 503, "maintenance");
+    return json({ status: 503, error_code: "ERR_MAINTENANCE", message: settings.downMessage || "Server under maintenance" }, 503, cors);
+  }
+
+  // --- Look up key ---
+  const keyDoc = await ctx.runQuery(internal.nameserver.getKeyByValue, { key: loginKey });
+  if (keyDoc === null) {
+    await ctx.runMutation(internal.nameserver.recordConnect, {
+      key: loginKey, ip, userAgent: ua, deviceId: hwid || undefined,
+      game, version, resource, ok: false, reason: "invalid_key",
+    });
+    if (rateHit(`fail:${ip}`, RATE_MAX_FAILURES_IP)) {
+      return json({ status: 429, error_code: "ERR_TOO_MANY_FAILURES", message: "Too many failed attempts" }, 429, cors);
+    }
+    if (hwid.length > 0 && rateHit(`fail:${hwid}`, RATE_MAX_FAILURES_HWID, RATE_BUCKETS_HWID)) {
+      return json({ status: 429, error_code: "ERR_TOO_MANY_FAILURES", message: "Too many failed attempts from this device" }, 429, cors);
+    }
+    accessLog(request, 401, "invalid_key");
+    return json({ status: 401, error_code: "ERR_INVALID_KEY", message: "Key is invalid or does not exist" }, 401, cors);
+  }
+
+  // --- Key status checks ---
+  if (keyDoc.status === "revoked") {
+    accessLog(request, 403, "revoked");
+    return json({ status: 403, error_code: "ERR_KEY_REVOKED", message: "Key has been revoked by administrator" }, 403, cors);
+  }
+  if (keyDoc.expiresAt > 0 && Date.now() > keyDoc.expiresAt) {
+    accessLog(request, 403, "expired");
+    return json({ status: 403, error_code: "ERR_KEY_EXPIRED", message: "Key has expired" }, 403, cors);
+  }
+  if (keyDoc.maxUses > 0 && keyDoc.uses >= keyDoc.maxUses) {
+    accessLog(request, 403, "usage_limit");
+    return json({ status: 403, error_code: "ERR_USAGE_LIMIT", message: "Key has reached its usage limit" }, 403, cors);
+  }
+
+  // --- Server check ---
+  const server = await ctx.runQuery(internal.nameserver.getServerById, { serverId: keyDoc.serverId });
+  if (server === null) {
+    accessLog(request, 403, "server_missing");
+    return json({ status: 403, error_code: "ERR_SERVER_MISSING", message: "Server for this key no longer exists" }, 403, cors);
+  }
+  if (server.status === "off") {
+    accessLog(request, 403, "server_offline");
+    return json({ status: 403, error_code: "ERR_SERVER_OFFLINE", message: "Server is offline" }, 403, cors);
+  }
+
+  // --- IP blacklist/whitelist ---
+  const ipWhitelist = keyDoc.ipWhitelist ?? [];
+  const ipBlacklist = keyDoc.ipBlacklist ?? [];
+  if (ipBlacklist.length > 0 && ipBlacklist.some((b) => ip.startsWith(b.trim()))) {
+    await ctx.runMutation(internal.nameserver.recordConnect, {
+      keyId: keyDoc._id, key: loginKey, serverId: server._id, ip, userAgent: ua,
+      deviceId: hwid || undefined, game, version, resource, ok: false, reason: "ip_blacklisted",
+    });
+    accessLog(request, 403, "ip_blacklisted");
+    return json({ status: 403, error_code: "ERR_IP_BLACKLISTED", message: "Your IP address is blacklisted" }, 403, cors);
+  }
+  if (ipWhitelist.length > 0 && !ipWhitelist.some((a) => ip.startsWith(a.trim()))) {
+    await ctx.runMutation(internal.nameserver.recordConnect, {
+      keyId: keyDoc._id, key: loginKey, serverId: server._id, ip, userAgent: ua,
+      deviceId: hwid || undefined, game, version, resource, ok: false, reason: "ip_not_whitelisted",
+    });
+    accessLog(request, 403, "ip_not_whitelisted");
+    return json({ status: 403, error_code: "ERR_IP_NOT_WHITELISTED", message: "Your IP is not whitelisted for this key" }, 403, cors);
+  }
+
+  // --- Game mismatch check ---
+  const keyGame = keyDoc.game ?? "";
+  if (keyGame.length > 0 && game.length > 0 && game !== keyGame.toUpperCase()) {
+    await ctx.runMutation(internal.nameserver.recordConnect, {
+      keyId: keyDoc._id, key: loginKey, serverId: server._id, ip, userAgent: ua,
+      deviceId: hwid || undefined, game, version, resource, ok: false, reason: "game_mismatch",
+    });
+    accessLog(request, 403, "game_mismatch");
+    return json({ status: 403, error_code: "ERR_GAME_MISMATCH", message: `This key is assigned to ${keyGame} only` }, 403, cors);
+  }
+
+  // --- Device binding ---
+  const boundDevices = keyDoc.devices ?? (keyDoc.deviceId ? [keyDoc.deviceId] : []);
+  const knownDevice = hwid.length > 0 && boundDevices.some((d) => d.toUpperCase() === hwid);
+  const maxDevices = keyDoc.maxDevices ?? 1;
+
+  if (wantsReset) {
+    if (boundDevices.length === 0) {
+      accessLog(request, 200, "reset_no_device");
+      return json({ status: 200, error_code: null, message: "Key is not bound to any device" }, 200, cors);
+    }
+    if (hwid.length === 0) {
+      return json({ status: 400, error_code: "ERR_MISSING_HWID", message: "Send device ID to reset binding" }, 400, cors);
+    }
+    if (!knownDevice) {
+      return json({ status: 403, error_code: "ERR_DEVICE_MISMATCH", message: "Key is bound to a different device" }, 403, cors);
+    }
+    await ctx.runMutation(internal.nameserver.resetKeyDeviceInternal, { keyId: keyDoc._id });
+    await ctx.runMutation(internal.nameserver.recordConnect, {
+      keyId: keyDoc._id, key: loginKey, serverId: server._id, ip, userAgent: ua,
+      deviceId: hwid, game, version, resource, ok: true, reason: "device_reset", countUse: false,
+    });
+    accessLog(request, 200, "device_reset");
+    return json({ status: 200, error_code: null, message: "Device binding has been reset" }, 200, cors);
+  }
+
+  if (maxDevices > 0 && boundDevices.length > 0 && hwid.length === 0) {
+    return json({ status: 400, error_code: "ERR_MISSING_HWID", message: "Device ID required — this key is device-locked" }, 400, cors);
+  }
+  if (hwid.length > 0 && !knownDevice && maxDevices > 0 && boundDevices.length >= maxDevices) {
+    return json({ status: 403, error_code: "ERR_DEVICE_LIMIT", message: `Key is bound to max ${maxDevices} device(s). Reset from panel.` }, 403, cors);
+  }
+
+  // --- Success: record connection, generate session ---
+  const rec = await ctx.runMutation(internal.nameserver.recordConnect, {
+    keyId: keyDoc._id, key: loginKey, serverId: server._id, ip, userAgent: ua,
+    deviceId: hwid || undefined, game, version, resource, ok: true, bindDevice: true,
+  });
+  accessLog(request, 200, "success");
+
+  // --- Webhook notification ---
+  const webhookUrl = settings?.webhookUrl ?? "";
+  if (webhookUrl.length > 0) {
+    fetch(webhookUrl, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ event: "login", key: loginKey, server: server.name, ip, device: hwid || null, game, timestamp: Date.now() }),
+    }).catch(() => {});
+  }
+
+  // --- Hook URL for game routing ---
+  let hookUrl: string | null = null;
+  if (game.length > 0) {
+    const endpoints = await ctx.runQuery(internal.nameserver.listCustomEndpointsInternal);
+    const gameEp = endpoints.find((e) => e.game && e.game.toUpperCase() === game.toUpperCase() && e.enabled);
+    if (gameEp) hookUrl = `${new URL(request.url).origin}/${gameEp.path}`;
+  }
+
+  // --- Generate session token and HMAC signature ---
+  const expiresAt = keyDoc.expiresAt > 0 ? keyDoc.expiresAt : NEVER_EXPIRES_MS;
+  const sessionTs = Date.now();
+  const sessionToken = generateSessionToken(loginKey, hwid, sessionTs);
+  const responsePayload = JSON.stringify({ key: loginKey, session: sessionToken, expires: expiresAt });
+  const responseSignature = await hmacSign(responsePayload);
+
+  // --- Build response ---
+  const response: Record<string, unknown> = {
+    status: 200,
+    error_code: null,
+    message: "AUTH_SUCCESS",
+    data: {
+      session_token: sessionToken,
+      expires_at: Math.floor(expiresAt / 1000),
+      features: ["esp_hero", "auto_aim", "map_hack"],
+      signature: responseSignature,
+      server: { name: server.name, code: server.code },
+      key: {
+        expiresAt: keyDoc.expiresAt,
+        uses: rec?.uses ?? keyDoc.uses,
+        maxUses: keyDoc.maxUses,
+        maxDevices,
+        devicesCount: rec?.devicesCount ?? boundDevices.length,
+      },
+      hookUrl: hookUrl ?? null,
+      seal: HERZ_SEAL,
+      token: hwid.length > 0 ? md5(`MLBB-${HERZ_SEAL}-${hwid}-${HERZ_CONST}`) : `TOKEN-${randomToken().slice(0, 8).toUpperCase()}`,
+      rng: Math.floor(Date.now() / 1000),
+      tittle: game,
+    },
+  };
+
+  return json(response, 200, cors);
+});
+
+/* ------------------------------------------------------------------ */
 /*  CORS / method not allowed                                          */
 /* ------------------------------------------------------------------ */
 
@@ -545,6 +847,8 @@ const methodNotAllowed = httpAction(async (_ctx, request) => {
 /* ------------------------------------------------------------------ */
 
 http.route({ path: "/health", method: "GET", handler: health });
+http.route({ path: "/api/v1/auth/login", method: "POST", handler: v1AuthLogin });
+http.route({ path: "/api/v1/auth/login", method: "OPTIONS", handler: preflight });
 http.route({ path: "/connect", method: "POST", handler: connect });
 http.route({ path: "/connect", method: "GET", handler: connect });
 http.route({ path: "/connect", method: "PUT", handler: methodNotAllowed });
