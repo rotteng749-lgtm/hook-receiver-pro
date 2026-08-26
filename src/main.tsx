@@ -29,7 +29,6 @@ const AdminOverview = lazy(() => import("./pages/admin/Overview.tsx"));
 const AdminKeys = lazy(() => import("./pages/admin/Keys.tsx"));
 const Servers = lazy(() => import("./pages/Servers.tsx"));
 const Connections = lazy(() => import("./pages/Connections.tsx"));
-const Databases = lazy(() => import("./pages/Databases.tsx"));
 const ApiTokens = lazy(() => import("./pages/ApiTokens.tsx"));
 const NotFound = lazy(() => import("./pages/NotFound.tsx"));
 
@@ -157,7 +156,7 @@ createRoot(document.getElementById("root")!).render(
                   <Route path="servers" element={<Servers />} />
                   <Route path="keys" element={<OwnerKeys />} />
                   <Route path="connections" element={<Connections />} />
-                  <Route path="databases" element={<Databases />} />
+
                   <Route path="endpoints" element={<OwnerEndpoints />} />
                   <Route path="members" element={<OwnerMembers />} />
                   <Route path="api" element={<ApiTokens />} />
@@ -180,7 +179,7 @@ createRoot(document.getElementById("root")!).render(
                   <Route path="servers" element={<Servers />} />
                   <Route path="keys" element={<AdminKeys />} />
                   <Route path="connections" element={<Connections />} />
-                  <Route path="databases" element={<Databases />} />
+
                   <Route path="endpoints" element={<OwnerEndpoints />} />
                   <Route path="api" element={<ApiTokens />} />
                 </Route>
