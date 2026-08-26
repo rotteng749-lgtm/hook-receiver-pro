@@ -398,12 +398,12 @@ const login = httpAction(async (ctx, request) => {
 /* ------------------------------------------------------------------ */
 
 const telegramWebhook = httpAction(async (ctx, request) => {
-  const body = await request.json();
   try {
     const { webhook } = await import("./telegram");
     const handler = webhook as any;
     return await handler(ctx, request);
   } catch (e) {
+    console.error("[telegram-webhook] Error:", e);
     return json({ error: String(e) }, 500);
   }
 });

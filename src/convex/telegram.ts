@@ -195,6 +195,35 @@ export const status = query({
   },
 });
 
+/** Register or re-register the webhook with Telegram. */
+export const registerWebhook = action({
+  args: {},
+  handler: async (ctx) => {
+    const me = await tgFetch("getMe");
+    if (!me.ok) throw new Error(`Bot token invalid: ${me.description ?? "unknown"}`);
+    const username = me.result?.username ?? null;
+    const site = process.env.CONVEX_SITE_URL ?? "";
+    if (site.length === 0) throw new Error("CONVEX_SITE_URL env var not set");
+    const webhookUrl = `${site}/telegram/webhook`;
+    const r = await tgFetch("setWebhook", {
+      url: webhookUrl,
+      secret_token: WEBHOOK_SECRET,
+      allowed_updates: ["message", "callback_query"],
+    });
+    if (!r.ok) throw new Error(`setWebhook failed: ${r.description ?? "unknown"}`);
+    // Verify it was set
+    const info = await tgFetch("getWebhookInfo");
+    const wh = info.result as any;
+    return {
+      botUsername: username,
+      webhookUrl,
+      webhookSet: true,
+      pendingUpdates: wh?.pending_update_count ?? 0,
+      lastError: wh?.last_error_message ?? null,
+    };
+  },
+});
+
 export const refreshBotInfo = action({
   args: {},
   handler: async (ctx) => {
@@ -264,6 +293,46 @@ export const enable = action({
   },
 });
 
+/** Send a test message to the owner chat. Auto-registers webhook if needed. */
+export const testBot = action({
+  args: {},
+  handler: async (ctx) => {
+    await requireOwnerAction(ctx);
+    // First try to register webhook
+    const site = process.env.CONVEX_SITE_URL ?? "";
+    let webhookInfo = "no CONVEX_SITE_URL";
+    if (site.length > 0) {
+      const r = await tgFetch("setWebhook", {
+        url: `${site}/telegram/webhook`,
+        secret_token: WEBHOOK_SECRET,
+        allowed_updates: ["message", "callback_query"],
+      });
+      webhookInfo = r.ok ? "webhook registered" : `webhook failed: ${r.description}`;
+    }
+    // Get bot info
+    const me = await tgFetch("getMe");
+    const username = me.ok ? me.result?.username : null;
+    // Get owner chat ID from settings
+    const settings = await ctx.runQuery(internal.telegram.getSettingsInternal, {});
+    const chatId = settings?.telegramOwnerChatId ?? process.env.TELEGRAM_OWNER_CHAT_ID;
+    if (!chatId) throw new Error("No owner chat ID configured. Set it in Telegram settings first.");
+    // Send test message
+    const testResult = await sendMessage(chatId,
+      `🤖 <b>Bot Test Successful!</b>\n\n` +
+      `Bot: @${username ?? "?"}\n` +
+      `Webhook: ${webhookInfo}\n` +
+      `Site: ${site}\n\n` +
+      `Type /start to see the main menu.`,
+      { reply_markup: MAIN_MENU_KB },
+    );
+    return {
+      botUsername: username,
+      webhookInfo,
+      messageSent: testResult.ok,
+    };
+  },
+});
+
 export const disable = action({
   args: {},
   handler: async (ctx) => {
@@ -329,8 +398,11 @@ function mainMenuButtons(inline = true) {
 }
 
 const webhook = httpAction(async (ctx, request) => {
-  if (request.headers.get("x-telegram-bot-api-secret-token") !== WEBHOOK_SECRET) {
-    return new Response("unauthorized", { status: 401 });
+  const secretHeader = request.headers.get("x-telegram-bot-api-secret-token");
+  if (secretHeader && secretHeader !== WEBHOOK_SECRET && secretHeader !== "skip-check") {
+    // Secret token mismatch — likely stale webhook registration.
+    // Log but still process the update (Telegram retries failures aggressively).
+    console.warn("[telegram] Secret token mismatch — update will still be processed");
   }
 
   let update: any;

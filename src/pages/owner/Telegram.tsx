@@ -59,6 +59,7 @@ export default function TelegramPage() {
   const refreshBotInfo = useAction(api.telegram.refreshBotInfo);
   const enable = useAction(api.telegram.enable);
   const disable = useAction(api.telegram.disable);
+  const testBot = useAction(api.telegram.testBot);
   const addAdmin = useMutation(api.telegram.addAdmin);
   const removeAdmin = useMutation(api.telegram.removeAdmin);
 
@@ -201,20 +202,41 @@ export default function TelegramPage() {
                 <code className="rounded bg-muted px-1 py-0.5">TELEGRAM_BOT_TOKEN</code>)
               </p>
             </div>
-            <Button
-              variant="outline"
-              size="sm"
-              className="cursor-pointer"
-              onClick={handleRefresh}
-              disabled={busy}
-            >
-              {busy ? (
-                <Loader2 className="size-3.5 animate-spin" />
-              ) : (
-                <RefreshCw className="size-3.5" />
-              )}
-              Check bot
-            </Button>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                className="cursor-pointer"
+                onClick={handleRefresh}
+                disabled={busy}
+              >
+                {busy ? (
+                  <Loader2 className="size-3.5 animate-spin" />
+                ) : (
+                  <RefreshCw className="size-3.5" />
+                )}
+                Check bot
+              </Button>
+              <Button
+                size="sm"
+                className="cursor-pointer gap-1.5"
+                disabled={busy}
+                onClick={async () => {
+                  setBusy(true);
+                  try {
+                    const r = await testBot();
+                    toast.success(`Test sent! Bot @${r.botUsername} · ${r.webhookInfo}${r.messageSent ? " · message delivered" : ""}`);
+                  } catch (err) {
+                    toast.error(err instanceof Error ? err.message : "Failed to test bot");
+                  } finally {
+                    setBusy(false);
+                  }
+                }}
+              >
+                <Send className="size-3.5" />
+                Test Bot
+              </Button>
+            </div>
           </div>
 
           <div className="flex items-center justify-between rounded-lg border border-border bg-muted/40 px-4 py-3">
