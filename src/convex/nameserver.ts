@@ -796,7 +796,7 @@ export const createCustomEndpoint = mutation({
   },
   handler: async (ctx, args) => {
     await requireRole(ctx, ["owner"]);
-    const path = args.path.trim().toLowerCase().replace(/[^a-z0-9_-]/g, "").slice(0, 64);
+    const path = args.path.trim().toLowerCase().replace(/[^a-z0-9._/\-]/g, "").replace(/\/+/g, "/").replace(/^\//, "").slice(0, 128);
     if (path.length === 0) throw new Error("Path is required");
     const RESERVED = ["health", "connect", "files", "databases", "api", "mod", "telegram", "hook"];
     if (RESERVED.includes(path)) throw new Error(`Path "${path}" is reserved`);

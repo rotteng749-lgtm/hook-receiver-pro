@@ -575,7 +575,7 @@ function EndpointForm({
           authType: authRequired ? authType : undefined,
           game: game || undefined,
         });
-        toast.success(`Endpoint /hook/${path} created`);
+        toast.success(`Endpoint /${path} created`);
       } else {
         await updateEndpoint({
           id: endpointId!,
@@ -622,7 +622,7 @@ function EndpointForm({
           <DialogTitle>{mode === "create" ? "Create custom endpoint" : "Edit endpoint"}</DialogTitle>
           <DialogDescription>
             Serve text responses or uploaded files (PHP, CSS, JS, HTML, etc.) at{" "}
-            <code className="font-mono text-violet-400">/hook/&lt;path&gt;</code>
+            <code className="font-mono text-violet-400">/&lt;path&gt;</code>
           </DialogDescription>
         </DialogHeader>
 
@@ -631,13 +631,13 @@ function EndpointForm({
               <Label className="text-xs font-medium">Path</Label>
               <div className="flex items-center gap-0">
                 <span className="rounded-l-md border border-r-0 border-border bg-muted/80 px-2 py-1.5 text-xs text-muted-foreground">
-                  /hook/
+                  /
                 </span>
                 <Input
                   value={path}
-                  onChange={(e) => setPath(e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, ""))}
-                  placeholder="my-endpoint"
-                  maxLength={64}
+                  onChange={(e) => setPath(e.target.value.replace(/[^a-zA-Z0-9._/\-]/g, ""))}
+                  placeholder="ml-check.php or v1/auth"
+                  maxLength={128}
                   disabled={mode === "edit"}
                   className="rounded-l-none font-mono text-sm disabled:opacity-60"
                 />
@@ -823,7 +823,7 @@ function EndpointForm({
                     </div>
                     <div className="flex items-center gap-1.5">
                       <span className="text-muted-foreground/60 w-16">Path</span>
-                      <span className="font-mono text-foreground">/hook/{autoCheck.suggestedPath || path}</span>
+                      <span className="font-mono text-foreground">/{autoCheck.suggestedPath || path}</span>
                     </div>
                     <div className="flex items-center gap-1.5">
                       <span className="text-muted-foreground/60 w-16">Type</span>
@@ -1002,7 +1002,7 @@ function KeyGenerateDialog({ open, onOpenChange, endpointPath }: { open: boolean
   const CONVEX_BASE = (import.meta.env.VITE_CONVEX_URL as string)
     .replace(/\.convex\.cloud$/, ".convex.site")
     .replace(/\/$/, "");
-  const url = `${CONVEX_BASE}/hook/${endpointPath}`;
+  const url = `${CONVEX_BASE}/${endpointPath}`;
 
   const GAMES = ["", "MLBB", "FREEFIRE", "PUBG", "CODM", "GENSHIN", "OTHER"];
 
@@ -1012,7 +1012,7 @@ function KeyGenerateDialog({ open, onOpenChange, endpointPath }: { open: boolean
     try {
       const res = await generateKey({
         serverId: serverId as Doc<"servers">["_id"],
-        note: note || `endpoint: /hook/${endpointPath}`,
+        note: note || `endpoint: /${endpointPath}`,
         uses: uses === "" ? undefined : Number(uses),
         hours: hours === "" ? undefined : Number(hours),
         maxDevices: maxDevices === "" ? undefined : Number(maxDevices),
@@ -1037,7 +1037,7 @@ function KeyGenerateDialog({ open, onOpenChange, endpointPath }: { open: boolean
             Generate Key
           </DialogTitle>
           <DialogDescription>
-            Create a key for <code className="font-mono text-violet-400">/hook/{endpointPath}</code>
+            Create a key for <code className="font-mono text-violet-400">/{endpointPath}</code>
           </DialogDescription>
         </DialogHeader>
 
@@ -1124,7 +1124,7 @@ function EndpointRow({ ep }: { ep: Doc<"customEndpoints"> }) {
   const CONVEX_BASE = (import.meta.env.VITE_CONVEX_URL as string)
     .replace(/\.convex\.cloud$/, ".convex.site")
     .replace(/\/$/, "");
-  const url = `${CONVEX_BASE}/hook/${ep.path}`;
+  const url = `${CONVEX_BASE}/${ep.path}`;
 
   const handleToggle = async () => {
     try {
@@ -1146,7 +1146,7 @@ function EndpointRow({ ep }: { ep: Doc<"customEndpoints"> }) {
   const handleDuplicate = async () => {
     try {
       const res = await duplicateEndpoint({ id: ep._id });
-      toast.success(`Duplicated as /hook/${res.path}`);
+      toast.success(`Duplicated as /${res.path}`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Duplicate failed");
     }
@@ -1164,7 +1164,7 @@ function EndpointRow({ ep }: { ep: Doc<"customEndpoints"> }) {
       >
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 flex-wrap">
-            <code className="font-mono text-sm font-medium">/hook/{ep.path}</code>
+            <code className="font-mono text-sm font-medium">/{ep.path}</code>
             <span className={`rounded-md border px-1.5 py-0.5 text-[10px] font-bold tracking-wide ${METHOD_COLORS[ep.method] ?? METHOD_COLORS.ANY}`}>
               {ep.method}
             </span>
@@ -1254,7 +1254,7 @@ function EndpointRow({ ep }: { ep: Doc<"customEndpoints"> }) {
             </AlertDialogTrigger>
             <AlertDialogContent>
               <AlertDialogHeader>
-                <AlertDialogTitle>Delete /hook/{ep.path}?</AlertDialogTitle>
+                <AlertDialogTitle>Delete /{ep.path}?</AlertDialogTitle>
                 <AlertDialogDescription>This endpoint will stop working immediately.</AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>
@@ -1420,11 +1420,11 @@ export default function CustomEndpointsPage() {
               <div className="space-y-1">
                 <p className="text-sm font-medium">How it works</p>
                 <p className="text-xs text-muted-foreground leading-relaxed">
-                  Each endpoint lives at <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px]">/hook/&lt;path&gt;</code>.
+                  Each endpoint lives at <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px]">/&lt;path&gt;</code>.
                   Choose <strong>Text / JSON</strong> for static responses or{" "}
                   <strong>File upload</strong> to serve uploaded files with auto-detected Content-Type.
                   Hover an endpoint to <strong>duplicate</strong>, <strong>edit</strong>, or <strong>delete</strong> it.
-                  Test with curl: <code className="font-mono text-[11px]">curl https://.../hook/&lt;path&gt;</code>
+                  Test with curl: <code className="font-mono text-[11px]">curl https://.../&lt;path&gt;</code>
                 </p>
               </div>
             </div>
