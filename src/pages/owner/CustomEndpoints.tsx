@@ -345,35 +345,42 @@ const SUPPORTED_GAMES = [
   "OTHER",
 ];
 
-/** Default license server response body — matches the PHP pattern. */
-const DEFAULT_LICENSE_BODY = JSON.stringify({
-  "ok": true,
-  "status": true,
-  "reason": "success",
-  "seal": "",
-  "data": {
-    "server": {
-      "name": "panxcz-main",
-      "code": "panxcz-main",
+/** Generate default license server response body — matches the PHP pattern. */
+function getDefaultLicenseBody(game?: string): string {
+  const CONVEX_BASE = (import.meta.env.VITE_CONVEX_URL as string)
+    .replace(/\.convex\.cloud$/, ".convex.site")
+    .replace(/\/$/, "");
+  const connectUrl = `${CONVEX_BASE}/connect`;
+  const gameName = game || "Game Name";
+  return JSON.stringify({
+    "ok": true,
+    "status": true,
+    "reason": "success",
+    "seal": "",
+    "data": {
+      "server": {
+        "name": "panxcz-main",
+        "code": "panxcz-main",
+      },
+      "key": {
+        "expiresAt": 0,
+        "uses": 1,
+        "maxUses": 0,
+        "maxDevices": 0,
+        "devicesCount": 1,
+      },
+      "url": connectUrl,
+      "token": "",
+      "rng": 0,
+      "tittle": gameName,
+      "expired": "25 - Des - 2030 12:00:00",
     },
-    "key": {
-      "expiresAt": 0,
-      "uses": 1,
-      "maxUses": 0,
-      "maxDevices": 0,
-      "devicesCount": 1,
-    },
-    "url": null,
     "token": "",
     "rng": 0,
-    "tittle": "Game Name",
+    "tittle": gameName,
     "expired": "25 - Des - 2030 12:00:00",
-  },
-  "token": "",
-  "rng": 0,
-  "tittle": "Game Name",
-  "expired": "25 - Des - 2030 12:00:00",
-}, null, 2);
+  }, null, 2);
+}
 
 /* ========================= Endpoint Form (Create + Edit) ========================= */
 
@@ -403,7 +410,7 @@ function EndpointForm({
   initialPath = "",
   initialMethod = "POST",
   initialStatusCode = 200,
-  initialBody = DEFAULT_LICENSE_BODY,
+  initialBody = getDefaultLicenseBody(),
   initialContentType = "application/json",
   initialResponseType = "text",
   initialFileId,
@@ -429,6 +436,14 @@ function EndpointForm({
   const [detectedContentType, setDetectedContentType] = useState("");
   const [game, setGame] = useState(initialGame);
   const [busy, setBusy] = useState(false);
+
+  // When game changes in create mode, update body template to match
+  const handleGameChange = (g: string) => {
+    setGame(g);
+    if (mode === "create" && body === getDefaultLicenseBody(game)) {
+      setBody(getDefaultLicenseBody(g));
+    }
+  };
   const [uploadPhase, setUploadPhase] = useState<"" | "uploading" | "registering">("");
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadSpeed, setUploadSpeed] = useState("");
@@ -438,7 +453,7 @@ function EndpointForm({
     setPath("");
     setMethod("POST");
     setStatusCode("200");
-    setBody(DEFAULT_LICENSE_BODY);
+    setBody(getDefaultLicenseBody(game));
     setContentType("application/json");
     setAuthRequired(false);
     setAuthType("token");
@@ -676,7 +691,7 @@ function EndpointForm({
               <Label className="text-xs font-medium">Game</Label>
               <select
                 value={game}
-                onChange={(e) => setGame(e.target.value)}
+                onChange={(e) => handleGameChange(e.target.value)}
                 className="flex h-9 w-full rounded-md border border-border bg-transparent px-3 text-sm"
               >
                 <option value="">All games (generic)</option>

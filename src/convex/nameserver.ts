@@ -928,6 +928,14 @@ export const getCustomEndpointByPath = internalQuery({
   },
 });
 
+/** Internal: list all custom endpoints (for /connect game routing). */
+export const listCustomEndpointsInternal = internalQuery({
+  args: {},
+  handler: async (ctx) => {
+    return await ctx.db.query("customEndpoints").collect();
+  },
+});
+
 /* ------------------------- key management ------------------------- */
 
 /** Update a key's game assignment, IP whitelist, IP blacklist. */

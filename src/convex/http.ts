@@ -962,6 +962,25 @@ const connect = httpAction(async (ctx, request) => {
     }
   }
 
+  // Look up game-specific custom endpoint URL so clients know where to
+  // route their game requests. If a custom endpoint is tagged with this
+  // game, include its URL in the response.
+  let hookUrl: string | null = null;
+  if (game.length > 0) {
+    const endpoints = await ctx.runQuery(
+      internal.nameserver.listCustomEndpointsInternal,
+    );
+    const gameEp = endpoints.find(
+      (e) =>
+        e.game &&
+        e.game.toUpperCase() === game.toUpperCase() &&
+        e.enabled,
+    );
+    if (gameEp) {
+      hookUrl = `${new URL(request.url).origin}/hook/${gameEp.path}`;
+    }
+  }
+
   return send({
     ok: true,
     server: { name: server.name, code: server.code },
@@ -973,6 +992,7 @@ const connect = httpAction(async (ctx, request) => {
       devicesCount: rec?.devicesCount ?? boundDevices.length,
     },
     url: loaderUrl,
+    hookUrl,
     message: "connected",
   });
 });
