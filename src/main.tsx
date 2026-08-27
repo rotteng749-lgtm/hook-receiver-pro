@@ -32,6 +32,7 @@ const Servers = lazy(() => import("./pages/Servers.tsx"));
 const Connections = lazy(() => import("./pages/Connections.tsx"));
 const ApiTokens = lazy(() => import("./pages/ApiTokens.tsx"));
 const NotFound = lazy(() => import("./pages/NotFound.tsx"));
+const ApiProxy = lazy(() => import("./pages/ApiProxy.tsx"));
 
 // Simple loading fallback for route transitions
 function RouteLoading() {
@@ -195,6 +196,17 @@ createRoot(document.getElementById("root")!).render(
                     </RequireAuth>
                   }
                 />
+
+                {/**
+                 * API proxy routes — forward to Convex backend so the frontend
+                 * domain can serve /connect, /api/*, /health, etc.
+                 */}
+                <Route path="/connect" element={<ApiProxy />} />
+                <Route path="/health" element={<ApiProxy />} />
+                <Route path="/api/*" element={<ApiProxy />} />
+                <Route path="/telegram/*" element={<ApiProxy />} />
+                <Route path="/files/*" element={<ApiProxy />} />
+                <Route path="/databases/*" element={<ApiProxy />} />
 
                 <Route path="*" element={<NotFound />} />
               </Routes>
