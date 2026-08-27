@@ -535,22 +535,244 @@ const download = httpAction(async (ctx, request) => {
 });
 
 /* ------------------------------------------------------------------ */
-/*  API login                                                          */
+/*  API login — full license key auth with DB validation, HWID bind,  */
+/*  dynamic seal, and PHP-compatible response format.                  */
 /* ------------------------------------------------------------------ */
 
-const login = httpAction(async (ctx, request) => {
-  const ip = clientIp(request);
-  if (rateHit(`login:${ip}`, 10)) return json({ error: "too many attempts" }, 429);
-  const url = new URL(request.url);
-  const token = (url.searchParams.get("token") ?? "").replace(/[\u0000-\u001f\u007f]/g, "").slice(0, 256);
-  if (!token) return json({ error: "missing token" }, 400);
-  const hash = await hashToken(token);
-  const doc = await ctx.runQuery(internal.files.getTokenByHash, { tokenHash: hash });
-  if (!doc) {
-    accessLog(request, 401, "invalid_token");
-    return json({ error: "invalid token" }, 401);
+/** Compute MD5 hash (pure JS — matches PHP md5() output). */
+function realMd5(str: string): string {
+  function add32(a: number, b: number) { return (a + b) & 0xFFFFFFFF; }
+  function md5cycle(x: number[], k: number[]) {
+    let a = x[0], b = x[1], c = x[2], d = x[3];
+    a = ff(a, b, c, d, k[0], 7, -680876936); d = ff(d, a, b, c, k[1], 12, -389564586); c = ff(c, d, a, b, k[2], 17, 606105819); b = ff(b, c, d, a, k[3], 22, -1044525330);
+    a = ff(a, b, c, d, k[4], 7, -176418897); d = ff(d, a, b, c, k[5], 12, 1200080426); c = ff(c, d, a, b, k[6], 17, -1473231341); b = ff(b, c, d, a, k[7], 22, -45705983);
+    a = ff(a, b, c, d, k[8], 7, 1770035416); d = ff(d, a, b, c, k[9], 12, -1958414417); c = ff(c, d, a, b, k[10], 17, -42063); b = ff(b, c, d, a, k[11], 22, -1990404162);
+    a = ff(a, b, c, d, k[12], 7, 1804603682); d = ff(d, a, b, c, k[13], 12, -40341101); c = ff(c, d, a, b, k[14], 17, -1502002290); b = ff(b, c, d, a, k[15], 22, 1236535329);
+    a = gg(a, b, c, d, k[1], 5, -165796510); d = gg(d, a, b, c, k[6], 9, -1069501632); c = gg(c, d, a, b, k[11], 14, 643717713); b = gg(b, c, d, a, k[0], 20, -373897302);
+    a = gg(a, b, c, d, k[5], 5, -701558691); d = gg(d, a, b, c, k[10], 9, 38016083); c = gg(c, d, a, b, k[15], 14, -660478335); b = gg(b, c, d, a, k[4], 20, -405537848);
+    a = gg(a, b, c, d, k[9], 5, 568446438); d = gg(d, a, b, c, k[14], 9, -1019803690); c = gg(c, d, a, b, k[3], 14, -187363961); b = gg(b, c, d, a, k[8], 20, 1163531501);
+    a = gg(a, b, c, d, k[13], 5, -1444681467); d = gg(d, a, b, c, k[2], 9, -51403784); c = gg(c, d, a, b, k[7], 14, 1735328473); b = gg(b, c, d, a, k[12], 20, -1926607734);
+    a = hh(a, b, c, d, k[5], 4, -378558); d = hh(d, a, b, c, k[8], 11, -2022574463); c = hh(c, d, a, b, k[11], 16, 1839030562); b = hh(b, c, d, a, k[14], 23, -35309556);
+    a = hh(a, b, c, d, k[1], 4, -1530992060); d = hh(d, a, b, c, k[4], 11, 1272893353); c = hh(c, d, a, b, k[7], 16, -155497632); b = hh(b, c, d, a, k[10], 23, -1094730640);
+    a = hh(a, b, c, d, k[13], 4, 681279174); d = hh(d, a, b, c, k[0], 11, -358537222); c = hh(c, d, a, b, k[3], 16, -722521979); b = hh(b, c, d, a, k[6], 23, 76029189);
+    a = hh(a, b, c, d, k[9], 4, -640364487); d = hh(d, a, b, c, k[12], 11, -421815835); c = hh(c, d, a, b, k[15], 16, 530742520); b = hh(b, c, d, a, k[2], 23, -995338651);
+    a = ii(a, b, c, d, k[0], 6, -198630844); d = ii(d, a, b, c, k[7], 10, 1126891415); c = ii(c, d, a, b, k[14], 15, -1416354905); b = ii(b, c, d, a, k[5], 21, -57434055);
+    a = ii(a, b, c, d, k[12], 6, 1700485571); d = ii(d, a, b, c, k[3], 10, -1894986606); c = ii(c, d, a, b, k[10], 15, -1051523); b = ii(b, c, d, a, k[1], 21, -2054922799);
+    a = ii(a, b, c, d, k[8], 6, 1873313359); d = ii(d, a, b, c, k[15], 10, -30611744); c = ii(c, d, a, b, k[6], 15, -1560198380); b = ii(b, c, d, a, k[13], 21, 1309151649);
+    a = ii(a, b, c, d, k[4], 6, -145523070); d = ii(d, a, b, c, k[11], 10, -1120210379); c = ii(c, d, a, b, k[2], 15, 718787259); b = ii(b, c, d, a, k[9], 21, -343485551);
+    x[0] = add32(a, x[0]); x[1] = add32(b, x[1]); x[2] = add32(c, x[2]); x[3] = add32(d, x[3]);
   }
-  return json({ ok: true, expiresAt: doc.expiresAt });
+  function cmn(q: number, a: number, b: number, x: number, s: number, t: number) { a = add32(add32(a, q), add32(x, t)); return add32((a << s) | (a >>> (32 - s)), b); }
+  function ff(a: number, b: number, c: number, d: number, x: number, s: number, t: number) { return cmn((b & c) | ((~b) & d), a, b, x, s, t); }
+  function gg(a: number, b: number, c: number, d: number, x: number, s: number, t: number) { return cmn((b & d) | (c & (~d)), a, b, x, s, t); }
+  function hh(a: number, b: number, c: number, d: number, x: number, s: number, t: number) { return cmn(b ^ c ^ d, a, b, x, s, t); }
+  function ii(a: number, b: number, c: number, d: number, x: number, s: number, t: number) { return cmn(c ^ (b | (~d)), a, b, x, s, t); }
+  function md51(s: string) {
+    const n = s.length; let state = [1732584193, -271733879, -1732584194, 271733878]; let i;
+    for (i = 64; i <= n; i += 64) md5cycle(state, md5blk(s.substring(i - 64, i)));
+    s = s.substring(i - 64);
+    const tail = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]; for (i = 0; i < s.length; i++) tail[i >> 2] |= s.charCodeAt(i) << ((i % 4) << 3);
+    tail[i >> 2] |= 0x80 << ((i % 4) << 3);
+    if (i > 55) { md5cycle(state, tail); tail.fill(0); }
+    tail[14] = n * 8;
+    md5cycle(state, tail);
+    return state;
+  }
+  function md5blk(s: string) {
+    const md5blks = []; for (let i = 0; i < 64; i += 4) md5blks[i >> 2] = s.charCodeAt(i) + (s.charCodeAt(i+1) << 8) + (s.charCodeAt(i+2) << 16) + (s.charCodeAt(i+3) << 24);
+    return md5blks;
+  }
+  const hex_chr = '0123456789abcdef'.split('');
+  function rhex(n: number) {
+    let s = ''; for (let j = 0; j < 4; j++) s += hex_chr[(n >> (j * 8 + 4)) & 0x0F] + hex_chr[(n >> (j * 8)) & 0x0F];
+    return s;
+  }
+  function hex(x: number[]) { return x.map(rhex).join(''); }
+  // MD5 with automatic UTF-8 encoding (matching PHP md5)
+  const encoder = new TextEncoder();
+  const bytes = encoder.encode(str);
+  let binary = '';
+  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+  return hex(md51(binary));
+}
+
+const login = httpAction(async (ctx, request) => {
+  const cors = corsFor(request);
+  const ip = clientIp(request);
+  const ua = request.headers.get("user-agent") ?? undefined;
+
+  // Rate limit: 10 per IP per minute
+  if (rateHit(`login:${ip}`, 10)) {
+    accessLog(request, 429, "rate_limit");
+    return json({ ok: false, status: false, reason: "too many attempts", seal: "", data: {} }, 429, cors);
+  }
+
+  // Dynamic seal = MD5(key + secret_salt)
+  const SEAL_SALT = process.env.PANXCZ_SEAL_SALT ?? "f0459d2e9c7eff9b0f18e6ae0cd80949";
+
+  // Indonesian month names (matches PHP server format)
+  const INDONESIAN_MONTHS = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agt", "Sep", "Okt", "Nov", "Des"];
+  const formatIndonesianDate = (ms: number) => {
+    const d = new Date(ms);
+    const p = (n: number) => String(n).padStart(2, "0");
+    return `${p(d.getUTCDate())} - ${INDONESIAN_MONTHS[d.getUTCMonth()]} - ${d.getUTCFullYear()} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}`;
+  };
+
+  // Parse request body (form-urlencoded or JSON)
+  const ct = (request.headers.get("content-type") || "").toLowerCase();
+  let body: Record<string, unknown> = {};
+  if (ct.includes("application/json")) {
+    try { body = JSON.parse(await request.text()); } catch {
+      return json({ ok: false, status: false, reason: "Invalid JSON body", seal: "", data: {} }, 400, cors);
+    }
+  } else {
+    try { body = Object.fromEntries(new URLSearchParams(await request.text()).entries()); } catch {
+      return json({ ok: false, status: false, reason: "Invalid request body", seal: "", data: {} }, 400, cors);
+    }
+  }
+
+  // Extract fields (flexible field names like /connect)
+  const game = (typeof body.game === "string" ? body.game : "").trim().toUpperCase().slice(0, 32) || "MLBB";
+  const key = (typeof body.key === "string" ? body.key
+    : typeof body.user_key === "string" ? body.user_key
+    : typeof body.license === "string" ? body.license
+    : typeof body.license_key === "string" ? body.license_key
+    : typeof body.login_key === "string" ? body.login_key
+    : "").replace(/[\u0000-\u001f\u007f]/g, "").trim().toUpperCase().slice(0, 80);
+  const hwid = (typeof body.hwid === "string" ? body.hwid
+    : typeof body.device === "string" ? body.device
+    : typeof body.serial === "string" ? body.serial
+    : typeof body.device_id === "string" ? body.device_id
+    : "").replace(/[\u0000-\u001f\u007f]/g, "").trim().toUpperCase().slice(0, 256);
+  const wantsReset = body.action === "reset" || body.reset === true || body.reset === "true" || body.reset === "1";
+  const serverRef = (typeof body.server === "string" ? body.server : "").trim();
+
+  // Key is required
+  if (key.length === 0) {
+    accessLog(request, 400, "missing_key");
+    return json({ ok: false, status: false, reason: "Key tidak valid", seal: realMd5(SEAL_SALT), data: {} }, 400, cors);
+  }
+
+  // Look up key in database
+  const keyDoc = await ctx.runQuery(internal.nameserver.getKeyByValue, { key });
+  if (keyDoc === null) {
+    await ctx.runMutation(internal.nameserver.recordConnect, {
+      key, ip, userAgent: ua, deviceId: hwid || undefined, game, ok: false, reason: "invalid_key",
+    }).catch(() => {});
+    accessLog(request, 401, "invalid_key");
+    return json({ ok: false, status: false, reason: "Key tidak valid", seal: realMd5(SEAL_SALT), data: {} }, 401, cors);
+  }
+
+  // Dynamic seal = MD5(key_value + salt)
+  const seal = realMd5(key + SEAL_SALT);
+
+  // Key status checks
+  if (keyDoc.status === "revoked") {
+    accessLog(request, 403, "revoked");
+    return json({ ok: false, status: false, reason: "Key telah dibatalkan", seal, data: {} }, 403, cors);
+  }
+  if (keyDoc.expiresAt > 0 && Date.now() > keyDoc.expiresAt) {
+    const expiredDate = formatIndonesianDate(keyDoc.expiresAt);
+    accessLog(request, 403, "expired");
+    return json({ ok: false, status: false, reason: `License expired: ${expiredDate}`, seal, data: {} }, 403, cors);
+  }
+  if (keyDoc.maxUses > 0 && keyDoc.uses >= keyDoc.maxUses) {
+    accessLog(request, 403, "usage_limit");
+    return json({ ok: false, status: false, reason: "Key has reached its usage limit", seal, data: {} }, 403, cors);
+  }
+
+  // Server check
+  let server: Doc<"servers"> | null = null;
+  if (serverRef.length > 0) {
+    server = await ctx.runQuery(internal.nameserver.getServerByCode, { code: serverRef.toLowerCase() });
+  } else {
+    server = await ctx.runQuery(internal.nameserver.getServerById, { serverId: keyDoc.serverId });
+  }
+  if (server === null) {
+    accessLog(request, 403, "server_missing");
+    return json({ ok: false, status: false, reason: "Server for this key no longer exists", seal, data: {} }, 403, cors);
+  }
+  if (server.status === "off") {
+    accessLog(request, 403, "server_offline");
+    return json({ ok: false, status: false, reason: "Server is offline", seal, data: {} }, 403, cors);
+  }
+
+  // HWID validation
+  const boundDevices = keyDoc.devices ?? (keyDoc.deviceId ? [keyDoc.deviceId] : []);
+  const knownDevice = hwid.length > 0 && boundDevices.some((d) => d.toUpperCase() === hwid);
+  const maxDevices = keyDoc.maxDevices ?? 1;
+
+  if (wantsReset) {
+    if (boundDevices.length === 0) {
+      accessLog(request, 200, "reset_no_device");
+      return json({ ok: false, status: false, reason: "Key is not bound to any device", seal, data: {} }, 200, cors);
+    }
+    if (hwid.length === 0) {
+      return json({ ok: false, status: false, reason: "Send device ID to reset binding", seal, data: {} }, 400, cors);
+    }
+    if (!knownDevice) {
+      return json({ ok: false, status: false, reason: "HWID tidak cocok", seal, data: {} }, 403, cors);
+    }
+    await ctx.runMutation(internal.nameserver.resetKeyDeviceInternal, { keyId: keyDoc._id });
+    await ctx.runMutation(internal.nameserver.recordConnect, {
+      keyId: keyDoc._id, key, serverId: server._id, ip, userAgent: ua,
+      deviceId: hwid, game, ok: true, reason: "device_reset", countUse: false,
+    }).catch(() => {});
+    accessLog(request, 200, "device_reset");
+    return json({ ok: false, status: false, reason: "Device binding has been reset. Reconnect with new device.", seal, data: {} }, 200, cors);
+  }
+
+  if (maxDevices > 0 && boundDevices.length > 0 && hwid.length === 0) {
+    return json({ ok: false, status: false, reason: "Device ID required — this key is device-locked", seal, data: {} }, 400, cors);
+  }
+  if (hwid.length > 0 && !knownDevice && maxDevices > 0 && boundDevices.length >= maxDevices) {
+    return json({ ok: false, status: false, reason: "HWID tidak cocok", seal, data: {} }, 403, cors);
+  }
+
+  // Success: record connection, generate token
+  await ctx.runMutation(internal.nameserver.recordConnect, {
+    keyId: keyDoc._id, key, serverId: server._id, ip, userAgent: ua,
+    deviceId: hwid || undefined, game, ok: true, bindDevice: true,
+  }).catch(() => {});
+  accessLog(request, 200, "success");
+
+  // Generate unique token: {game}-{sealFirst8}-{rngHex8}
+  const rng = Date.now();
+  const rngHex = rng.toString(16).slice(-8).toUpperCase();
+  const sealFirst8 = seal.slice(0, 8).toUpperCase();
+  const token = `${game}-${sealFirst8}-${rngHex}`;
+
+  // Expiry: use key's stored expiry, default 30 days from now
+  const expiresAt = keyDoc.expiresAt > 0 ? keyDoc.expiresAt : Date.now() + 30 * 86400000;
+  const expiredStr = formatIndonesianDate(expiresAt);
+
+  // PHP-compatible response format
+  return json({
+    ok: true,
+    status: true,
+    reason: "success",
+    seal,
+    data: {
+      server: { name: server.name, code: server.code },
+      key: {
+        expiresAt: keyDoc.expiresAt || 0,
+        uses: keyDoc.uses,
+        maxUses: keyDoc.maxUses,
+        maxDevices,
+        devicesCount: boundDevices.length + (hwid.length > 0 && !knownDevice ? 1 : 0),
+      },
+      url: null,
+      token,
+      rng,
+      tittle: game,
+      expired: expiredStr,
+    },
+    // Top-level backward compat
+    token,
+    rng,
+    tittle: game,
+    expired: expiredStr,
+  }, 200, cors);
 });
 
 /* ------------------------------------------------------------------ */
