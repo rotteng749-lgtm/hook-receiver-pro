@@ -378,6 +378,21 @@ export default function SettingsPage() {
                   <p className="text-xs text-muted-foreground">
                     e.g. <code className="rounded bg-muted px-1 py-0.5 font-mono">panxcz</code> → <code className="rounded bg-muted px-1 py-0.5 font-mono">https://panxcz.site</code>
                   </p>
+                  <div className="mt-2 rounded-md border border-amber-500/20 bg-amber-500/5 p-3">
+                    <p className="text-xs font-medium text-amber-600 dark:text-amber-400">⚠️ DNS Setup Required for Terminal/API Access</p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      For <code className="rounded bg-muted px-0.5 font-mono">curl</code> and app clients to work on your custom domain, add this DNS record:
+                    </p>
+                    <pre className="mt-1.5 overflow-x-auto rounded bg-muted p-2 font-mono text-[10px] leading-relaxed">
+{`Type:  CNAME
+Name:  @ (or your subdomain)
+Value: lovable-dove-890.convex.site`}
+                    </pre>
+                    <p className="mt-1.5 text-[10px] text-muted-foreground/70">
+                      After DNS propagates (5-30 min), <code>curl https://yourdomain.com/connect</code> will work.
+                      Browser access works immediately via auto-redirect.
+                    </p>
+                  </div>
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="endpoint-auth-token">Endpoint auth token</Label>
