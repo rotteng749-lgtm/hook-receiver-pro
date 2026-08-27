@@ -602,6 +602,30 @@ export const revokeKey = mutation({
   },
 });
 
+/** Renew / extend a key's expiry by N days from now. */
+export const renewKey = mutation({
+  args: {
+    id: v.id("connectKeys"),
+    days: v.optional(v.number()),
+  },
+  handler: async (ctx, { id, days }) => {
+    const { user } = await requireRole(ctx, ["owner", "admin"]);
+    const key = await ctx.db.get(id);
+    if (key === null) throw new Error("Key not found");
+    if (roleOf(user) !== "owner" && key.createdBy !== user._id) {
+      throw new Error("Forbidden");
+    }
+    const addMs = (days ?? 30) * 86400000;
+    const base = Date.now() > (key.expiresAt ?? 0) ? Date.now() : (key.expiresAt ?? 0);
+    const newExpiry = base + addMs;
+    await ctx.db.patch(id, {
+      expiresAt: newExpiry,
+      status: "active",
+    });
+    return { expiresAt: newExpiry };
+  },
+});
+
 export const deleteKey = mutation({
   args: { id: v.id("connectKeys") },
   handler: async (ctx, { id }) => {

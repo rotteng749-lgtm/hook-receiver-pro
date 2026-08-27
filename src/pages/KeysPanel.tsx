@@ -43,6 +43,7 @@ import { formatExpiry, formatRelative, formatUses } from "@/lib/format";
 import { useMutation, useQuery } from "convex/react";
 import {
   AlertTriangle,
+  Clock,
   Coins,
   Download,
   Gamepad2,
@@ -393,6 +394,7 @@ export default function KeysPanel({ scope }: { scope: "owner" | "admin" }) {
   const exportKeys = useQuery(api.nameserver.exportKeys);
   const revokeKey = useMutation(api.nameserver.revokeKey);
   const deleteKey = useMutation(api.nameserver.deleteKey);
+  const renewKey = useMutation(api.nameserver.renewKey);
   const resetKeyDevice = useMutation(api.nameserver.resetKeyDevice);
   const updateKeyDevices = useMutation(api.nameserver.updateKeyDevices);
   const balance = stats?.balance ?? 0;
@@ -425,6 +427,15 @@ export default function KeysPanel({ scope }: { scope: "owner" | "admin" }) {
     try {
       await revokeKey({ id: key._id });
       toast.success("Key revoked");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed");
+    }
+  };
+
+  const renew = async (key: KeyRow, days: number) => {
+    try {
+      const res = await renewKey({ id: key._id, days });
+      toast.success(`Key renewed +${days} days`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed");
     }
@@ -611,6 +622,33 @@ export default function KeysPanel({ scope }: { scope: "owner" | "admin" }) {
                               <AlertDialogFooter>
                                 <AlertDialogCancel className="cursor-pointer">Cancel</AlertDialogCancel>
                                 <AlertDialogAction className="cursor-pointer" onClick={() => reset(key)}>Reset</AlertDialogAction>
+                              </AlertDialogFooter>
+                            </AlertDialogContent>
+                          </AlertDialog>
+                        )}
+                        {key.canManage && (
+                          <AlertDialog>
+                            <AlertDialogTrigger asChild>
+                              <Button variant="ghost" size="icon-sm" className="cursor-pointer text-muted-foreground hover:text-foreground" title="Renew / Extend">
+                                <Clock className="size-4" />
+                              </Button>
+                            </AlertDialogTrigger>
+                            <AlertDialogContent>
+                              <AlertDialogHeader>
+                                <AlertDialogTitle>Renew key?</AlertDialogTitle>
+                                <AlertDialogDescription>
+                                  Extend this key's expiry. If expired, starts from today.
+                                </AlertDialogDescription>
+                              </AlertDialogHeader>
+                              <div className="flex gap-2 px-6 pb-4">
+                                {[7, 30, 90, 365].map((d) => (
+                                  <Button key={d} variant="outline" size="sm" className="cursor-pointer" onClick={() => renew(key, d)}>
+                                    {d}d
+                                  </Button>
+                                ))}
+                              </div>
+                              <AlertDialogFooter>
+                                <AlertDialogCancel className="cursor-pointer">Close</AlertDialogCancel>
                               </AlertDialogFooter>
                             </AlertDialogContent>
                           </AlertDialog>
