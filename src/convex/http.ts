@@ -432,10 +432,14 @@ const connect = httpAction(async (ctx, request) => {
     if (gameEp) hookUrl = `${new URL(request.url).origin}/${gameEp.path}`;
   }
 
+  const tier = getKeyTier(key);
+  const features = FEATURE_MAP[tier] ?? FEATURE_MAP.basic;
+
   return send({
     ok: true,
     server: { name: server.name, code: server.code },
     key: { expiresAt: keyDoc.expiresAt, uses: rec?.uses ?? keyDoc.uses, maxUses: keyDoc.maxUses, maxDevices, devicesCount: rec?.devicesCount ?? boundDevices.length },
+    features,
     hookUrl, message: "connected",
   });
 });
@@ -596,6 +600,84 @@ function realMd5(str: string): string {
   return hex(md51(binary));
 }
 
+/* ------------------------------------------------------------------ */
+/*  Feature tiers — maps key prefix → available mod features            */
+/* ------------------------------------------------------------------ */
+const FEATURE_MAP: Record<string, Record<string, boolean>> = {
+  vip: {
+    drone_zoom: true,
+    fly: true,
+    steal: true,
+    roomInfo: true,
+    esp_hero: true,
+    auto_aim: true,
+    map_hack: true,
+    speed_hack: true,
+    wall_hack: true,
+    radar_hack: true,
+    unlimited_gold: true,
+    god_mode: true,
+    anti_ban: true,
+    esp_line: true,
+    esp_box: true,
+    esp_distance: true,
+    esp_health: true,
+    esp_name: true,
+    esp_range: true,
+    no_recoil: true,
+    instant_cast: true,
+    auto_skill: true,
+    aim_fov: true,
+    crosshair: true,
+    esp_sound: true,
+    no_fog: true,
+    night_mode: true,
+    unlock_skin: true,
+    drone_speed: true,
+    teleport: true,
+    esp_minimap: true,
+    esp_vehicle: true,
+    esp_item: true,
+    auto_loot: true,
+    no_clip: true,
+    one_hit_kill: true,
+    infinite_mana: true,
+    cooldown_zero: true,
+    esp_player_count: true,
+    esp_danger_zone: true,
+    esp_loot: true,
+    esp_vehicle_speed: true,
+    esp_player_level: true,
+    esp_player_rank: true,
+    esp_player_kda: true,
+    esp_player_gold: true,
+    esp_player_items: true,
+  },
+  basic: {
+    esp_hero: true,
+    auto_aim: true,
+    map_hack: true,
+    esp_line: true,
+    esp_box: true,
+    esp_distance: true,
+    esp_health: true,
+    esp_name: true,
+    esp_range: true,
+    esp_sound: true,
+    esp_minimap: true,
+    esp_player_count: true,
+    esp_danger_zone: true,
+  },
+};
+
+/** Determine which feature tier a key belongs to. */
+function getKeyTier(keyValue: string): string {
+  const upper = keyValue.toUpperCase();
+  // VIP prefixes: ML_VIP, ML_PRIM, VIP, PRIM, PAN, LIC, etc.
+  if (/^(ML_VIP|ML_PRIM|VIP|PRIM|PAN|LIC|PREMIUM|OWNER)/.test(upper)) return "vip";
+  return "basic";
+}
+
 const login = httpAction(async (ctx, request) => {
   const cors = corsFor(request);
   const ip = clientIp(request);
@@ -746,6 +828,10 @@ const login = httpAction(async (ctx, request) => {
   const expiresAt = keyDoc.expiresAt > 0 ? keyDoc.expiresAt : Date.now() + 30 * 86400000;
   const expiredStr = formatIndonesianDate(expiresAt);
 
+  // Feature tier based on key prefix
+  const tier = getKeyTier(key);
+  const features = FEATURE_MAP[tier] ?? FEATURE_MAP.basic;
+
   // PHP-compatible response format
   return json({
     ok: true,
@@ -766,12 +852,14 @@ const login = httpAction(async (ctx, request) => {
       rng,
       tittle: game,
       expired: expiredStr,
+      features,
     },
     // Top-level backward compat
     token,
     rng,
     tittle: game,
     expired: expiredStr,
+    features,
   }, 200, cors);
 });
 
@@ -1166,7 +1254,7 @@ const v1AuthLogin = httpAction(async (ctx, request) => {
     data: {
       session_token: sessionToken,
       expires_at: Math.floor(expiresAt / 1000),
-      features: ["esp_hero", "auto_aim", "map_hack"],
+      features: FEATURE_MAP[getKeyTier(loginKey)] ?? FEATURE_MAP.basic,
       signature: responseSignature,
       server: { name: server.name, code: server.code },
       key: {
