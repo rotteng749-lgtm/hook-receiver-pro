@@ -652,6 +652,10 @@ const FEATURE_MAP: Record<string, Record<string, boolean>> = {
     esp_player_kda: true,
     esp_player_gold: true,
     esp_player_items: true,
+    wallHack: true,
+    speedHack: true,
+    noCooldown: true,
+    autoWin: true,
   },
   basic: {
     esp_hero: true,
