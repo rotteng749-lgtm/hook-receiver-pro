@@ -101,6 +101,7 @@ function GenerateKeyCard({ scope }: { scope: "owner" | "admin" }) {
   const servers = useQuery(api.nameserver.listServers) ?? [];
   const settings = useQuery(api.nameserver.getSettings);
   const stats = useQuery(api.nameserver.overviewStats);
+  const debugAuth = useQuery(api.nameserver.debugAuth);
   const generateKey = useMutation(api.nameserver.generateKey);
   const batchGenerateKeys = useMutation(api.nameserver.batchGenerateKeys);
 
@@ -172,9 +173,18 @@ function GenerateKeyCard({ scope }: { scope: "owner" | "admin" }) {
     }
   };
 
+  // Debug: show auth state to diagnose generateKey failures
+  const authDebug = debugAuth;
+  const showAuthWarn = authDebug && (!authDebug.authenticated || !authDebug.userFound || (authDebug.role !== "owner" && authDebug.role !== "admin"));
+
   return (
     <>
       <motion.div initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
+      {showAuthWarn && (
+        <div className="mb-3 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-xs text-red-400">
+          ⚠️ Auth issue: {JSON.stringify(authDebug)}
+        </div>
+      )}
       <Card className="border-border/70">
         <CardHeader>
           <div className="flex items-center justify-between">

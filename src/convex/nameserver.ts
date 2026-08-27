@@ -422,6 +422,25 @@ function generateKeyValue(prefix: string, format = ""): string {
   return out;
 }
 
+/** Diagnostic query — shows current user auth state so we can debug generateKey failures. */
+export const debugAuth = query({
+  args: {},
+  handler: async (ctx) => {
+    const userId = await getAuthUserId(ctx);
+    if (userId === null) return { authenticated: false };
+    const user = await ctx.db.get(userId);
+    if (!user) return { authenticated: true, userFound: false };
+    return {
+      authenticated: true,
+      userFound: true,
+      userId,
+      role: roleOf(user),
+      balance: user.balance ?? 0,
+      isAnonymous: user.isAnonymous ?? false,
+    };
+  },
+});
+
 export const generateKey = mutation({
   args: {
     serverId: v.id("servers"),
@@ -435,7 +454,16 @@ export const generateKey = mutation({
     ipBlacklist: v.optional(v.array(v.string())),
   },
   handler: async (ctx, args) => {
-    const { userId, user } = await requireRole(ctx, ["owner", "admin"]);
+    let userId: Id<"users">;
+    let user: Doc<"users">;
+    try {
+      const auth = await requireRole(ctx, ["owner", "admin"]);
+      userId = auth.userId;
+      user = auth.user;
+    } catch (err) {
+      console.error("[generateKey] Auth failed:", err);
+      throw new Error(`Auth failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
     const server = await ctx.db.get(args.serverId);
     if (server === null) throw new Error("Server not found — did you create a server first?");
     if (server.status !== "active") throw new Error("Server is offline — toggle it on in Servers");
@@ -495,23 +523,29 @@ export const generateKey = mutation({
       args.maxDevices === undefined
         ? 1
         : Math.max(0, Math.round(args.maxDevices));
-    const id = await ctx.db.insert("connectKeys", {
-      key,
-      serverId: server._id,
-      createdBy: userId,
-      status: "active",
-      maxUses,
-      uses: 0,
-      expiresAt: hours > 0 ? Date.now() + hours * 60 * 60 * 1000 : 0,
-      cost,
-      note: args.note?.trim().slice(0, 160) || undefined,
-      maxDevices,
-      game: args.game?.trim() || undefined,
-      ipWhitelist: args.ipWhitelist?.filter((ip) => ip.trim().length > 0) || undefined,
-      ipBlacklist: args.ipBlacklist?.filter((ip) => ip.trim().length > 0) || undefined,
-    });
+    let id;
+    try {
+      id = await ctx.db.insert("connectKeys", {
+        key,
+        serverId: server._id,
+        createdBy: userId!,
+        status: "active",
+        maxUses,
+        uses: 0,
+        expiresAt: hours > 0 ? Date.now() + hours * 60 * 60 * 1000 : 0,
+        cost,
+        note: args.note?.trim().slice(0, 160) || undefined,
+        maxDevices,
+        game: args.game?.trim() || undefined,
+        ipWhitelist: args.ipWhitelist?.filter((ip) => ip.trim().length > 0) || undefined,
+        ipBlacklist: args.ipBlacklist?.filter((ip) => ip.trim().length > 0) || undefined,
+      });
+    } catch (err) {
+      console.error("[generateKey] Insert failed:", err);
+      throw new Error(`Insert failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
     if (!isOwner) {
-      await ctx.db.patch(userId, { balance: balance - cost });
+      await ctx.db.patch(userId!, { balance: balance - cost });
     }
     return { id, key, cost, balance: isOwner ? balance : balance - cost };
   },
