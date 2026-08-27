@@ -51,12 +51,14 @@ const CONVEX_BASE = (import.meta.env.VITE_CONVEX_URL as string)
   .replace(/\.convex\.cloud$/, ".convex.site")
   .replace(/\/$/, "");
 
-/** Build the connect URL: custom domain if set, otherwise Convex site URL. */
+/** Build the connect URL: use current domain (works via Vite proxy / Convex routing). */
 function buildConnectBase(domain: string): string {
   if (domain.length > 0) {
     return domain.includes(".") ? `https://${domain}` : `https://${domain}.site`;
   }
-  return CONVEX_BASE;
+  // Default: use the current website domain — works when Vite proxy or
+  // Freebuff routing forwards API paths to the Convex backend.
+  return typeof window !== "undefined" ? window.location.origin : CONVEX_BASE;
 }
 
 function slugify(name: string): string {
