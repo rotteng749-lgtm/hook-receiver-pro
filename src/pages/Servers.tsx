@@ -51,13 +51,12 @@ const CONVEX_BASE = (import.meta.env.VITE_CONVEX_URL as string)
   .replace(/\.convex\.cloud$/, ".convex.site")
   .replace(/\/$/, "");
 
-/** Build the connect URL: custom domain if set, otherwise panxcz.convex.site. */
+/** Build the connect URL: custom domain if set, otherwise Convex site URL. */
 function buildConnectBase(domain: string): string {
   if (domain.length > 0) {
     return domain.includes(".") ? `https://${domain}` : `https://${domain}.site`;
   }
-  // Auto-detect: use the current website domain as default
-  return typeof window !== "undefined" ? window.location.origin : "https://lovable-dove-890.convex.site";
+  return CONVEX_BASE;
 }
 
 function slugify(name: string): string {
