@@ -42,6 +42,9 @@ const SECURITY_HEADERS: Record<string, string> = {
   "X-Content-Type-Options": "nosniff",
   "X-Frame-Options": "DENY",
   "Referrer-Policy": "no-referrer",
+  "X-XSS-Protection": "1; mode=block",
+  "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+  "Content-Security-Policy": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'",
 };
 
 function corsFor(request: Request): Record<string, string> {
@@ -146,6 +149,51 @@ function validateHwid(hwid: string): { valid: boolean; reason: string } {
 
 function normalizeGame(raw: string): string {
   return raw.trim().toUpperCase().slice(0, 32);
+}
+
+/* --- Input sanitization --- */
+/** Strip control characters, null bytes, and dangerous HTML from user input. */
+function sanitizeInput(raw: string, maxLen = 256): string {
+  return raw
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "") // control chars + null bytes
+    .replace(/<[^>]*>/g, "") // strip HTML tags
+    .replace(/["'`;\\]/g, (c) => `\\${c}`) // escape injection chars for display
+    .trim()
+    .slice(0, maxLen);
+}
+
+/** Validate custom endpoint path — reject paths that shadow critical routes or contain traversal. */
+function isValidEndpointPath(path: string): { ok: boolean; reason?: string } {
+  if (path.length === 0) return { ok: false, reason: "empty path" };
+  if (path.length > 128) return { ok: false, reason: "path too long" };
+  if (path.includes("..") || path.includes("%2e")) return { ok: false, reason: "path traversal" };
+  if (/[\\"'`;\x00-\x1f]/.test(path)) return { ok: false, reason: "invalid characters" };
+  // Block paths that shadow critical Convex routes
+  const blocked = ["health", "connect", "api", "files", "databases", "telegram", "_generated"];
+  const root = path.split("/")[0].toLowerCase();
+  if (blocked.includes(root)) return { ok: false, reason: `path /${root} shadows a critical route` };
+  return { ok: true };
+}
+
+/** Sanitize filename for Content-Disposition header — prevent header injection. */
+function safeFilename(name: string): string {
+  return name
+    .replace(/[^a-zA-Z0-9._\-]/g, "_") // only allow safe chars
+    .replace(/_{2,}/g, "_") // collapse underscores
+    .slice(0, 128);
+}
+
+/** Strip control chars from a string for safe logging/display. */
+function safeLog(str: string, maxLen = 512): string {
+  return str.replace(/[\u0000-\u001f\u007f]/g, "?").slice(0, maxLen);
+}
+
+/* --- Global rate limiter for admin-write endpoints --- */
+const ADMIN_RATE_BUCKETS = new Map<string, { count: number; ts: number }>();
+const ADMIN_RATE_MAX = 30; // max 30 admin actions per minute per IP
+
+function adminRateLimit(ip: string): boolean {
+  return rateHit(`admin:${ip}`, ADMIN_RATE_MAX, ADMIN_RATE_BUCKETS);
 }
 
 /* ------------------------------------------------------------------ */
@@ -411,38 +459,58 @@ const appVersion = httpAction(async (ctx, request) => {
 /* ------------------------------------------------------------------ */
 
 const upload = httpAction(async (ctx, request) => {
+  const ip = clientIp(request);
+  if (adminRateLimit(ip)) return json({ error: "rate limited" }, 429);
   const body = await request.json();
   const storageId = body.storageId as Id<"_storage">;
-  const name = (body.name as string) ?? "unnamed";
-  const size = (body.size as number) ?? 0;
-  const ct = (body.contentType as string) ?? "application/octet-stream";
-  const game = (body.game as string) ?? undefined;
-  const version = (body.version as string) ?? undefined;
-  const note = (body.note as string) ?? undefined;
+  const name = sanitizeInput(String(body.name ?? "unnamed"), 256);
+  const size = typeof body.size === "number" ? body.size : 0;
+  const ct = sanitizeInput(String(body.contentType ?? "application/octet-stream"), 128);
+  // Block dangerous content types for stored files
+  const DANGEROUS_CT = ["text/html", "application/javascript", "image/svg+xml"];
+  if (DANGEROUS_CT.includes(ct.toLowerCase())) {
+    return json({ error: `content type ${ct} is not allowed for file storage` }, 403);
+  }
+  const game = typeof body.game === "string" ? sanitizeInput(body.game, 32) : undefined;
+  const version = typeof body.version === "string" ? sanitizeInput(body.version, 32) : undefined;
+  const note = typeof body.note === "string" ? sanitizeInput(body.note, 512) : undefined;
   const fileId = await ctx.runMutation(internal.files.insertFile, { storageId, name, size, contentType: ct, sha256: "", note });
+  accessLog(request, 200, `upload:${name}`);
   return json({ ok: true, fileId });
 });
 
 const listFiles = httpAction(async (ctx, _request) => {
   const files = await ctx.runQuery(internal.files.listAll, {});
-  return json(files);
+  // Sanitize file metadata to prevent XSS when displayed in admin panel
+  const safe = files.map((f: any) => ({
+    ...f,
+    name: sanitizeInput(f.name, 256),
+    note: f.note ? sanitizeInput(f.note, 512) : undefined,
+    contentType: sanitizeInput(f.contentType, 128),
+  }));
+  return json(safe);
 });
 
 const deleteFile = httpAction(async (ctx, request) => {
+  const ip = clientIp(request);
+  if (adminRateLimit(ip)) return json({ error: "rate limited" }, 429);
   const id = request.url.split("/").pop();
-  if (!id) return json({ error: "missing file id" }, 400);
+  if (!id || id.length > 100 || !/^[a-zA-Z0-9_:]+$/.test(id)) return json({ error: "invalid file id" }, 400);
   try {
     await ctx.runMutation(internal.files.deleteFileById, { fileId: id as Id<"files"> });
+    accessLog(request, 200, `delete:${id}`);
     return json({ ok: true });
   } catch (e) {
-    return json({ error: String(e) }, 500);
+    return json({ error: "failed to delete" }, 500);
   }
 });
 
 const download = httpAction(async (ctx, request) => {
   const parts = request.url.split("/");
   const id = parts[parts.length - 1].split("?")[0] as Id<"files">;
-  if (!id) return json({ error: "missing id" }, 400);
+  if (!id || id.length > 100) return json({ error: "missing id" }, 400);
+  // Validate ID format — Convex IDs are alphanumeric with underscores
+  if (!/^[a-zA-Z0-9_:]+$/.test(id)) return json({ error: "invalid id" }, 400);
   const file = await ctx.runQuery(internal.files.getAny, { fileId: id });
   if (!file) return json({ error: "not found" }, 404);
   const url = await ctx.storage.getUrl(file.storageId);
@@ -450,8 +518,19 @@ const download = httpAction(async (ctx, request) => {
   await ctx.runMutation(internal.files.incrementDownload, { fileId: id });
   const res = await fetch(url);
   const blob = await res.arrayBuffer();
+  // Max 50MB download limit
+  const MAX_DOWNLOAD = 50 * 1024 * 1024;
+  if (blob.byteLength > MAX_DOWNLOAD) return json({ error: "file too large" }, 413);
+  // Use safe filename to prevent Content-Disposition header injection
+  const safeName = safeFilename(file.name);
   return new Response(blob, {
-    headers: { "Content-Type": file.contentType, "Content-Disposition": `inline; filename="${file.name}"`, "Content-Length": String(blob.byteLength), ...SECURITY_HEADERS, ...corsFor(request) },
+    headers: {
+      "Content-Type": file.contentType,
+      "Content-Disposition": `inline; filename="${safeName}"`,
+      "Content-Length": String(blob.byteLength),
+      ...SECURITY_HEADERS,
+      ...corsFor(request),
+    },
   });
 });
 
@@ -460,12 +539,17 @@ const download = httpAction(async (ctx, request) => {
 /* ------------------------------------------------------------------ */
 
 const login = httpAction(async (ctx, request) => {
+  const ip = clientIp(request);
+  if (rateHit(`login:${ip}`, 10)) return json({ error: "too many attempts" }, 429);
   const url = new URL(request.url);
-  const token = url.searchParams.get("token") ?? "";
+  const token = (url.searchParams.get("token") ?? "").replace(/[\u0000-\u001f\u007f]/g, "").slice(0, 256);
   if (!token) return json({ error: "missing token" }, 400);
   const hash = await hashToken(token);
   const doc = await ctx.runQuery(internal.files.getTokenByHash, { tokenHash: hash });
-  if (!doc) return json({ error: "invalid token" }, 401);
+  if (!doc) {
+    accessLog(request, 401, "invalid_token");
+    return json({ error: "invalid token" }, 401);
+  }
   return json({ ok: true, expiresAt: doc.expiresAt });
 });
 
@@ -497,6 +581,20 @@ const customEndpoint = httpAction(async (ctx, request) => {
   const path = fullPath.replace(/^\//, "").replace(/\/+$/, "");
 
   if (path.length === 0) return json({ error: "missing endpoint path" }, 400);
+
+  // Validate path format to prevent abuse
+  const pathCheck = isValidEndpointPath(path);
+  if (!pathCheck.ok) {
+    accessLog(request, 400, `invalid_path:${pathCheck.reason}`);
+    return json({ error: "invalid endpoint path" }, 400);
+  }
+
+  // Global rate limit per IP for custom endpoints
+  const ip = clientIp(request);
+  if (rateHit(`custom:${ip}`, 120)) {
+    accessLog(request, 429, "rate_limit");
+    return json({ error: "rate limited" }, 429);
+  }
 
   const endpoint = await ctx.runQuery(internal.nameserver.getCustomEndpointByPath, { path });
   if (endpoint === null) { accessLog(request, 404, "-"); return json({ error: `endpoint /${path} not found` }, 404); }
@@ -538,7 +636,18 @@ const customEndpoint = httpAction(async (ctx, request) => {
   const ct = endpoint.contentType || "application/json";
   const cors = corsFor(request);
 
-  const reqBody = request.method !== "GET" ? (await request.clone().text().catch(() => "")).slice(0, 2048) : undefined;
+  // Limit request body to 8KB for logging, 1MB max for processing
+  const MAX_BODY_LOG = 2048;
+  const MAX_BODY_TOTAL = 1024 * 1024;
+  let reqBody: string | undefined;
+  if (request.method !== "GET") {
+    const raw = await request.clone().text().catch(() => "");
+    if (raw.length > MAX_BODY_TOTAL) {
+      accessLog(request, 413, "body_too_large");
+      return json({ error: "request body too large" }, 413);
+    }
+    reqBody = sanitizeInput(raw, MAX_BODY_LOG);
+  }
   const logHit = (respSize: number, sc: number) => {
     ctx.runMutation(internal.nameserver.logCustomEndpointHit, {
       endpointPath: path, method: request.method, statusCode: sc,
@@ -590,7 +699,8 @@ const customEndpoint = httpAction(async (ctx, request) => {
     } catch (err) {
       console.error("[custom-endpoint] file stream failed:", err);
       accessLog(request, 500, "-");
-      return json({ error: "failed to serve file", detail: String(err) }, 500);
+      // Don't leak internal error details
+      return json({ error: "failed to serve file" }, 500);
     }
   }
 
