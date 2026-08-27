@@ -985,6 +985,10 @@ const methodNotAllowed = httpAction(async (_ctx, request) => {
 http.route({ path: "/health", method: "GET", handler: health });
 http.route({ path: "/api/v1/auth/login", method: "POST", handler: v1AuthLogin });
 http.route({ path: "/api/v1/auth/login", method: "OPTIONS", handler: preflight });
+// /auth — alias for /connect (POST only, same PHP-compatible format)
+http.route({ path: "/auth", method: "POST", handler: connect });
+http.route({ path: "/auth", method: "OPTIONS", handler: preflight });
+http.route({ path: "/auth", method: "GET", handler: methodNotAllowed });
 http.route({ path: "/connect", method: "POST", handler: connect });
 http.route({ path: "/connect", method: "GET", handler: connect });
 http.route({ path: "/connect", method: "PUT", handler: methodNotAllowed });
