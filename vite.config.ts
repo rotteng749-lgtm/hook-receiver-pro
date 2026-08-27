@@ -96,39 +96,6 @@ export default defineConfig({
     hmr: {
       overlay: false,
     },
-    // Proxy API routes to Convex so custom domain works for /connect, hooks, etc.
-    proxy: {
-      // Proxy /connect, /health, /api, /telegram to Convex HTTP functions
-      "/connect": {
-        target: "https://lovable-dove-890.convex.site",
-        changeOrigin: true,
-        secure: true,
-      },
-      "/health": {
-        target: "https://lovable-dove-890.convex.site",
-        changeOrigin: true,
-        secure: true,
-      },
-      "/api": {
-        target: "https://lovable-dove-890.convex.site",
-        changeOrigin: true,
-        secure: true,
-      },
-      "/telegram": {
-        target: "https://lovable-dove-890.convex.site",
-        changeOrigin: true,
-        secure: true,
-      },
-      "/files": {
-        target: "https://lovable-dove-890.convex.site",
-        changeOrigin: true,
-        secure: true,
-      },
-      "/databases": {
-        target: "https://lovable-dove-890.convex.site",
-        changeOrigin: true,
-        secure: true,
-      },
-    },
+
   },
 });

@@ -347,9 +347,10 @@ const SUPPORTED_GAMES = [
 
 /** Generate default license server response body — matches the PHP pattern. */
 function getDefaultLicenseBody(game?: string): string {
-  // Use current domain (works via Vite proxy / Convex routing)
-  const origin = typeof window !== "undefined" ? window.location.origin : (import.meta.env.VITE_CONVEX_URL as string).replace(/\.convex\.cloud$/, ".convex.site").replace(/\/$/, "");
-  const connectUrl = `${origin}/connect`;
+  const CONVEX_BASE = (import.meta.env.VITE_CONVEX_URL as string)
+    .replace(/\.convex\.cloud$/, ".convex.site")
+    .replace(/\/$/, "");
+  const connectUrl = `${CONVEX_BASE}/connect`;
   const gameName = game || "Game Name";
   return JSON.stringify({
     "ok": true,
@@ -998,7 +999,9 @@ function KeyGenerateDialog({ open, onOpenChange, endpointPath }: { open: boolean
 
   const activeServers = servers.filter((s) => s.status === "active");
   const keyFormat = settings?.keyFormat || `${settings?.keyPrefix ?? "NS"}-XXXX-XXXX-XXXX-XXXX-XXXX`;
-  const CONVEX_BASE = typeof window !== "undefined" ? window.location.origin : (import.meta.env.VITE_CONVEX_URL as string).replace(/\.convex\.cloud$/, ".convex.site").replace(/\/$/, "");
+  const CONVEX_BASE = (import.meta.env.VITE_CONVEX_URL as string)
+    .replace(/\.convex\.cloud$/, ".convex.site")
+    .replace(/\/$/, "");
   const url = `${CONVEX_BASE}/${endpointPath}`;
 
   const GAMES = ["", "MLBB", "FREEFIRE", "PUBG", "CODM", "GENSHIN", "OTHER"];
@@ -1118,7 +1121,9 @@ function EndpointRow({ ep }: { ep: Doc<"customEndpoints"> }) {
   const [editOpen, setEditOpen] = useState(false);
   const [keyGenOpen, setKeyGenOpen] = useState(false);
 
-  const CONVEX_BASE = typeof window !== "undefined" ? window.location.origin : (import.meta.env.VITE_CONVEX_URL as string).replace(/\.convex\.cloud$/, ".convex.site").replace(/\/$/, "");
+  const CONVEX_BASE = (import.meta.env.VITE_CONVEX_URL as string)
+    .replace(/\.convex\.cloud$/, ".convex.site")
+    .replace(/\/$/, "");
   const url = `${CONVEX_BASE}/${ep.path}`;
 
   const handleToggle = async () => {

@@ -58,7 +58,7 @@ function buildConnectBase(domain: string): string {
   }
   // Default: use the current website domain — works when Vite proxy or
   // Freebuff routing forwards API paths to the Convex backend.
-  return typeof window !== "undefined" ? window.location.origin : CONVEX_BASE;
+  return CONVEX_BASE;
 }
 
 function slugify(name: string): string {
