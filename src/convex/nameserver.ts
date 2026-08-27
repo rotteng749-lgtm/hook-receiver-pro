@@ -71,7 +71,12 @@ function roleOf(user: Doc<"users"> | null | undefined): PanelRole {
 
 async function requireRole(ctx: QueryCtx | MutationCtx, roles: PanelRole[]) {
   const { userId, user } = await getAuthUser(ctx);
-  if (!roles.includes(roleOf(user))) throw new Error("Forbidden");
+  const userRole = roleOf(user);
+  if (!roles.includes(userRole)) {
+    throw new Error(
+      `Forbidden — your role is "${userRole}" but this action requires: ${roles.join(" or ")}`,
+    );
+  }
   return { userId, user };
 }
 
@@ -432,8 +437,8 @@ export const generateKey = mutation({
   handler: async (ctx, args) => {
     const { userId, user } = await requireRole(ctx, ["owner", "admin"]);
     const server = await ctx.db.get(args.serverId);
-    if (server === null) throw new Error("Server not found");
-    if (server.status !== "active") throw new Error("Server is offline");
+    if (server === null) throw new Error("Server not found — did you create a server first?");
+    if (server.status !== "active") throw new Error("Server is offline — toggle it on in Servers");
 
     const settings = await getSettingsDoc(ctx);
     const maxUses = Math.max(
