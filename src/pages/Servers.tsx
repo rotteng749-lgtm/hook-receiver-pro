@@ -56,7 +56,8 @@ function buildConnectBase(domain: string): string {
   if (domain.length > 0) {
     return domain.includes(".") ? `https://${domain}` : `https://${domain}.site`;
   }
-  return "https://lovable-dove-890.convex.site";
+  // Auto-detect: use the current website domain as default
+  return typeof window !== "undefined" ? window.location.origin : "https://lovable-dove-890.convex.site";
 }
 
 function slugify(name: string): string {

@@ -127,7 +127,9 @@ function getConnectUrl(domain: string): string {
   if (domain.length > 0) {
     return domain.includes(".") ? `https://${domain}` : `https://${domain}.site`;
   }
-  return "https://lovable-dove-890.convex.site";
+  // Use the deployed Convex site URL as default
+  const site = process.env.CONVEX_SITE_URL ?? "";
+  return site.length > 0 ? site.replace(/\.cloud$/, ".site") : "https://lovable-dove-890.convex.site";
 }
 
 function escapeHtml(s: string): string {
