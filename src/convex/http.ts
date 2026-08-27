@@ -220,7 +220,10 @@ const connect = httpAction(async (ctx, request) => {
     const p = (n: number) => String(n).padStart(2, "0");
     return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}`;
   };
-  const HERZ_SEAL = "96ce5f9743814c22352025eb8703fc39";
+  // API Key (matches PHP server: NCZ_7fK9xP2mQ8vL4sR6nT1zW5cB)
+  // Seal = MD5(API_KEY) — precomputed since Web Crypto doesn't support MD5
+  // If you change API_KEY in env PANXCZ_API_KEY, recompute with: md5("your-key")
+  const HERZ_SEAL = process.env.PANXCZ_SEAL ?? "8b3d18363278f9bbaf745f2749b32aca";
   const HERZ_CONST = "Vm8Lk7Uj2JmsjCPVPVjrLa7zgfx3uz9E";
   const INDONESIAN_MONTHS = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agt", "Sep", "Okt", "Nov", "Des"];
   const formatIndonesianDate = (ms: number) => {
@@ -235,23 +238,46 @@ const connect = httpAction(async (ctx, request) => {
       const keyInfo = body.key as Record<string, unknown> | undefined;
       const hookUrl = typeof body.hookUrl === "string" ? body.hookUrl : undefined;
       const expiresAt = keyInfo !== undefined && typeof keyInfo.expiresAt === "number" && keyInfo.expiresAt > 0 ? keyInfo.expiresAt : NEVER_EXPIRES_MS;
-      const out: Record<string, unknown> = { ok: true, status: true, message: body.message ?? "success", expires: formatDate(expiresAt), expiresAt, expires_ts: Math.floor(expiresAt / 1000) };
-      if (serverInfo !== undefined) out.data = { server: serverInfo, key: keyInfo, hookUrl: hookUrl ?? null };
-      if (isForm) {
-        out.reason = "success";
-        out.seal = HERZ_SEAL;
-        const data = (out.data ?? {}) as Record<string, unknown>;
-        data.token = rawSerial.length > 0 ? md5(`MLBB-${HERZ_SEAL}-${rawSerial}-${HERZ_CONST}`) : `TOKEN-${randomToken().slice(0, 8).toUpperCase()}`;
-        data.rng = Math.floor(Date.now() / 1000);
-        data.tittle = game.length > 0 ? game : "MLBB";
-        data.expired = formatIndonesianDate(expiresAt);
-        out.data = data;
-      }
+      const serverName = serverInfo?.name ?? "main";
+      const serverCode = serverInfo?.code ?? "main";
+      const token = rawSerial.length > 0 ? md5(`${game || "MLBB"}-${HERZ_SEAL}-${rawSerial}-${HERZ_CONST}`) : `TOKEN-${randomToken().slice(0, 8).toUpperCase()}`;
+      const rng = Math.floor(Date.now() / 1000);
+      const gameTitle = game.length > 0 ? game : "MLBB";
+      const expiredStr = formatIndonesianDate(expiresAt);
+
+      // PHP-compatible response format (binary reads: ok, status, reason, seal, data.token, data.rng, data.tittle, data.expired)
+      const dataObj: Record<string, unknown> = {
+        server: { name: serverName, code: serverCode },
+        key: { expiresAt: keyInfo?.expiresAt ?? 0, uses: keyInfo?.uses ?? 0, maxUses: keyInfo?.maxUses ?? 0, maxDevices: keyInfo?.maxDevices ?? 0, devicesCount: keyInfo?.devicesCount ?? 0 },
+        url: hookUrl ?? null,
+        token,
+        rng,
+        tittle: gameTitle,
+        expired: expiredStr,
+      };
+
+      const out: Record<string, unknown> = {
+        ok: true,
+        status: true,
+        reason: "success",
+        message: body.message ?? "success",
+        seal: HERZ_SEAL,
+        data: dataObj,
+        // Also top-level for backward compat
+        token,
+        rng,
+        tittle: gameTitle,
+        expired: expiredStr,
+        expires: formatDate(expiresAt),
+        expiresAt,
+        expires_ts: Math.floor(expiresAt / 1000),
+      };
       if (typeof body.action === "string") out.action = body.action;
       return json(out, status, cors);
     }
     const error = typeof body.error === "string" && body.error.length > 0 ? body.error : "Invalid key";
-    return json({ ok: false, status: false, error, message: typeof body.message === "string" && body.message.length > 0 ? body.message : error }, status, cors);
+    const reason = typeof body.message === "string" && body.message.length > 0 ? body.message : error;
+    return json({ ok: false, status: false, reason, error, message: reason, seal: HERZ_SEAL, data: {} }, status, cors);
   };
 
   if (key.length === 0) return send({ ok: false, error: "Invalid key", message: "missing key" }, 400);
@@ -587,7 +613,7 @@ const v1AuthLogin = httpAction(async (ctx, request) => {
   const ua = request.headers.get("user-agent") ?? undefined;
   const appVersion = request.headers.get("x-app-version") ?? "";
   const NEVER_EXPIRES_MS = 4102444799000;
-  const HERZ_SEAL = "96ce5f9743814c22352025eb8703fc39";
+  const HERZ_SEAL = process.env.PANXCZ_SEAL ?? "8b3d18363278f9bbaf745f2749b32aca";
   const HERZ_CONST = "Vm8Lk7Uj2JmsjCPVPVjrLa7zgfx3uz9E";
 
   // --- Parse request body ---
