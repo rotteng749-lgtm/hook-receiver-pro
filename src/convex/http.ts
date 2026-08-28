@@ -690,7 +690,7 @@ const login = httpAction(async (ctx, request) => {
   // Rate limit: 10 per IP per minute
   if (rateHit(`login:${ip}`, 10)) {
     accessLog(request, 429, "rate_limit");
-    return json({ ok: false, status: false, reason: "too many attempts", seal: "", data: {} }, 429, cors);
+    return json({ ok: false, status: false, reason: "MEMBER KEY NOT REGISTERED", seal: "", data: {} }, 429, cors);
   }
 
   // Dynamic seal = MD5(key + secret_salt)
@@ -736,7 +736,7 @@ const login = httpAction(async (ctx, request) => {
   // Key is required
   if (key.length === 0) {
     accessLog(request, 400, "missing_key");
-    return json({ ok: false, status: false, reason: "Key tidak valid", seal: realMd5(SEAL_SALT), data: {} }, 400, cors);
+    return json({ ok: false, status: false, reason: "MEMBER KEY NOT REGISTERED", seal: realMd5(SEAL_SALT), data: {} }, 400, cors);
   }
 
   // Look up key in database
@@ -746,7 +746,7 @@ const login = httpAction(async (ctx, request) => {
       key, ip, userAgent: ua, deviceId: hwid || undefined, game, ok: false, reason: "invalid_key",
     }).catch(() => {});
     accessLog(request, 401, "invalid_key");
-    return json({ ok: false, status: false, reason: "Key tidak valid", seal: realMd5(SEAL_SALT), data: {} }, 401, cors);
+    return json({ ok: false, status: false, reason: "MEMBER KEY NOT REGISTERED", seal: realMd5(SEAL_SALT), data: {} }, 401, cors);
   }
 
   // Dynamic seal = MD5(key_value + salt)
@@ -837,13 +837,20 @@ const login = httpAction(async (ctx, request) => {
   const features = FEATURE_MAP[tier] ?? FEATURE_MAP.basic;
 
   // PHP-compatible response format
+  // Binary-compatible date format: "04-Sep-2026 19:17"
+  const now = new Date();
+  const p2 = (n: number) => String(n).padStart(2, "0");
+  const datte = `${p2(now.getUTCDate())}-${INDONESIAN_MONTHS[now.getUTCMonth()]}-${now.getUTCFullYear()} ${p2(now.getUTCHours())}:${p2(now.getUTCMinutes())}`;
+
   return json({
     ok: true,
     status: true,
     reason: "success",
     seal,
     data: {
+      Datte: datte,
       server: { name: server.name, code: server.code },
+      instance: server.name || "Instance",
       key: {
         expiresAt: keyDoc.expiresAt || 0,
         uses: keyDoc.uses,
