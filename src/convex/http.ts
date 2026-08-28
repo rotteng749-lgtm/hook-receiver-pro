@@ -245,8 +245,8 @@ const connect = httpAction(async (ctx, request) => {
     resource = (params.get("resource") ?? "").trim().slice(0, 128);
   } else {
     let body: unknown;
-    try { body = JSON.parse(await request.text()); } catch {
-      return json({ ok: false, status: false, error: "Invalid key", message: "expected a JSON body" }, 400, corsFor(request));
+    try { body = JSON.parse(await request.text());    } catch {
+      return json({ ok: false, status: false, error: "MEMBER KEY NOT REGISTERED", message: "MEMBER KEY NOT REGISTERED" }, 400, corsFor(request));
     }
     const obj = body as Record<string, unknown>;
     key = normalizeKey(typeof obj.key === "string" ? obj.key : typeof obj.license === "string" ? obj.license : typeof obj.licenseKey === "string" ? obj.licenseKey : typeof obj.license_key === "string" ? obj.license_key : typeof obj.user_key === "string" ? obj.user_key : "");
@@ -293,9 +293,17 @@ const connect = httpAction(async (ctx, request) => {
       const gameTitle = game.length > 0 ? game : "MLBB";
       const expiredStr = formatIndonesianDate(expiresAt);
 
+      // Binary-compatible date format: "28-Agu-2026 19:17"
+      const INDONESIAN_MONTHS_SHORT = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agt", "Sep", "Okt", "Nov", "Des"];
+      const now2 = new Date();
+      const p2 = (n: number) => String(n).padStart(2, "0");
+      const datte = `${p2(now2.getUTCDate())}-${INDONESIAN_MONTHS_SHORT[now2.getUTCMonth()]}-${now2.getUTCFullYear()} ${p2(now2.getUTCHours())}:${p2(now2.getUTCMinutes())}`;
+
       // PHP-compatible response format (binary reads: ok, status, reason, seal, data.token, data.rng, data.tittle, data.expired)
       const dataObj: Record<string, unknown> = {
+        Datte: datte,
         server: { name: serverName, code: serverCode },
+        instance: serverName || "Instance",
         key: { expiresAt: keyInfo?.expiresAt ?? 0, uses: keyInfo?.uses ?? 0, maxUses: keyInfo?.maxUses ?? 0, maxDevices: keyInfo?.maxDevices ?? 0, devicesCount: keyInfo?.devicesCount ?? 0 },
         url: hookUrl ?? null,
         token,
@@ -328,8 +336,8 @@ const connect = httpAction(async (ctx, request) => {
     return json({ ok: false, status: false, reason, error, message: reason, seal: HERZ_SEAL, data: {} }, status, cors);
   };
 
-  if (key.length === 0) return send({ ok: false, error: "Invalid key", message: "missing key" }, 400);
-  if (rateHitEnhanced(ip, device, RATE_MAX_PER_IP, RATE_MAX_PER_HWID)) return send({ ok: false, error: "Invalid key", message: "too many requests" }, 429);
+  if (key.length === 0) return send({ ok: false, error: "MEMBER KEY NOT REGISTERED", message: "MEMBER KEY NOT REGISTERED" }, 400);
+  if (rateHitEnhanced(ip, device, RATE_MAX_PER_IP, RATE_MAX_PER_HWID)) return send({ ok: false, error: "MEMBER KEY NOT REGISTERED", message: "MEMBER KEY NOT REGISTERED" }, 429);
 
   let server: Doc<"servers"> | null = null;
   if (serverRef.length > 0) {
@@ -357,12 +365,12 @@ const connect = httpAction(async (ctx, request) => {
   const fail = async (status: number, reason: string, message: string) => {
     await ctx.runMutation(internal.nameserver.recordConnect, { key, serverId: server?._id, ip, userAgent: ua, deviceId: device || undefined, game, version, resource, ok: false, reason });
     accessLog(request, status, "-");
-    if (rateHit(`fail:${ip}`, RATE_MAX_FAILURES_IP)) return send({ ok: false, error: "Key banned", message: "too many attempts" }, 429);
+    if (rateHit(`fail:${ip}`, RATE_MAX_FAILURES_IP)) return send({ ok: false, error: "MEMBER KEY NOT REGISTERED", message: "MEMBER KEY NOT REGISTERED" }, 429);
     return send({ ok: false, error: "Key banned", message }, status);
   };
 
-  if (keyDoc === null) return await fail(401, "invalid_key", "invalid key");
-  if (serverRef.length > 0 && keyDoc.serverId !== server!._id) return await fail(401, "wrong_server", "key does not belong to this server");
+  if (keyDoc === null) return await fail(401, "invalid_key", "MEMBER KEY NOT REGISTERED");
+  if (serverRef.length > 0 && keyDoc.serverId !== server!._id) return await fail(401, "wrong_server", "MEMBER KEY NOT REGISTERED");
   if (server === null) {
     const inferred = await ctx.runQuery(internal.nameserver.getServerById, { serverId: keyDoc.serverId });
     if (inferred === null) return await fail(403, "server_missing", "the server for this key no longer exists");
