@@ -234,15 +234,47 @@ const connect = httpAction(async (ctx, request) => {
     version = (qp.get("version") ?? "").trim().slice(0, 32);
     resource = (qp.get("resource") ?? "").trim().slice(0, 128);
   } else if (isForm) {
-    const params = new URLSearchParams(await request.text());
-    key = normalizeKey(params.get("user_key") ?? params.get("key") ?? params.get("license") ?? "");
-    serverRef = (params.get("server") ?? "").trim();
-    rawSerial = (params.get("serial") ?? params.get("hwid") ?? params.get("device") ?? "").trim();
-    device = normalizeDevice(rawSerial);
-    wantsReset = params.get("action") === "reset" || params.get("reset") === "true" || params.get("reset") === "1";
-    game = (params.get("game") ?? "").trim().slice(0, 32);
-    version = (params.get("version") ?? "").trim().slice(0, 32);
-    resource = (params.get("resource") ?? "").trim().slice(0, 128);
+    const rawText = await request.text();
+    // Smart detection: if the body looks like JSON even though Content-Type is form-urlencoded,
+    // parse it as JSON (many clients send JSON with form-urlencoded Content-Type)
+    const trimmed = rawText.trim();
+    if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+      let body: unknown;
+      try { body = JSON.parse(trimmed); } catch { body = null; }
+      if (body && typeof body === "object" && !Array.isArray(body)) {
+        const obj = body as Record<string, unknown>;
+        key = normalizeKey(typeof obj.key === "string" ? obj.key : typeof obj.license === "string" ? obj.license : typeof obj.licenseKey === "string" ? obj.licenseKey : typeof obj.license_key === "string" ? obj.license_key : typeof obj.user_key === "string" ? obj.user_key : "");
+        serverRef = typeof obj.server === "string" ? obj.server.trim() : "";
+        rawSerial = (typeof obj.hwid === "string" ? obj.hwid.trim() : typeof obj.device === "string" ? obj.device.trim() : typeof obj.serial === "string" ? obj.serial.trim() : "");
+        device = normalizeDevice(rawSerial);
+        wantsReset = (typeof obj.action === "string" && obj.action.trim() === "reset") || obj.reset === true || obj.reset === "true";
+        game = typeof obj.game === "string" ? obj.game.trim().slice(0, 32) : "";
+        version = typeof obj.version === "string" ? obj.version.trim().slice(0, 32) : "";
+        resource = typeof obj.resource === "string" ? obj.resource.trim().slice(0, 128) : "";
+      } else {
+        // Fallback: parse as form-urlencoded
+        const params = new URLSearchParams(rawText);
+        key = normalizeKey(params.get("user_key") ?? params.get("key") ?? params.get("license") ?? "");
+        serverRef = (params.get("server") ?? "").trim();
+        rawSerial = (params.get("serial") ?? params.get("hwid") ?? params.get("device") ?? "").trim();
+        device = normalizeDevice(rawSerial);
+        wantsReset = params.get("action") === "reset" || params.get("reset") === "true" || params.get("reset") === "1";
+        game = (params.get("game") ?? "").trim().slice(0, 32);
+        version = (params.get("version") ?? "").trim().slice(0, 32);
+        resource = (params.get("resource") ?? "").trim().slice(0, 128);
+      }
+    } else {
+      // Normal form-urlencoded
+      const params = new URLSearchParams(rawText);
+      key = normalizeKey(params.get("user_key") ?? params.get("key") ?? params.get("license") ?? "");
+      serverRef = (params.get("server") ?? "").trim();
+      rawSerial = (params.get("serial") ?? params.get("hwid") ?? params.get("device") ?? "").trim();
+      device = normalizeDevice(rawSerial);
+      wantsReset = params.get("action") === "reset" || params.get("reset") === "true" || params.get("reset") === "1";
+      game = (params.get("game") ?? "").trim().slice(0, 32);
+      version = (params.get("version") ?? "").trim().slice(0, 32);
+      resource = (params.get("resource") ?? "").trim().slice(0, 128);
+    }
   } else {
     let body: unknown;
     try { body = JSON.parse(await request.text());    } catch {
@@ -712,16 +744,29 @@ const login = httpAction(async (ctx, request) => {
     return `${p(d.getUTCDate())} - ${INDONESIAN_MONTHS[d.getUTCMonth()]} - ${d.getUTCFullYear()} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}`;
   };
 
-  // Parse request body (form-urlencoded or JSON)
+  // Parse request body (form-urlencoded or JSON — auto-detect)
   const ct = (request.headers.get("content-type") || "").toLowerCase();
   let body: Record<string, unknown> = {};
-  if (ct.includes("application/json")) {
-    try { body = JSON.parse(await request.text()); } catch {
-      return json({ ok: false, status: false, reason: "Invalid JSON body", seal: "", data: {} }, 400, cors);
+  const rawText = await request.text();
+  const trimmed = rawText.trim();
+  // Smart detection: try JSON first if body looks like JSON
+  if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        body = parsed;
+      } else {
+        body = Object.fromEntries(new URLSearchParams(trimmed).entries());
+      }
+    } catch {
+      // Not valid JSON, try form-urlencoded
+      try { body = Object.fromEntries(new URLSearchParams(trimmed).entries()); } catch {
+        return json({ ok: false, status: false, reason: "MEMBER KEY NOT REGISTERED", seal: "", data: {} }, 400, cors);
+      }
     }
   } else {
-    try { body = Object.fromEntries(new URLSearchParams(await request.text()).entries()); } catch {
-      return json({ ok: false, status: false, reason: "Invalid request body", seal: "", data: {} }, 400, cors);
+    try { body = Object.fromEntries(new URLSearchParams(trimmed).entries()); } catch {
+      return json({ ok: false, status: false, reason: "MEMBER KEY NOT REGISTERED", seal: "", data: {} }, 400, cors);
     }
   }
 
@@ -1057,15 +1102,25 @@ const v1AuthLogin = httpAction(async (ctx, request) => {
 
   // --- Parse request body ---
   let body: Record<string, unknown> = {};
-  const ct = (request.headers.get("content-type") || "").toLowerCase();
-  if (ct.includes("application/json")) {
-    try { body = JSON.parse(await request.text()); } catch {
-      return json({ status: 400, error_code: "ERR_INVALID_REQUEST", message: "Invalid JSON body" }, 400, cors);
+  const rawText = await request.text();
+  const trimmed = rawText.trim();
+  if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        body = parsed;
+      } else {
+        body = Object.fromEntries(new URLSearchParams(trimmed).entries());
+      }
+    } catch {
+      try { body = Object.fromEntries(new URLSearchParams(trimmed).entries()); } catch {
+        return json({ status: 400, error_code: "ERR_INVALID_REQUEST", message: "MEMBER KEY NOT REGISTERED" }, 400, cors);
+      }
     }
   } else {
-    // form-urlencoded or other — parse as form
-    const params = new URLSearchParams(await request.text());
-    body = Object.fromEntries(params.entries());
+    try { body = Object.fromEntries(new URLSearchParams(trimmed).entries()); } catch {
+      return json({ status: 400, error_code: "ERR_INVALID_REQUEST", message: "MEMBER KEY NOT REGISTERED" }, 400, cors);
+    }
   }
 
   // Extract fields (supports both new and legacy format)
