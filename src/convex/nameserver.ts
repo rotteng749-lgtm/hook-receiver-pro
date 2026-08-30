@@ -303,6 +303,7 @@ export const createServer = mutation({
     name: v.string(),
     code: v.string(),
     description: v.optional(v.string()),
+    customSeal: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const { userId } = await requireRole(ctx, ["owner", "admin"]);
@@ -319,12 +320,14 @@ export const createServer = mutation({
       .withIndex("by_code", (q) => q.eq("code", code))
       .first();
     if (existing) throw new Error(`A server with code "${code}" already exists`);
+    const seal = args.customSeal?.trim() || undefined;
     return await ctx.db.insert("servers", {
       name,
       code,
       description: args.description?.trim() || undefined,
       status: "active",
       createdBy: userId,
+      ...(seal ? { customSeal: seal } : {}),
     });
   },
 });
@@ -335,6 +338,7 @@ export const updateServer = mutation({
     name: v.optional(v.string()),
     description: v.optional(v.string()),
     status: v.optional(v.union(v.literal("active"), v.literal("off"))),
+    customSeal: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const { user } = await requireRole(ctx, ["owner", "admin"]);
@@ -353,6 +357,9 @@ export const updateServer = mutation({
       patch.description = args.description.trim() || undefined;
     }
     if (args.status !== undefined) patch.status = args.status;
+    if (args.customSeal !== undefined) {
+      patch.customSeal = args.customSeal.trim() || undefined;
+    }
     await ctx.db.patch(args.id, patch);
   },
 });

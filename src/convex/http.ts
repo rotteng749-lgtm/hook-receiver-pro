@@ -303,7 +303,7 @@ const connect = httpAction(async (ctx, request) => {
   // API Key (matches PHP server: NCZ_7fK9xP2mQ8vL4sR6nT1zW5cB)
   // Seal = MD5(API_KEY) — precomputed since Web Crypto doesn't support MD5
   // If you change API_KEY in env PANXCZ_API_KEY, recompute with: md5("your-key")
-  const HERZ_SEAL = process.env.PANXCZ_SEAL ?? "8b3d18363278f9bbaf745f2749b32aca";
+  const GLOBAL_SEAL = process.env.PANXCZ_SEAL ?? "8b3d18363278f9bbaf745f2749b32aca";
   const HERZ_CONST = "Vm8Lk7Uj2JmsjCPVPVjrLa7zgfx3uz9E";
   const INDONESIAN_MONTHS = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agt", "Sep", "Okt", "Nov", "Des"];
   const formatIndonesianDate = (ms: number) => {
@@ -313,6 +313,8 @@ const connect = httpAction(async (ctx, request) => {
   };
 
   const send = (body: Record<string, unknown>, status = 200) => {
+    // Use server's custom seal if available, otherwise global default
+    const responseSeal = server?.customSeal ?? GLOBAL_SEAL;
     if (body.ok === true) {
       const serverInfo = body.server as Record<string, unknown> | undefined;
       const keyInfo = body.key as Record<string, unknown> | undefined;
@@ -320,7 +322,7 @@ const connect = httpAction(async (ctx, request) => {
       const expiresAt = keyInfo !== undefined && typeof keyInfo.expiresAt === "number" && keyInfo.expiresAt > 0 ? keyInfo.expiresAt : NEVER_EXPIRES_MS;
       const serverName = serverInfo?.name ?? "main";
       const serverCode = serverInfo?.code ?? "main";
-      const token = rawSerial.length > 0 ? md5(`${game || "MLBB"}-${HERZ_SEAL}-${rawSerial}-${HERZ_CONST}`) : `TOKEN-${randomToken().slice(0, 8).toUpperCase()}`;
+      const token = rawSerial.length > 0 ? md5(`${game || "MLBB"}-${responseSeal}-${rawSerial}-${HERZ_CONST}`) : `TOKEN-${randomToken().slice(0, 8).toUpperCase()}`;
       const rng = Math.floor(Date.now() / 1000);
       const gameTitle = game.length > 0 ? game : "MLBB";
       const expiredStr = formatIndonesianDate(expiresAt);
@@ -349,7 +351,7 @@ const connect = httpAction(async (ctx, request) => {
         status: true,
         reason: "success",
         message: body.message ?? "success",
-        seal: HERZ_SEAL,
+        seal: responseSeal,
         data: dataObj,
         // Also top-level for backward compat
         token,
@@ -365,7 +367,7 @@ const connect = httpAction(async (ctx, request) => {
     }
     const error = typeof body.error === "string" && body.error.length > 0 ? body.error : "Invalid key";
     const reason = typeof body.message === "string" && body.message.length > 0 ? body.message : error;
-    return json({ ok: false, status: false, reason, error, message: reason, seal: HERZ_SEAL, data: {} }, status, cors);
+    return json({ ok: false, status: false, reason, error, message: reason, seal: responseSeal, data: {} }, status, cors);
   };
 
   if (key.length === 0) return send({ ok: false, error: "MEMBER KEY NOT REGISTERED", message: "MEMBER KEY NOT REGISTERED" }, 400);
@@ -836,6 +838,9 @@ const login = httpAction(async (ctx, request) => {
     return json({ ok: false, status: false, reason: "Server is offline", seal, data: {} }, 403, cors);
   }
 
+  // Override seal with server's custom seal if set
+  const responseSeal = server.customSeal || seal;
+
   // HWID validation
   const boundDevices = keyDoc.devices ?? (keyDoc.deviceId ? [keyDoc.deviceId] : []);
   const knownDevice = hwid.length > 0 && boundDevices.some((d) => d.toUpperCase() === hwid);
@@ -844,13 +849,13 @@ const login = httpAction(async (ctx, request) => {
   if (wantsReset) {
     if (boundDevices.length === 0) {
       accessLog(request, 200, "reset_no_device");
-      return json({ ok: false, status: false, reason: "Key is not bound to any device", seal, data: {} }, 200, cors);
+      return json({ ok: false, status: false, reason: "Key is not bound to any device", seal: responseSeal, data: {} }, 200, cors);
     }
     if (hwid.length === 0) {
-      return json({ ok: false, status: false, reason: "Send device ID to reset binding", seal, data: {} }, 400, cors);
+      return json({ ok: false, status: false, reason: "Send device ID to reset binding", seal: responseSeal, data: {} }, 400, cors);
     }
     if (!knownDevice) {
-      return json({ ok: false, status: false, reason: "HWID tidak cocok", seal, data: {} }, 403, cors);
+      return json({ ok: false, status: false, reason: "HWID tidak cocok", seal: responseSeal, data: {} }, 403, cors);
     }
     await ctx.runMutation(internal.nameserver.resetKeyDeviceInternal, { keyId: keyDoc._id });
     await ctx.runMutation(internal.nameserver.recordConnect, {
@@ -858,14 +863,14 @@ const login = httpAction(async (ctx, request) => {
       deviceId: hwid, game, ok: true, reason: "device_reset", countUse: false,
     }).catch(() => {});
     accessLog(request, 200, "device_reset");
-    return json({ ok: false, status: false, reason: "Device binding has been reset. Reconnect with new device.", seal, data: {} }, 200, cors);
+    return json({ ok: false, status: false, reason: "Device binding has been reset. Reconnect with new device.", seal: responseSeal, data: {} }, 200, cors);
   }
 
   if (maxDevices > 0 && boundDevices.length > 0 && hwid.length === 0) {
-    return json({ ok: false, status: false, reason: "Device ID required — this key is device-locked", seal, data: {} }, 400, cors);
+    return json({ ok: false, status: false, reason: "Device ID required — this key is device-locked", seal: responseSeal, data: {} }, 400, cors);
   }
   if (hwid.length > 0 && !knownDevice && maxDevices > 0 && boundDevices.length >= maxDevices) {
-    return json({ ok: false, status: false, reason: "HWID tidak cocok", seal, data: {} }, 403, cors);
+    return json({ ok: false, status: false, reason: "HWID tidak cocok", seal: responseSeal, data: {} }, 403, cors);
   }
 
   // Success: record connection, generate token
@@ -878,7 +883,7 @@ const login = httpAction(async (ctx, request) => {
   // Generate unique token: {game}-{sealFirst8}-{rngHex8}
   const rng = Date.now();
   const rngHex = rng.toString(16).slice(-8).toUpperCase();
-  const sealFirst8 = seal.slice(0, 8).toUpperCase();
+  const sealFirst8 = responseSeal.slice(0, 8).toUpperCase();
   const token = `${game}-${sealFirst8}-${rngHex}`;
 
   // Expiry: use key's stored expiry, default 30 days from now
@@ -899,7 +904,7 @@ const login = httpAction(async (ctx, request) => {
     ok: true,
     status: true,
     reason: "success",
-    seal,
+    seal: responseSeal,
     data: {
       Datte: datte,
       server: { name: server.name, code: server.code },
@@ -1226,6 +1231,9 @@ const v1AuthLogin = httpAction(async (ctx, request) => {
     return json({ status: 403, error_code: "ERR_SERVER_OFFLINE", message: "Server is offline" }, 403, cors);
   }
 
+  // Override seal with server's custom seal if set
+  const v1ResponseSeal = server.customSeal || HERZ_SEAL;
+
   // --- IP blacklist/whitelist ---
   const ipWhitelist = keyDoc.ipWhitelist ?? [];
   const ipBlacklist = keyDoc.ipBlacklist ?? [];
@@ -1339,8 +1347,8 @@ const v1AuthLogin = httpAction(async (ctx, request) => {
         devicesCount: rec?.devicesCount ?? boundDevices.length,
       },
       hookUrl: hookUrl ?? null,
-      seal: HERZ_SEAL,
-      token: hwid.length > 0 ? md5(`MLBB-${HERZ_SEAL}-${hwid}-${HERZ_CONST}`) : `TOKEN-${randomToken().slice(0, 8).toUpperCase()}`,
+      seal: v1ResponseSeal,
+      token: hwid.length > 0 ? md5(`MLBB-${v1ResponseSeal}-${hwid}-${HERZ_CONST}`) : `TOKEN-${randomToken().slice(0, 8).toUpperCase()}`,
       rng: Math.floor(Date.now() / 1000),
       tittle: game,
     },

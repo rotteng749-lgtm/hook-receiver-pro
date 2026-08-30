@@ -75,6 +75,7 @@ function NewServerDialog({ onCreated }: { onCreated?: () => void }) {
   const [name, setName] = useState("");
   const [code, setCode] = useState("");
   const [description, setDescription] = useState("");
+  const [customSeal, setCustomSeal] = useState("");
   const [busy, setBusy] = useState(false);
 
   const handleName = (value: string) => {
@@ -86,12 +87,13 @@ function NewServerDialog({ onCreated }: { onCreated?: () => void }) {
     e.preventDefault();
     setBusy(true);
     try {
-      await createServer({ name, code, description: description || undefined });
+      await createServer({ name, code, description: description || undefined, customSeal: customSeal.trim() || undefined });
       toast.success(`Server "${name}" created`);
       setOpen(false);
       setName("");
       setCode("");
       setDescription("");
+      setCustomSeal("");
       onCreated?.();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to create server");
@@ -153,6 +155,49 @@ function NewServerDialog({ onCreated }: { onCreated?: () => void }) {
               rows={2}
             />
           </div>
+          <div className="space-y-2">
+            <Label htmlFor="server-seal">Custom Seal / MD5 (optional)</Label>
+            <div className="flex gap-2">
+              <Input
+                id="server-seal"
+                value={customSeal}
+                onChange={(e) => setCustomSeal(e.target.value)}
+                placeholder="e.g. 8b3d18363278f9bbaf745f2749b32aca"
+                className="font-mono text-xs"
+              />
+              <label className="flex items-center gap-1 cursor-pointer whitespace-nowrap rounded-md border bg-muted px-3 text-xs">
+                <input
+                  type="file"
+                  className="sr-only"
+                  accept=".php,.txt,.js,.json,.py,.sh,.rb,.conf"
+                  onChange={async (e) => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    const text = await file.text();
+                    // Auto-detect MD5: match 32-char hex strings
+                    const md5Match = text.match(/\b([a-f0-9]{32})\b/i);
+                    if (md5Match) {
+                      setCustomSeal(md5Match[1].toLowerCase());
+                      toast.success(`MD5 detected: ${md5Match[1]}`);
+                    } else {
+                      // Try to find md5() call
+                      const md5Call = text.match(/md5\s*\(\s*["']([^"']+)["']/i);
+                      if (md5Call) {
+                        setCustomSeal(md5Call[1]);
+                        toast.success(`MD5 value detected: ${md5Call[1]}`);
+                      } else {
+                        toast.error("No MD5 hash found in file");
+                      }
+                    }
+                  }}
+                />
+                📄 Auto-detect
+              </label>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Upload a PHP/JS file to auto-detect its MD5 seal. This seal is returned in connect responses.
+            </p>
+          </div>
           <DialogFooter>
             <Button type="submit" disabled={busy}>
               {busy && <Loader2 className="size-4 animate-spin" />}
@@ -170,6 +215,7 @@ function EditServerDialog({ server }: { server: ServerRow }) {
   const [open, setOpen] = useState(false);
   const [name, setName] = useState(server.name);
   const [description, setDescription] = useState(server.description ?? "");
+  const [customSeal, setCustomSeal] = useState(server.customSeal ?? "");
   const [busy, setBusy] = useState(false);
 
   const submit = async (e: React.FormEvent) => {
@@ -180,6 +226,7 @@ function EditServerDialog({ server }: { server: ServerRow }) {
         id: server._id,
         name,
         description: description || undefined,
+        customSeal: customSeal.trim() || undefined,
       });
       toast.success("Server updated");
       setOpen(false);
@@ -213,6 +260,46 @@ function EditServerDialog({ server }: { server: ServerRow }) {
               onChange={(e) => setDescription(e.target.value)}
               rows={2}
             />
+          </div>
+          <div className="space-y-2">
+            <Label>Custom Seal / MD5 (optional)</Label>
+            <div className="flex gap-2">
+              <Input
+                value={customSeal}
+                onChange={(e) => setCustomSeal(e.target.value)}
+                placeholder="e.g. 8b3d18363278f9bbaf745f2749b32aca"
+                className="font-mono text-xs"
+              />
+              <label className="flex items-center gap-1 cursor-pointer whitespace-nowrap rounded-md border bg-muted px-3 text-xs">
+                <input
+                  type="file"
+                  className="sr-only"
+                  accept=".php,.txt,.js,.json,.py,.sh,.rb,.conf"
+                  onChange={async (e) => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    const text = await file.text();
+                    const md5Match = text.match(/\b([a-f0-9]{32})\b/i);
+                    if (md5Match) {
+                      setCustomSeal(md5Match[1].toLowerCase());
+                      toast.success(`MD5 detected: ${md5Match[1]}`);
+                    } else {
+                      const md5Call = text.match(/md5\s*\(\s*["']([^"']+)["']/i);
+                      if (md5Call) {
+                        setCustomSeal(md5Call[1]);
+                        toast.success(`MD5 value detected: ${md5Call[1]}`);
+                      } else {
+                        toast.error("No MD5 hash found in file");
+                      }
+                    }
+                  }}
+                />
+                📄 Auto-detect
+              </label>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Upload a PHP/JS file to auto-detect its MD5 seal.
+            </p>
           </div>
           <DialogFooter>
             <Button type="submit" disabled={busy}>
@@ -398,6 +485,22 @@ export default function Servers() {
             with the prefix you set in Settings (default {" "}
             <code className="rounded bg-muted px-1 py-0.5">{keyPrefix}</code>).
           </p>
+          <div className="mt-2 rounded-lg border border-border bg-muted/30 p-3">
+            <p className="mb-2 text-xs font-medium text-muted-foreground">Login format (PHP):</p>
+            <pre className="overflow-x-auto font-mono text-[11px] text-muted-foreground/80">{`$resp = file_get_contents("${connectBase}/connect", false,
+  stream_context_create(["http" => [
+    "method" => "POST",
+    "header" => "Content-Type: application/x-www-form-urlencoded",
+    "content" => http_build_query([
+      "game" => "MLBB",
+      "user_key" => "YOUR_KEY",
+      "serial" => "DEVICE_ID"
+    ])
+  ]])
+);
+$data = json_decode($resp, true);
+echo $data["ok"] ? "OK!" : "Gagal: " . $data["reason"];`}</pre>
+          </div>
         </CardContent>
       </Card>
       </motion.div>
@@ -439,6 +542,12 @@ export default function Servers() {
                   </p>
                   {server.description && (
                     <p className="mt-1 truncate text-xs text-muted-foreground">{server.description}</p>
+                  )}
+                  {server.customSeal && (
+                    <p className="mt-1 flex items-center gap-1 font-mono text-xs text-violet-400">
+                      Seal: {server.customSeal.slice(0, 12)}…
+                      <CopyButton value={server.customSeal} label="Seal" variant="ghost" size="icon" />
+                    </p>
                   )}
                   <p className="mt-1 text-xs text-muted-foreground/70">
                     by {server.creatorEmail} · created {formatRelative(server._creationTime)}

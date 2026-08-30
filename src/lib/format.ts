@@ -13,10 +13,14 @@ export function formatExpiry(expiresAt: number): string {
   if (expiresAt === 0) return "never";
   const ms = expiresAt - Date.now();
   if (ms <= 0) return "expired";
-  const hours = ms / (60 * 60 * 1000);
-  if (hours < 1) return `${Math.max(1, Math.round(hours * 60))}m`;
-  if (hours < 48) return `${Math.round(hours)}h`;
-  return `${Math.round(hours / 24)}d`;
+  const days = ms / (86400000);
+  if (days < 1) {
+    const hours = ms / (3600000);
+    if (hours < 1) return `${Math.max(1, Math.round(hours * 60))}m`;
+    return `${Math.round(hours)}h`;
+  }
+  if (days < 365) return `${Math.round(days)}d`;
+  return `${(days / 365).toFixed(1)}y`;
 }
 
 export function formatUses(uses: number, maxUses: number): string {

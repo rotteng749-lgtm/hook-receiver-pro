@@ -79,6 +79,7 @@ const schema = defineSchema(
       description: v.optional(v.string()),
       status: v.union(v.literal("active"), v.literal("off")),
       createdBy: v.id("users"),
+      customSeal: v.optional(v.string()), // custom MD5 seal for this server (e.g. from PHP file)
     }).index("by_code", ["code"]),
 
     // Generated connect keys. Generating one deducts `cost` from the
