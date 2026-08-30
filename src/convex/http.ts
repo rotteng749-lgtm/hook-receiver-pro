@@ -1357,6 +1357,156 @@ const v1AuthLogin = httpAction(async (ctx, request) => {
   return json(response, 200, cors);
 });
 
+
+/* ------------------------------------------------------------------ */
+/*  /PUBGM — PUBG Mobile game-specific response format                 */
+/* ------------------------------------------------------------------ */
+
+/* PUBG response helpers */
+function pubgErrorResponse(reason: string) {
+  return { status: false, reason };
+}
+
+function pubgSuccessResponse(args: {
+  serverName: string;
+  token: string;
+  rng: number;
+  expiresAt: number;
+  tier: string;
+  credit?: string;
+}) {
+  const d = new Date(args.expiresAt);
+  const p2 = (n: number) => String(n).padStart(2, "0");
+  const expiryStr = `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())} ${p2(d.getHours())}:${p2(d.getMinutes())}:${p2(d.getSeconds())}`;
+
+  const allOn: Record<string, string> = {
+    ESP: "on", ITEMS: "on", AIM: "on", BULLETTRACK: "on",
+    FLOATING: "on", MEMORY: "on", SETTING: "off", ANTICRACK: "on",
+  };
+  const flags = args.tier === "vip" ? allOn : {
+    ...allOn, BULLETTRACK: "off", FLOATING: "off", MEMORY: "off", SETTING: "off",
+  };
+
+  return {
+    status: true,
+    data: {
+      servername: args.serverName,
+      modname: " ",
+      mod_status: "",
+      credit: args.credit ?? "ONLINE MOD",
+      token: args.token,
+      exdate: expiryStr,
+      EXP: expiryStr,
+      ...flags,
+      rng: args.rng,
+    },
+  };
+}
+
+const pubgmHandler = httpAction(async (ctx, request) => {
+  const cors = corsFor(request);
+  const ip = clientIp(request);
+  const ua = request.headers.get("user-agent") ?? undefined;
+
+  // Rate limit: 10 per IP per minute
+  if (rateHit(`pubgm:${ip}`, 10)) {
+    accessLog(request, 429, "rate_limit");
+    return json(pubgErrorResponse("USER OR GAME NOT REGISTERED"), 429, cors);
+  }
+
+  // Smart JSON/form detection
+  const rawBody = await request.text();
+  let body: Record<string, string> = {};
+  const trimmed = rawBody.trimStart();
+  if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+    try { body = JSON.parse(trimmed); } catch { body = {}; }
+  }
+  if (!body.game && !body.user_key && !body.serial && !body.key && !body.device && !body.license) {
+    try {
+      const params = new URLSearchParams(rawBody);
+      for (const [k, v] of params.entries()) body[k] = v;
+    } catch { /* ignore */ }
+  }
+
+  const game = String(body.game ?? "PUBG");
+  const key = String(body.user_key ?? body.key ?? body.license ?? "").trim();
+  const serial = String(body.serial ?? body.device ?? "").trim();
+
+  if (!key) {
+    accessLog(request, 400, "empty_key");
+    return json(pubgErrorResponse("USER OR GAME NOT REGISTERED"), 200, cors);
+  }
+
+  // Look up key in database
+  const keyDoc = await ctx.runQuery(internal.nameserver.getKeyByValue, { key });
+  if (!keyDoc) {
+    await ctx.runMutation(internal.nameserver.recordConnect, {
+      key, ip, userAgent: ua, deviceId: serial || undefined, game, ok: false, reason: "invalid_key",
+    }).catch(() => {});
+    accessLog(request, 200, "invalid_key");
+    return json(pubgErrorResponse("USER OR GAME NOT REGISTERED"), 200, cors);
+  }
+
+  // Key status checks
+  if (keyDoc.status === "revoked") {
+    accessLog(request, 200, "revoked");
+    return json(pubgErrorResponse("USER OR GAME NOT REGISTERED"), 200, cors);
+  }
+  if (keyDoc.expiresAt > 0 && Date.now() > keyDoc.expiresAt) {
+    accessLog(request, 200, "expired");
+    return json(pubgErrorResponse("USER OR GAME NOT REGISTERED"), 200, cors);
+  }
+  if (keyDoc.maxUses > 0 && keyDoc.uses >= keyDoc.maxUses) {
+    accessLog(request, 200, "usage_limit");
+    return json(pubgErrorResponse("USER OR GAME NOT REGISTERED"), 200, cors);
+  }
+
+  // Server check
+  const server = await ctx.runQuery(internal.nameserver.getServerById, { serverId: keyDoc.serverId });
+  if (!server || server.status === "off") {
+    accessLog(request, 200, "server_offline");
+    return json(pubgErrorResponse("USER OR GAME NOT REGISTERED"), 200, cors);
+  }
+
+  // HWID validation
+  const boundDevices = keyDoc.devices ?? (keyDoc.deviceId ? [keyDoc.deviceId] : []);
+  const knownDevice = serial.length > 0 && boundDevices.some((d) => d.toUpperCase() === serial.toUpperCase());
+  const maxDevices = keyDoc.maxDevices ?? 1;
+
+  if (maxDevices > 0 && boundDevices.length > 0 && serial.length === 0) {
+    return json(pubgErrorResponse("USER OR GAME NOT REGISTERED"), 200, cors);
+  }
+  if (serial.length > 0 && !knownDevice && maxDevices > 0 && boundDevices.length >= maxDevices) {
+    return json(pubgErrorResponse("USER OR GAME NOT REGISTERED"), 200, cors);
+  }
+
+  // Success — record connection
+  await ctx.runMutation(internal.nameserver.recordConnect, {
+    keyId: keyDoc._id, key, serverId: server._id, ip, userAgent: ua,
+    deviceId: serial || undefined, game, ok: true, bindDevice: true,
+  }).catch(() => {});
+  accessLog(request, 200, "success");
+
+  // Generate token (plain MD5 hex string)
+  const rng = Math.floor(Date.now() / 1000);
+  const PUBG_SALT = "f0459d2e9c7eff9b0f18e6ae0cd80949";
+  const tokenHash = realMd5(`${key}-${rng}-${PUBG_SALT}`);
+
+  // Expiry
+  const expiresAt = keyDoc.expiresAt > 0 ? keyDoc.expiresAt : Date.now() + 30 * 86400000;
+  const tier = getKeyTier(key);
+
+  return json(pubgSuccessResponse({
+    serverName: server.name,
+    token: tokenHash,
+    rng,
+    expiresAt,
+    tier,
+    credit: "ONLINE MOD",
+  }), 200, cors);
+});
+
+
 /* ------------------------------------------------------------------ */
 /*  CORS / method not allowed                                          */
 /* ------------------------------------------------------------------ */
@@ -1394,6 +1544,8 @@ http.route({ pathPrefix: "/api/files/", method: "DELETE", handler: deleteFile })
 http.route({ pathPrefix: "/files/", method: "GET", handler: download });
 http.route({ pathPrefix: "/databases/", method: "GET", handler: download });
 http.route({ path: "/telegram/webhook", method: "POST", handler: telegramWebhook });
+http.route({ path: "/PUBGM", method: "POST", handler: pubgmHandler });
+http.route({ path: "/PUBGM", method: "OPTIONS", handler: preflight });
 http.route({ path: "/connect", method: "OPTIONS", handler: preflight });
 http.route({ path: "/api/", method: "OPTIONS", handler: preflight });
 http.route({ pathPrefix: "/files/", method: "OPTIONS", handler: preflight });
