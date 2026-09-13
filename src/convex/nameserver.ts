@@ -13,7 +13,12 @@
  * The public connect endpoint lives in convex/http.ts and calls the
  * internal helpers at the bottom of this file.
  */
-import { createAccount, getAuthUserId, modifyAccountCredentials } from "@convex-dev/auth/server";
+import {
+  createAccount,
+  getAuthUserId,
+  modifyAccountCredentials,
+  retrieveAccount,
+} from "@convex-dev/auth/server";
 import type { GenericActionCtx, GenericDataModel } from "convex/server";
 import { v } from "convex/values";
 import {
@@ -257,7 +262,28 @@ export const seedOwner = mutation({
       if (user && user.role !== "owner") {
         await ctx.db.patch(existing.userId, { role: "owner" });
       }
-      return { created: false, username };
+      // The account exists — make sure the configured password still works.
+      // ADMIN_USERNAME / ADMIN_PASSWORD are the master credentials, so if the
+      // stored secret no longer matches we re-sync it. Without this a password
+      // changed elsewhere (or a different env value) locks the owner out with
+      // "invalid username or password" forever.
+      let passwordOk = false;
+      try {
+        await retrieveAccount(asActionCtx(ctx), {
+          provider: "password",
+          account: { id: username, secret: password },
+        });
+        passwordOk = true;
+      } catch {
+        passwordOk = false;
+      }
+      if (!passwordOk) {
+        await modifyAccountCredentials(asActionCtx(ctx), {
+          provider: "password",
+          account: { id: username, secret: password },
+        });
+      }
+      return { created: false, username, passwordSynced: !passwordOk };
     }
     await createAccount(asActionCtx(ctx), {
       provider: "password",

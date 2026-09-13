@@ -10,8 +10,16 @@ import { httpRouter } from "convex/server";
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import { extensionOf, hashToken } from "./files";
+import { auth } from "./auth";
 
 const http = httpRouter();
+
+/* Convex Auth's JWT verification endpoints — these MUST stay reachable:
+ * the deployment self-issues JWTs validated via OIDC discovery at
+ * /.well-known/openid-configuration, so if the custom-endpoint catch-all
+ * below swallowed them every session would stay unconfirmed and the panel
+ * would sit on a loading spinner forever. */
+auth.addHttpRoutes(http);
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                            */
@@ -960,6 +968,17 @@ const customEndpoint = httpAction(async (ctx, request) => {
   const path = fullPath.replace(/^\//, "").replace(/\/+$/, "");
 
   if (path.length === 0) return json({ error: "missing endpoint path" }, 400);
+
+  // Internal + auth paths are never custom endpoints.
+  if (
+    path.startsWith(".well-known") ||
+    path === "api/auth" ||
+    path.startsWith("api/auth/") ||
+    path.startsWith("oauth/")
+  ) {
+    accessLog(request, 404, "reserved_path");
+    return json({ error: `endpoint /${path} not found` }, 404);
+  }
 
   // Validate path format to prevent abuse
   const pathCheck = isValidEndpointPath(path);
