@@ -1508,6 +1508,235 @@ const pubgmHandler = httpAction(async (ctx, request) => {
 
 
 /* ------------------------------------------------------------------ */
+/*  /getkey — token-based trial keys                                   */
+/*                                                                      */
+/*  POST /getkey  …  issue a trial key (settings.getkeyHours, default   */
+/*                   5h) — max settings.getkeyMaxPerDay per day (3).    */
+/*  GET  /getkey  …  quota check; ?generate=1 also issues a key.        */
+/* ------------------------------------------------------------------ */
+
+/** Parse a JSON or x-www-form-urlencoded body into a flat record. */
+async function readBody(request: Request): Promise<Record<string, unknown>> {
+  if (request.method === "GET") return {};
+  const raw = await request.clone().text().catch(() => "");
+  if (raw.length === 0 || raw.length > 1024 * 1024) return {};
+  const ct = (request.headers.get("content-type") || "").toLowerCase();
+  try {
+    if (ct.includes("json")) {
+      const parsed: unknown = JSON.parse(raw);
+      return typeof parsed === "object" && parsed !== null
+        ? (parsed as Record<string, unknown>)
+        : {};
+    }
+    return Object.fromEntries(new URLSearchParams(raw)) as Record<string, unknown>;
+  } catch {
+    return {};
+  }
+}
+
+/** First non-empty string (or number) among the candidates. */
+function pickString(...values: unknown[]): string {
+  for (const candidate of values) {
+    if (typeof candidate === "string" && candidate.trim().length > 0) return candidate.trim();
+    if (typeof candidate === "number") return String(candidate);
+  }
+  return "";
+}
+
+const getkey = httpAction(async (ctx, request) => {
+  const cors = corsFor(request);
+  const url = new URL(request.url);
+  const ip = clientIp(request);
+  if (rateHit(`getkey:${ip}`, 30)) {
+    accessLog(request, 429, "rate_limit");
+    return json({ ok: false, error: "rate limited — try again in a minute" }, 429, cors);
+  }
+
+  const body = await readBody(request);
+  const token = pickString(
+    body.token, body.key, body.api_key, body.apiKey,
+    url.searchParams.get("token"), url.searchParams.get("key"),
+    (request.headers.get("authorization") || "").replace(/^Bearer\s+/i, ""),
+  );
+  if (token.length === 0) {
+    accessLog(request, 401, "missing_token");
+    return json({ ok: false, error: "missing token — pass ?token=YOUR_API_TOKEN" }, 401, cors);
+  }
+  const tokenHash = await hashToken(token);
+  const tokenDoc = await ctx.runQuery(internal.files.getTokenByHash, { tokenHash });
+  if (tokenDoc === null) {
+    accessLog(request, 401, "bad_token");
+    return json({ ok: false, error: "invalid or expired token" }, 401, cors);
+  }
+
+  const generate =
+    request.method === "POST" ||
+    pickString(url.searchParams.get("generate"), body.generate) === "1";
+  if (!generate) {
+    const usage = await ctx.runQuery(internal.nameserver.getGetkeyUsage, { tokenHash });
+    accessLog(request, 200, "getkey_usage");
+    return json({ ok: true, ...usage }, 200, cors);
+  }
+
+  const res = await ctx.runMutation(internal.nameserver.issueGetkey, { tokenHash });
+  if (!res.ok) {
+    const messages: Record<string, string> = {
+      daily_limit: `daily limit reached (${res.used}/${res.maxPerDay} keys today)`,
+      no_server: "no active server configured — create one in the panel first",
+      no_owner: "no owner account configured",
+    };
+    accessLog(request, res.reason === "daily_limit" ? 429 : 503, `getkey_${res.reason}`);
+    return json(
+      { ...res, ok: false, error: messages[res.reason] ?? res.reason },
+      res.reason === "daily_limit" ? 429 : 503,
+      cors,
+    );
+  }
+
+  accessLog(request, 200, "getkey_issued");
+  return json(
+    {
+      ok: true,
+      key: res.key,
+      server: res.serverName,
+      serverCode: res.serverCode,
+      hours: res.hours,
+      expiresAt: res.expiresAt,
+      expires: new Date(res.expiresAt).toISOString(),
+      usedToday: res.used,
+      maxPerDay: res.maxPerDay,
+      remaining: Math.max(0, res.maxPerDay - res.used),
+    },
+    200,
+    cors,
+  );
+});
+
+/* ------------------------------------------------------------------ */
+/*  /api/shorten — monetized short links (ShrtFly)                     */
+/* ------------------------------------------------------------------ */
+
+const shorten = httpAction(async (ctx, request) => {
+  const cors = corsFor(request);
+  const url = new URL(request.url);
+  const ip = clientIp(request);
+  if (rateHit(`shorten:${ip}`, 30)) {
+    accessLog(request, 429, "rate_limit");
+    return json({ ok: false, error: "rate limited" }, 429, cors);
+  }
+
+  const body = await readBody(request);
+  const token = pickString(
+    body.token,
+    url.searchParams.get("token"),
+    (request.headers.get("authorization") || "").replace(/^Bearer\s+/i, ""),
+  );
+  const settings = await ctx.runQuery(internal.nameserver.getSettingsInternal, {});
+  const expected = settings?.endpointAuthToken ?? "";
+  let authorized = expected.length > 0 && token === expected;
+  if (!authorized && token.length > 0) {
+    const tokenDoc = await ctx.runQuery(internal.files.getTokenByHash, {
+      tokenHash: await hashToken(token),
+    });
+    authorized = tokenDoc !== null;
+  }
+  if (!authorized) {
+    accessLog(request, 401, "unauthorized");
+    return json({ ok: false, error: "unauthorized — pass the endpoint token or an API token" }, 401, cors);
+  }
+
+  const longUrl = pickString(body.url, body.long_url, url.searchParams.get("url"));
+  if (longUrl.length === 0) return json({ ok: false, error: "missing url" }, 400, cors);
+  const alias = pickString(body.alias, url.searchParams.get("alias"));
+  const adType = Number(pickString(body.type, body.adType, url.searchParams.get("type")));
+
+  try {
+    const rec = await ctx.runAction(internal.shortener.createShortLinkByKey, {
+      url: longUrl,
+      alias: alias || undefined,
+      adType: adType === 2 ? 2 : 1,
+    });
+    accessLog(request, 200, "shorten");
+    return json(
+      {
+        ok: true,
+        status: "success",
+        result: {
+          alias: rec.alias,
+          original_url: rec.originalUrl,
+          shorten_url: rec.shortUrl,
+          stats_url: rec.statsUrl ?? null,
+        },
+      },
+      200,
+      cors,
+    );
+  } catch (e) {
+    accessLog(request, 400, "shorten_failed");
+    return json(
+      { ok: false, status: "error", error: e instanceof Error ? e.message : String(e) },
+      400,
+      cors,
+    );
+  }
+});
+
+/* ------------------------------------------------------------------ */
+/*  /s/<alias> — redirect + click counter                              */
+/* ------------------------------------------------------------------ */
+
+const shortRedirect = httpAction(async (ctx, request) => {
+  const url = new URL(request.url);
+  const alias = url.pathname.replace(/^\/s\//, "").replace(/\/+$/, "");
+  if (alias.length === 0) return json({ error: "missing alias" }, 400);
+  const link = await ctx.runQuery(internal.shortener.getShortLinkByAlias, { alias });
+  if (link === null) {
+    accessLog(request, 404, "short_not_found");
+    return json({ error: `short link /s/${alias} not found` }, 404);
+  }
+  ctx.runMutation(internal.shortener.clickShortLink, { id: link._id }).catch(() => {});
+  accessLog(request, 302, "short_redirect");
+  return new Response(null, {
+    status: 302,
+    headers: { ...SECURITY_HEADERS, Location: link.shortUrl, "Cache-Control": "no-store" },
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/*  /api/device — register a device (opaque JSON id)                   */
+/* ------------------------------------------------------------------ */
+
+const deviceRegister = httpAction(async (ctx, request) => {
+  const cors = corsFor(request);
+  const url = new URL(request.url);
+  const ip = clientIp(request);
+  if (rateHit(`device:${ip}`, 60)) {
+    accessLog(request, 429, "rate_limit");
+    return json({ ok: false, error: "rate limited" }, 429, cors);
+  }
+  const body = await readBody(request);
+  const device = pickString(
+    body.device, body.deviceId, body.serial, body.hwid,
+    url.searchParams.get("device"), url.searchParams.get("serial"),
+  ).slice(0, 200);
+  const key = pickString(
+    body.key, body.license, body.user_key,
+    url.searchParams.get("key"), url.searchParams.get("license"),
+  );
+  if (device.length === 0) {
+    accessLog(request, 400, "missing_device");
+    return json({ ok: false, error: "missing device — pass ?device=<id>" }, 400, cors);
+  }
+  const res = await ctx.runMutation(internal.shortener.recordDevice, {
+    deviceId: device,
+    key: key || undefined,
+    ip,
+  });
+  accessLog(request, 200, "device_registered");
+  return json({ ok: true, ...res }, 200, cors);
+});
+
+/* ------------------------------------------------------------------ */
 /*  CORS / method not allowed                                          */
 /* ------------------------------------------------------------------ */
 
@@ -1555,6 +1784,17 @@ http.route({ pathPrefix: "/databases/", method: "OPTIONS", handler: preflight })
 // CUSTOM ENDPOINT CATCH-ALL — registered LAST so specific routes
 // take priority.  Handles ANY path: /ml-check.php, /v1/auth, /hook/x
 // ═══════════════════════════════════════════════════════════════════
+http.route({ path: "/getkey", method: "POST", handler: getkey });
+http.route({ path: "/getkey", method: "GET", handler: getkey });
+http.route({ path: "/getkey", method: "OPTIONS", handler: preflight });
+http.route({ path: "/api/shorten", method: "POST", handler: shorten });
+http.route({ path: "/api/shorten", method: "GET", handler: shorten });
+http.route({ path: "/api/shorten", method: "OPTIONS", handler: preflight });
+http.route({ pathPrefix: "/s/", method: "GET", handler: shortRedirect });
+http.route({ path: "/api/device", method: "POST", handler: deviceRegister });
+http.route({ path: "/api/device", method: "GET", handler: deviceRegister });
+http.route({ path: "/api/device", method: "OPTIONS", handler: preflight });
+
 http.route({ pathPrefix: "/", method: "GET", handler: customEndpoint });
 http.route({ pathPrefix: "/", method: "POST", handler: customEndpoint });
 http.route({ pathPrefix: "/", method: "PUT", handler: customEndpoint });

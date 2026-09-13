@@ -35,17 +35,18 @@ const schema = defineSchema(
       balance: v.optional(v.number()), // wallet balance — generating keys deducts this
     }).index("email", ["email"]), // index for the email. do not remove or modify
 
-    // GetKey daily usage: one row per user per UTC day, tracking how many
-    // free/paid keys they generated through the coin-based GetKey system.
-    // getkeyMaxPerDay settings caps `count` (default 3/day).
+    // GetKey daily usage: one row per API token per UTC day, tracking how many
+    // trial keys were generated through POST/GET /getkey. The token itself is
+    // the identity (apiTokens rows are not linked to users), and
+    // settings.getkeyMaxPerDay caps `count` (default 3/day).
     getkeyDaily: defineTable({
-      userId: v.id("users"),
+      tokenHash: v.string(), // sha256 of the API token used
       day: v.string(), // UTC date, e.g. "2026-09-13"
       count: v.number(), // keys generated today
       spentCoins: v.number(), // coins spent today
       keyIds: v.optional(v.array(v.id("connectKeys"))), // generated key ids
     })
-      .index("by_user_day", ["userId", "day"]),
+      .index("by_token_day", ["tokenHash", "day"]),
 
     // Every uploaded file. The bytes live in Convex object storage (S3-backed);
     // this table holds the metadata: display name, version, note, size,

@@ -15,8 +15,22 @@ import {
 import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 
+/** Shape of a stored short link row (used as an explicit return type so
+ *  Convex's type inference cannot form a circular reference). */
+type ShortLinkRecord = {
+  _id: Id<"shortLinks">;
+  alias: string;
+  originalUrl: string;
+  shortUrl: string;
+  statsUrl: string | undefined;
+  adType: number;
+  clicks: number;
+  createdBy: Id<"users"> | undefined;
+  createdAt: number;
+};
+
 /** Read a user's role (used by the panel action's auth check). */
-const getUserRole = internalQuery({
+export const getUserRole = internalQuery({
   args: { userId: v.id("users") },
   handler: async (ctx, { userId }) => {
     const user = await ctx.db.get(userId);
@@ -25,7 +39,7 @@ const getUserRole = internalQuery({
 });
 
 /** Read the global settings doc (ShrtFly API key). */
-const getShortenerSettings = internalQuery({
+export const getShortenerSettings = internalQuery({
   args: {},
   handler: async (ctx) => {
     const doc = await ctx.db
@@ -40,7 +54,7 @@ const getShortenerSettings = internalQuery({
 });
 
 /** Insert a short-link row. */
-const insertShortLinkRow = internalMutation({
+export const insertShortLinkRow = internalMutation({
   args: {
     alias: v.string(),
     originalUrl: v.string(),
@@ -76,7 +90,7 @@ export const createShortLinkByKey = internalAction({
     adType: v.optional(v.number()),
     userId: v.optional(v.id("users")),
   },
-  handler: async (ctx, args) => {
+  handler: async (ctx, args): Promise<ShortLinkRecord> => {
     const longUrl = args.url.trim();
     if (!/^https?:\/\/.+\..+/.test(longUrl)) {
       throw new Error("Please enter a valid URL (must start with http:// or https://)");
@@ -129,7 +143,7 @@ export const createShortLink = action({
     alias: v.optional(v.string()),
     adType: v.optional(v.number()),
   },
-  handler: async (ctx, args) => {
+  handler: async (ctx, args): Promise<ShortLinkRecord> => {
     const userId = await getAuthUserId(ctx);
     if (userId === null) throw new Error("Not authenticated");
     const role = await ctx.runQuery(internal.shortener.getUserRole, { userId });

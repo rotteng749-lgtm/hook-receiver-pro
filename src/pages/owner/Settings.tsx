@@ -8,6 +8,13 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { PageHeader } from "@/components/panel/PageHeader";
@@ -22,6 +29,7 @@ import {
   Save,
   User,
   Lock,
+  Sparkles,
   Wifi,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
@@ -70,6 +78,7 @@ const stagger = {
 
 export default function SettingsPage() {
   const settings = useQuery(api.nameserver.getSettings);
+  const servers = useQuery(api.nameserver.listServers);
   const updateSettings = useMutation(api.nameserver.updateSettings);
   const profile = useQuery(api.nameserver.getMyProfile);
   const updateMyProfile = useMutation(api.nameserver.updateMyProfile);
@@ -98,6 +107,10 @@ export default function SettingsPage() {
   const [serverDomain, setServerDomain] = useState("");
   const [endpointAuthToken, setEndpointAuthToken] = useState("");
   const [webhookUrl, setWebhookUrl] = useState("");
+  const [getkeyPrice, setGetkeyPrice] = useState("10");
+  const [getkeyHours, setGetkeyHours] = useState("5");
+  const [getkeyMaxPerDay, setGetkeyMaxPerDay] = useState("3");
+  const [getkeyServerId, setGetkeyServerId] = useState("");
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -112,6 +125,10 @@ export default function SettingsPage() {
       setServerDomain(settings.serverDomain);
       setEndpointAuthToken(settings.endpointAuthToken);
       setWebhookUrl(settings.webhookUrl ?? "");
+      setGetkeyPrice(String(settings.getkeyPrice));
+      setGetkeyHours(String(settings.getkeyHours));
+      setGetkeyMaxPerDay(String(settings.getkeyMaxPerDay));
+      setGetkeyServerId(settings.getkeyServerId ?? "");
     }
   }, [settings]);
 
@@ -179,6 +196,12 @@ export default function SettingsPage() {
         serverDomain: serverDomain || undefined,
         endpointAuthToken: endpointAuthToken || undefined,
         webhookUrl: webhookUrl || undefined,
+        getkeyPrice: Number(getkeyPrice) || 0,
+        getkeyHours: Number(getkeyHours) || 0,
+        getkeyMaxPerDay: Number(getkeyMaxPerDay) || 1,
+        getkeyServerId: getkeyServerId
+          ? (getkeyServerId as Parameters<typeof updateSettings>[0]["getkeyServerId"])
+          : undefined,
       });
       toast.success("Settings saved — applied immediately");
     } catch (err) {
@@ -483,6 +506,76 @@ export default function SettingsPage() {
                       </motion.div>
                     )}
                   </AnimatePresence>
+                </div>
+              </CardContent>
+            </Card>
+          </motion.div>
+
+          {/* ─── GetKey trial keys ─── */}
+          <motion.div variants={cardVariants}>
+            <Card className="border-border/70">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <Sparkles className="size-4 text-primary" />
+                  GetKey trial keys
+                </CardTitle>
+                <CardDescription>
+                  Controls the token-based /getkey endpoint — how long trial keys last and how
+                  many a single API token may mint per day.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="grid grid-cols-1 gap-5 sm:grid-cols-3">
+                <div className="space-y-2">
+                  <Label htmlFor="getkey-hours">Trial lifetime (hours)</Label>
+                  <Input
+                    id="getkey-hours"
+                    type="number"
+                    min={1}
+                    value={getkeyHours}
+                    onChange={(e) => setGetkeyHours(e.target.value)}
+                  />
+                  <p className="text-xs text-muted-foreground">Default 5 hours.</p>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="getkey-max">Max keys per day / token</Label>
+                  <Input
+                    id="getkey-max"
+                    type="number"
+                    min={1}
+                    value={getkeyMaxPerDay}
+                    onChange={(e) => setGetkeyMaxPerDay(e.target.value)}
+                  />
+                  <p className="text-xs text-muted-foreground">Default 3 per day.</p>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="getkey-price">Coin price per key</Label>
+                  <Input
+                    id="getkey-price"
+                    type="number"
+                    min={0}
+                    value={getkeyPrice}
+                    onChange={(e) => setGetkeyPrice(e.target.value)}
+                  />
+                  <p className="text-xs text-muted-foreground">Logged per issued key.</p>
+                </div>
+                <div className="space-y-2 sm:col-span-3">
+                  <Label>Server for trial keys</Label>
+                  <Select
+                    value={getkeyServerId || "auto"}
+                    onValueChange={(value) => setGetkeyServerId(value === "auto" ? "" : value)}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="auto">Auto — first active server</SelectItem>
+                      {(servers ?? []).map((server) => (
+                        <SelectItem key={server._id} value={server._id}>
+                          {server.name} ({server.code})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
               </CardContent>
             </Card>

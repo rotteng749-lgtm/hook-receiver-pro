@@ -6,10 +6,12 @@ import {
   Braces,
   KeyRound,
   LayoutDashboard,
+  Link2,
   Plug,
   Send,
   Server,
   Settings,
+  Sparkles,
   Users,
 } from "lucide-react";
 
@@ -21,6 +23,8 @@ const navItems = [
   { to: "/owner/endpoints", label: "Endpoints", icon: Plug, end: false },
   { to: "/owner/telegram", label: "Telegram", icon: Send, end: false },
   { to: "/owner/api", label: "API", icon: Braces, end: false },
+  { to: "/owner/getkey", label: "GetKey", icon: Sparkles, end: false },
+  { to: "/owner/shortener", label: "Shortener", icon: Link2, end: false },
   { to: "/owner/members", label: "Members", icon: Users, end: false },
   { to: "/owner/settings", label: "Settings", icon: Settings, end: false },
 ];
