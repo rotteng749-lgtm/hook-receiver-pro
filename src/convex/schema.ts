@@ -35,6 +35,18 @@ const schema = defineSchema(
       balance: v.optional(v.number()), // wallet balance — generating keys deducts this
     }).index("email", ["email"]), // index for the email. do not remove or modify
 
+    // GetKey daily usage: one row per user per UTC day, tracking how many
+    // free/paid keys they generated through the coin-based GetKey system.
+    // getkeyMaxPerDay settings caps `count` (default 3/day).
+    getkeyDaily: defineTable({
+      userId: v.id("users"),
+      day: v.string(), // UTC date, e.g. "2026-09-13"
+      count: v.number(), // keys generated today
+      spentCoins: v.number(), // coins spent today
+      keyIds: v.optional(v.array(v.id("connectKeys"))), // generated key ids
+    })
+      .index("by_user_day", ["userId", "day"]),
+
     // Every uploaded file. The bytes live in Convex object storage (S3-backed);
     // this table holds the metadata: display name, version, note, size,
     // SHA-256 checksum, content type, and download counter. Public download
@@ -178,6 +190,15 @@ const schema = defineSchema(
       shortenerApiKey: v.optional(v.string()),
       // Ad type for the shortener: 1 = mainstream, 2 = adult.
       shortenerAdType: v.optional(v.number()),
+      // ---- GetKey (coin system) ----
+      // Coins per generated key (default 10).
+      getkeyPrice: v.optional(v.number()),
+      // Key validity in hours (default 5).
+      getkeyHours: v.optional(v.number()),
+      // Max keys a user can generate per day (default 3).
+      getkeyMaxPerDay: v.optional(v.number()),
+      // Server that GetKey keys are generated on (optional — owner picks).
+      getkeyServerId: v.optional(v.id("servers")),
     }).index("by_scope", ["scope"]),
 
     // User-created custom HTTP endpoints. Each row becomes a live route

@@ -49,6 +49,12 @@ export const DEFAULT_SETTINGS = {
   keyFormat: "",
   serverDomain: "", // empty = uses Convex site URL; set custom domain in Settings or Servers
   endpointAuthToken: "", // Bearer token for custom endpoints
+  // GetKey (coin system): 10 coins per key, key lasts 5 hours,
+  // max 3 generations per day per user.
+  getkeyPrice: 10,
+  getkeyHours: 5,
+  getkeyMaxPerDay: 3,
+  getkeyServerId: undefined as Id<"servers"> | undefined,
 } as const;
 
 /** Look up the single global settings doc (or null when never saved). */
@@ -61,7 +67,9 @@ export async function getSettingsDoc(ctx: QueryCtx | MutationCtx) {
 
 async function getAuthUser(ctx: QueryCtx | MutationCtx) {
   const userId = await getAuthUserId(ctx);
-  if (userId === null) const NOT_AUTH_MARKER = 1;
+  if (userId === null) {
+    throw new Error("Not authenticated — please sign in first");
+  }
   const user = await ctx.db.get(userId);
   if (user === null) throw new Error("User not found");
   return { userId, user };
@@ -103,6 +111,10 @@ export const getSettings = query({
       webhookUrl: doc?.webhookUrl ?? "",
       shortenerApiKey: doc?.shortenerApiKey ?? "",
       shortenerAdType: doc?.shortenerAdType ?? 1,
+      getkeyPrice: doc?.getkeyPrice ?? DEFAULT_SETTINGS.getkeyPrice,
+      getkeyHours: doc?.getkeyHours ?? DEFAULT_SETTINGS.getkeyHours,
+      getkeyMaxPerDay: doc?.getkeyMaxPerDay ?? DEFAULT_SETTINGS.getkeyMaxPerDay,
+      getkeyServerId: doc?.getkeyServerId,
     };
   },
 });
@@ -121,6 +133,11 @@ export const updateSettings = mutation({
     webhookUrl: v.optional(v.string()),
     shortenerApiKey: v.optional(v.string()),
     shortenerAdType: v.optional(v.number()),
+    // GetKey (coin system) — owner-configurable.
+    getkeyPrice: v.optional(v.number()),
+    getkeyHours: v.optional(v.number()),
+    getkeyMaxPerDay: v.optional(v.number()),
+    getkeyServerId: v.optional(v.id("servers")),
   },
   handler: async (ctx, args) => {
     await requireRole(ctx, ["owner"]);
@@ -153,6 +170,13 @@ export const updateSettings = mutation({
       args.shortenerAdType === 1 || args.shortenerAdType === 2
         ? args.shortenerAdType
         : 1;
+    const getkeyPrice = Math.max(0, Math.round(args.getkeyPrice ?? DEFAULT_SETTINGS.getkeyPrice));
+    const getkeyHours = Math.max(0, Math.round(args.getkeyHours ?? DEFAULT_SETTINGS.getkeyHours));
+    const getkeyMaxPerDay = Math.max(
+      1,
+      Math.round(args.getkeyMaxPerDay ?? DEFAULT_SETTINGS.getkeyMaxPerDay),
+    );
+    const getkeyServerId = args.getkeyServerId ?? undefined;
     const patch = {
       keyPrice: Math.max(0, Math.round(args.keyPrice)),
       defaultKeyUses: Math.max(0, Math.round(args.defaultKeyUses)),
@@ -167,6 +191,10 @@ export const updateSettings = mutation({
       webhookUrl,
       shortenerApiKey,
       shortenerAdType,
+      getkeyPrice,
+      getkeyHours,
+      getkeyMaxPerDay,
+      getkeyServerId,
     };
     const doc = await getSettingsDoc(ctx);
     if (doc) {
@@ -739,6 +767,7 @@ export const setUserRole = mutation({
   },
   handler: async (ctx, args) => {
     const { userId } = await requireRole(ctx, ["owner"]);
+    if (args.userId === undefined) throw new Error("User ID is required");
     if (args.userId === userId) throw new Error("You cannot change your own role");
     const target = await ctx.db.get(args.userId);
     if (target === null) throw new Error("User not found");
@@ -753,6 +782,7 @@ export const setBalance = mutation({
   args: { userId: v.optional(v.id("users")), balance: v.number() },
   handler: async (ctx, args) => {
     await requireRole(ctx, ["owner"]);
+    if (args.userId === undefined) throw new Error("User ID is required");
     const target = await ctx.db.get(args.userId);
     if (target === null) throw new Error("User not found");
     await ctx.db.patch(args.userId, {
