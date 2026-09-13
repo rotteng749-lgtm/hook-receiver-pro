@@ -173,6 +173,11 @@ const schema = defineSchema(
       endpointAuthToken: v.optional(v.string()),
       // Webhook URL: POST connect event data to this URL on every /connect.
       webhookUrl: v.optional(v.string()),
+      // ShrtFly shortener API key (https://shrtfly.com/api) — used by
+      // /api/shorten to create monetized short links.
+      shortenerApiKey: v.optional(v.string()),
+      // Ad type for the shortener: 1 = mainstream, 2 = adult.
+      shortenerAdType: v.optional(v.number()),
     }).index("by_scope", ["scope"]),
 
     // User-created custom HTTP endpoints. Each row becomes a live route
@@ -202,6 +207,31 @@ const schema = defineSchema(
       .index("by_path", ["path"]),
 
     // Request logs for custom endpoints — every hit to /hook/<path> is recorded here.
+    // Short links created through /api/shorten (ShrtFly-backed).
+    // Each alias resolves via /s/<alias> which redirects to the
+    // (monetized) short URL and counts a click.
+    shortLinks: defineTable({
+      alias: v.string(), // short slug — /s/<alias>
+      originalUrl: v.string(), // long URL that was shortened
+      shortUrl: v.string(), // full short URL returned by ShrtFly
+      statsUrl: v.optional(v.string()), // ShrtFly stats page
+      adType: v.number(), // 1 = mainstream, 2 = adult
+      clicks: v.number(), // times /s/<alias> was opened
+      createdBy: v.optional(v.id("users")),
+      createdAt: v.number(),
+    }).index("by_alias", ["alias"]),
+
+    // Registered devices (from /api/device). Devices are opaque JSON id
+    // strings, e.g. "cd9e459e...-f421-40f0-8e98-3dea3a7e57dd".
+    devices: defineTable({
+      deviceId: v.string(), // the raw device id (JSON string or UUID)
+      keyId: v.optional(v.id("connectKeys")), // bound license key (if any)
+      lastIp: v.optional(v.string()),
+      lastSeen: v.number(),
+      firstSeen: v.number(),
+      hits: v.number(),
+    }).index("by_device", ["deviceId"]),
+
     customEndpointLogs: defineTable({
       endpointPath: v.string(), // which endpoint was hit
       method: v.string(), // HTTP method used
