@@ -14,10 +14,11 @@ import { api } from "@/convex/_generated/api";
 import { useAuth } from "@/hooks/use-auth";
 import { roleHome } from "@/lib/roles";
 import logo from "@/assets/logo.svg";
-import { useMutation } from "convex/react";
+import { useAction, useMutation } from "convex/react";
 import { ArrowRight, Loader2, Lock, User, ExternalLink } from "lucide-react";
 import { Suspense, useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
+import { Turnstile } from "@/components/Turnstile";
 
 interface AuthProps {
   redirectAfterAuth?: string;
@@ -46,11 +47,12 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
   const isRegister = mode === "register";
 
   const seedOwner = useMutation(api.nameserver.seedOwner);
-  const createMember = useMutation(api.nameserver.createMember);
+  const registerMember = useAction(api.public.registerMember);
   // Seeding is best-effort and must NEVER block signing in: if the owner
   // account already exists (or the mutation is slow) the form stays usable.
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [captchaToken, setCaptchaToken] = useState("");
 
   const seedRef = useRef<Promise<unknown> | null>(null);
 
@@ -119,11 +121,16 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
         return;
       }
 
-      await createMember({
+      if (captchaToken.length === 0) {
+        setError("Please complete the human check first.");
+        setIsLoading(false);
+        return;
+      }
+
+      await registerMember({
         username,
         password,
-        role: "user",
-        balance: 0,
+        turnstileToken: captchaToken,
       });
 
       // Auto sign-in after registration
@@ -135,6 +142,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
       navigate(redirect);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Registration failed.");
+      setCaptchaToken("");
       setIsLoading(false);
     }
   };
@@ -254,6 +262,15 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                         required
                       />
                     </div>
+                  </div>
+                )}
+
+                {isRegister && (
+                  <div className="flex flex-col items-center gap-2">
+                    <Turnstile onToken={setCaptchaToken} theme="dark" />
+                    <p className="text-xs text-muted-foreground">
+                      Cloudflare human check — stops bot registrations.
+                    </p>
                   </div>
                 )}
 

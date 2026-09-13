@@ -59,6 +59,7 @@ export const DEFAULT_SETTINGS = {
   getkeyPrice: 10,
   getkeyHours: 5,
   getkeyMaxPerDay: 3,
+  getkeyWeb: true,
   getkeyServerId: undefined as Id<"servers"> | undefined,
 } as const;
 
@@ -119,6 +120,7 @@ export const getSettings = query({
       getkeyPrice: doc?.getkeyPrice ?? DEFAULT_SETTINGS.getkeyPrice,
       getkeyHours: doc?.getkeyHours ?? DEFAULT_SETTINGS.getkeyHours,
       getkeyMaxPerDay: doc?.getkeyMaxPerDay ?? DEFAULT_SETTINGS.getkeyMaxPerDay,
+      getkeyWeb: doc?.getkeyWeb ?? DEFAULT_SETTINGS.getkeyWeb,
       getkeyServerId: doc?.getkeyServerId,
     };
   },
@@ -142,6 +144,7 @@ export const updateSettings = mutation({
     getkeyPrice: v.optional(v.number()),
     getkeyHours: v.optional(v.number()),
     getkeyMaxPerDay: v.optional(v.number()),
+    getkeyWeb: v.optional(v.boolean()),
     getkeyServerId: v.optional(v.id("servers")),
   },
   handler: async (ctx, args) => {
@@ -199,6 +202,7 @@ export const updateSettings = mutation({
       getkeyPrice,
       getkeyHours,
       getkeyMaxPerDay,
+      getkeyWeb: args.getkeyWeb ?? DEFAULT_SETTINGS.getkeyWeb,
       getkeyServerId,
     };
     const doc = await getSettingsDoc(ctx);
@@ -1905,6 +1909,11 @@ export const issueGetkey = internalMutation({
     const prefix = doc?.keyPrefix ?? DEFAULT_SETTINGS.keyPrefix;
     const keyFormat = doc?.keyFormat ?? "";
     const day = new Date().toISOString().slice(0, 10);
+
+    // The public /getkey page can be switched off by the owner.
+    if (tokenHash.startsWith("web:") && doc?.getkeyWeb === false) {
+      return { ok: false as const, reason: "web_disabled", used: 0, maxPerDay, hours };
+    }
 
     const usage = await ctx.db
       .query("getkeyDaily")

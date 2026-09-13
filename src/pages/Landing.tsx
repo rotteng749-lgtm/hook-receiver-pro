@@ -395,6 +395,9 @@ export default function Landing() {
             ) : (
               <>
                 <Button asChild variant="ghost" size="sm" className="cursor-pointer text-[#a8b2c1] hidden sm:flex">
+                  <Link to="/getkey">Free Key</Link>
+                </Button>
+                <Button asChild variant="ghost" size="sm" className="cursor-pointer text-[#a8b2c1] hidden sm:flex">
                   <Link to="/auth">Sign in</Link>
                 </Button>
                 <Button asChild size="sm" className="cursor-pointer bg-[#4a9a8e] hover:bg-[#5aaa9e] text-[#0f1419]">
@@ -617,9 +620,14 @@ export default function Landing() {
           <Network className="size-10 text-[#4a9a8e]" />
           <h2 className="mt-6 max-w-xl text-3xl sm:text-4xl font-bold tracking-tight text-foreground">Gate your clients, track every connect.</h2>
           <p className="mt-4 max-w-md text-[#a8b2c1]">Sign in as the owner, create your first server, generate a key, and connect your first client — all in under ten minutes.</p>
-          <Button asChild size="lg" className="mt-8 cursor-pointer bg-[#4a9a8e] hover:bg-[#5aaa9e] text-[#0f1419] font-semibold transition-all hover:glow-teal">
-            <Link to={ctaHref}>{isLoading ? "Loading…" : isAuthenticated ? "Open Panel" : "Get Started Free"} <ArrowRight className="ml-2 size-4" /></Link>
-          </Button>
+          <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
+            <Button asChild size="lg" className="cursor-pointer bg-[#4a9a8e] hover:bg-[#5aaa9e] text-[#0f1419] font-semibold transition-all hover:glow-teal">
+              <Link to={ctaHref}>{isLoading ? "Loading…" : isAuthenticated ? "Open Panel" : "Get Started Free"} <ArrowRight className="ml-2 size-4" /></Link>
+            </Button>
+            <Button asChild size="lg" variant="outline" className="cursor-pointer border-white/15 bg-transparent text-foreground hover:bg-white/10">
+              <Link to="/getkey"><KeyRound className="mr-2 size-4" /> Get a free trial key</Link>
+            </Button>
+          </div>
         </div>
       </Section>
 
@@ -640,6 +648,7 @@ export default function Landing() {
                 <li><a href="#features" className="hover:text-[#4a9a8e] transition-colors">Features</a></li>
                 <li><a href="#pricing" className="hover:text-[#4a9a8e] transition-colors">Pricing</a></li>
                 <li><Link to="/auth" className="hover:text-[#4a9a8e] transition-colors">Get Started</Link></li>
+                <li><Link to="/getkey" className="hover:text-[#4a9a8e] transition-colors">Free Trial Key</Link></li>
               </ul>
             </div>
             <div>

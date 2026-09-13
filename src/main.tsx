@@ -17,6 +17,7 @@ import "./index.css";
 // Lazy load route components for better code splitting
 const Landing = lazy(() => import("./pages/Landing.tsx"));
 const AuthPage = lazy(() => import("./pages/Auth.tsx"));
+const PublicGetKey = lazy(() => import("./pages/GetKey.tsx"));
 const UserHome = lazy(() => import("./pages/UserHome.tsx"));
 const OwnerPanel = lazy(() => import("./pages/owner/OwnerPanel.tsx"));
 const OwnerOverview = lazy(() => import("./pages/owner/Overview.tsx"));
@@ -144,6 +145,7 @@ createRoot(document.getElementById("root")!).render(
               <Routes>
                 <Route path="/" element={<Landing />} />
                 <Route path="/auth" element={<AuthPage />} />
+                <Route path="/getkey" element={<PublicGetKey />} />
 
                 {/* Owner panel — full control */}
                 <Route

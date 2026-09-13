@@ -198,6 +198,9 @@ const schema = defineSchema(
       getkeyHours: v.optional(v.number()),
       // Max keys a user can generate per day (default 3).
       getkeyMaxPerDay: v.optional(v.number()),
+      // Whether the public web page (/getkey) may hand out trial keys.
+      // Undefined = enabled.
+      getkeyWeb: v.optional(v.boolean()),
       // Server that GetKey keys are generated on (optional — owner picks).
       getkeyServerId: v.optional(v.id("servers")),
     }).index("by_scope", ["scope"]),

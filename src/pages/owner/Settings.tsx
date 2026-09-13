@@ -111,6 +111,7 @@ export default function SettingsPage() {
   const [getkeyHours, setGetkeyHours] = useState("5");
   const [getkeyMaxPerDay, setGetkeyMaxPerDay] = useState("3");
   const [getkeyServerId, setGetkeyServerId] = useState("");
+  const [getkeyWeb, setGetkeyWeb] = useState(true);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -129,6 +130,7 @@ export default function SettingsPage() {
       setGetkeyHours(String(settings.getkeyHours));
       setGetkeyMaxPerDay(String(settings.getkeyMaxPerDay));
       setGetkeyServerId(settings.getkeyServerId ?? "");
+      setGetkeyWeb(settings.getkeyWeb ?? true);
     }
   }, [settings]);
 
@@ -199,6 +201,7 @@ export default function SettingsPage() {
         getkeyPrice: Number(getkeyPrice) || 0,
         getkeyHours: Number(getkeyHours) || 0,
         getkeyMaxPerDay: Number(getkeyMaxPerDay) || 1,
+        getkeyWeb,
         getkeyServerId: getkeyServerId
           ? (getkeyServerId as Parameters<typeof updateSettings>[0]["getkeyServerId"])
           : undefined,
@@ -557,6 +560,19 @@ export default function SettingsPage() {
                     onChange={(e) => setGetkeyPrice(e.target.value)}
                   />
                   <p className="text-xs text-muted-foreground">Logged per issued key.</p>
+                </div>
+                <div className="flex items-center justify-between rounded-lg border border-border bg-muted/40 px-4 py-3 sm:col-span-3">
+                  <div>
+                    <p className="text-sm font-medium">Public free-key page</p>
+                    <p className="text-xs text-muted-foreground">
+                      Let visitors claim a trial key at /getkey (Cloudflare human check + daily cap).
+                    </p>
+                  </div>
+                  <Switch
+                    checked={getkeyWeb}
+                    onCheckedChange={setGetkeyWeb}
+                    aria-label="Public free-key page"
+                  />
                 </div>
                 <div className="space-y-2 sm:col-span-3">
                   <Label>Server for trial keys</Label>
