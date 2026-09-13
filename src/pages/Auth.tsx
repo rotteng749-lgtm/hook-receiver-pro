@@ -16,7 +16,7 @@ import { roleHome } from "@/lib/roles";
 import logo from "@/assets/logo.svg";
 import { useMutation } from "convex/react";
 import { ArrowRight, Loader2, Lock, User, ExternalLink } from "lucide-react";
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 
 interface AuthProps {
@@ -47,14 +47,18 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
 
   const seedOwner = useMutation(api.nameserver.seedOwner);
   const createMember = useMutation(api.nameserver.createMember);
-  const [seeding, setSeeding] = useState(true);
+  // Seeding is best-effort and must NEVER block signing in: if the owner
+  // account already exists (or the mutation is slow) the form stays usable.
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const seedRef = useRef<Promise<unknown> | null>(null);
+
   useEffect(() => {
-    void seedOwner()
-      .catch((err) => console.warn("seedOwner failed:", err))
-      .finally(() => setSeeding(false));
+    const promise = seedOwner().catch((err) => {
+      console.warn("seedOwner failed:", err);
+    });
+    seedRef.current = promise;
   }, [seedOwner]);
 
   useEffect(() => {
@@ -68,6 +72,14 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
     setIsLoading(true);
     setError(null);
     try {
+      // Give the seeded owner account a moment to exist (worst case 2.5s) so
+      // the very first sign-in after a cold start doesn't fail.
+      if (seedRef.current) {
+        await Promise.race([
+          seedRef.current.catch(() => undefined),
+          new Promise((resolve) => window.setTimeout(resolve, 2500)),
+        ]);
+      }
       const formData = new FormData(event.currentTarget);
       await signIn("password", {
         username: formData.get("username") as string,
@@ -200,7 +212,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                       placeholder="Enter your username"
                       autoComplete="username"
                       className="pl-10 h-11"
-                      disabled={isLoading || seeding}
+                      disabled={isLoading}
                       required
                     />
                   </div>
@@ -218,7 +230,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                       placeholder="••••••••"
                       autoComplete={isRegister ? "new-password" : "current-password"}
                       className="pl-10 h-11"
-                      disabled={isLoading || seeding}
+                      disabled={isLoading}
                       required
                     />
                   </div>
@@ -238,7 +250,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                         placeholder="••••••••"
                         autoComplete="new-password"
                         className="pl-10 h-11"
-                        disabled={isLoading || seeding}
+                        disabled={isLoading}
                         required
                       />
                     </div>
@@ -254,18 +266,16 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                 <Button
                   type="submit"
                   className="w-full h-11 cursor-pointer font-semibold"
-                  disabled={isLoading || seeding}
+                  disabled={isLoading}
                 >
-                  {isLoading || seeding ? (
+                  {isLoading ? (
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                   ) : (
                     <ArrowRight className="mr-2 h-4 w-4" />
                   )}
-                  {seeding
-                    ? "Preparing account…"
-                    : isLoading
-                      ? isRegister ? "Creating account…" : "Signing in…"
-                      : isRegister ? "Create Account" : "Sign In"}
+                  {isLoading
+                    ? isRegister ? "Creating account…" : "Signing in…"
+                    : isRegister ? "Create Account" : "Sign In"}
                 </Button>
               </CardContent>
             </form>

@@ -188,6 +188,8 @@ createRoot(document.getElementById("root")!).render(
 
                   <Route path="endpoints" element={<OwnerEndpoints />} />
                   <Route path="api" element={<ApiTokens />} />
+                  <Route path="getkey" element={<OwnerGetKey />} />
+                  <Route path="shortener" element={<OwnerShortener />} />
                 </Route>
 
                 {/* Regular accounts */}

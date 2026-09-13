@@ -6,8 +6,10 @@ import {
   Braces,
   KeyRound,
   LayoutDashboard,
+  Link2,
   Plug,
   Server,
+  Sparkles,
 } from "lucide-react";
 
 const navItems = [
@@ -17,6 +19,8 @@ const navItems = [
   { to: "/admin/connections", label: "Connections", icon: Activity, end: false },
   { to: "/admin/endpoints", label: "Endpoints", icon: Plug, end: false },
   { to: "/admin/api", label: "API", icon: Braces, end: false },
+  { to: "/admin/getkey", label: "GetKey", icon: Sparkles, end: false },
+  { to: "/admin/shortener", label: "Shortener", icon: Link2, end: false },
 ];
 
 export default function AdminPanel() {

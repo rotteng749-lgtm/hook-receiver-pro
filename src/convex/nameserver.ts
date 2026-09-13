@@ -2082,7 +2082,7 @@ export const mintTrialKey = mutation({
 export const resetGetkeyUsage = mutation({
   args: { id: v.optional(v.id("getkeyDaily")) },
   handler: async (ctx, { id }) => {
-    await requireRole(ctx, ["owner"]);
+    await requireRole(ctx, ["owner", "admin"]);
     if (id !== undefined) {
       await ctx.db.delete(id);
       return { deleted: 1 };
