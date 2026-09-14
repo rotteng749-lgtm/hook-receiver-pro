@@ -101,6 +101,18 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
 
   const handleSignIn = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    // Read the fields BEFORE any await — React nulls event.currentTarget
+    // after the first await, which crashed new FormData(event.currentTarget)
+    // and (worse) made correct logins look like "Invalid username or password".
+    const usernameInput = event.currentTarget.elements.namedItem(
+      "username",
+    ) as HTMLInputElement | null;
+    const passwordInput = event.currentTarget.elements.namedItem(
+      "password",
+    ) as HTMLInputElement | null;
+    const username = usernameInput?.value ?? "";
+    const password = passwordInput?.value ?? "";
+
     setIsLoading(true);
     setError(null);
     try {
@@ -110,9 +122,6 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
           new Promise((resolve) => window.setTimeout(resolve, 2500)),
         ]);
       }
-      const formData = new FormData(event.currentTarget);
-      const username = (formData.get("username") as string) ?? "";
-      const password = (formData.get("password") as string) ?? "";
       if (!username.trim()) {
         setError("Username is required.");
         setIsLoading(false);
@@ -128,14 +137,23 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
 
   const handleRegister = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    // Same pooled-event safety: read inputs before any await.
+    const usernameInput = event.currentTarget.elements.namedItem(
+      "username",
+    ) as HTMLInputElement | null;
+    const passwordInput = event.currentTarget.elements.namedItem(
+      "password",
+    ) as HTMLInputElement | null;
+    const confirmInput = event.currentTarget.elements.namedItem(
+      "confirmPassword",
+    ) as HTMLInputElement | null;
+    const username = (usernameInput?.value ?? "").trim();
+    const password = passwordInput?.value ?? "";
+    const confirmPassword = confirmInput?.value ?? "";
+
     setIsLoading(true);
     setError(null);
     try {
-      const formData = new FormData(event.currentTarget);
-      const username = (formData.get("username") as string).trim();
-      const password = formData.get("password") as string;
-      const confirmPassword = formData.get("confirmPassword") as string;
-
       if (username.length < 3) {
         setError("Username must be at least 3 characters.");
         setIsLoading(false);

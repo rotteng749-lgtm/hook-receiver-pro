@@ -204,6 +204,16 @@ function LoginForm() {
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    // Read fields BEFORE any await — React nulls e.currentTarget after the
+    // first await, which previously crashed new FormData(e.currentTarget).
+    const usernameInput = e.currentTarget.elements.namedItem(
+      "username",
+    ) as HTMLInputElement | null;
+    const passwordInput = e.currentTarget.elements.namedItem(
+      "password",
+    ) as HTMLInputElement | null;
+    const u = usernameInput?.value ?? "";
+    const p = passwordInput?.value ?? "";
     setIsLoading(true);
     setError(null);
     try {
@@ -213,9 +223,6 @@ function LoginForm() {
           new Promise((r) => window.setTimeout(r, 2500)),
         ]);
       }
-      const fd = new FormData(e.currentTarget);
-      const u = (fd.get("username") as string) ?? "";
-      const p = (fd.get("password") as string) ?? "";
       if (!u.trim()) {
         setError("Username is required.");
         setIsLoading(false);
