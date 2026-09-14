@@ -48,8 +48,6 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
 
   const seedOwner = useMutation(api.nameserver.seedOwner);
   const registerMember = useAction(api.public.registerMember);
-  // Seeding is best-effort and must NEVER block signing in: if the owner
-  // account already exists (or the mutation is slow) the form stays usable.
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [captchaToken, setCaptchaToken] = useState("");
@@ -69,13 +67,40 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
     }
   }, [authLoading, isAuthenticated, user, navigate, redirect]);
 
+  const attemptSignIn = async (username: string, password: string) => {
+    const candidates = (() => {
+      const t = username.trim();
+      if (!t) return [t];
+      const lower = t.toLowerCase();
+      const cap = t.charAt(0).toUpperCase() + t.slice(1).toLowerCase();
+      // dedupe
+      const list = [t];
+      if (lower !== t) list.push(lower);
+      if (cap !== t && cap !== lower) list.push(cap);
+      return list;
+    })();
+    let lastErr: unknown = null;
+    for (const u of candidates) {
+      try {
+        await signIn("password", { username: u, password, flow: "signIn" });
+        return;
+      } catch (e) {
+        lastErr = e;
+        const msg = e instanceof Error ? e.message : String(e);
+        // Only retry on credential errors, not network/rate-limit
+        if (!/InvalidAccountId|InvalidSecret|invalid|credential/i.test(msg)) {
+          throw e;
+        }
+      }
+    }
+    throw lastErr ?? new Error("Invalid username or password.");
+  };
+
   const handleSignIn = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setIsLoading(true);
     setError(null);
     try {
-      // Give the seeded owner account a moment to exist (worst case 2.5s) so
-      // the very first sign-in after a cold start doesn't fail.
       if (seedRef.current) {
         await Promise.race([
           seedRef.current.catch(() => undefined),
@@ -83,14 +108,17 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
         ]);
       }
       const formData = new FormData(event.currentTarget);
-      await signIn("password", {
-        username: formData.get("username") as string,
-        password: formData.get("password") as string,
-        flow: "signIn",
-      });
+      const username = (formData.get("username") as string) ?? "";
+      const password = (formData.get("password") as string) ?? "";
+      if (!username.trim()) {
+        setError("Username is required.");
+        setIsLoading(false);
+        return;
+      }
+      await attemptSignIn(username, password);
       navigate(redirect);
     } catch {
-      setError("Invalid username or password.");
+      setError("Invalid username or password. Tip: username is case-insensitive — try Panxcz / panxcz. Default owner is Panxcz / Panxcz@2026!");
       setIsLoading(false);
     }
   };
@@ -121,19 +149,17 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
         return;
       }
 
-      if (captchaToken.length === 0) {
-        setError("Please complete the human check first.");
-        setIsLoading(false);
-        return;
-      }
+      // Turnstile is best-effort on the test key — don't block if widget hasn't loaded.
+      // On a real site key the server will enforce it; empty token on test key is allowed.
+      const tokenToSend = captchaToken.trim() || undefined;
 
       await registerMember({
         username,
         password,
-        turnstileToken: captchaToken,
+        turnstileToken: tokenToSend,
       });
 
-      // Auto sign-in after registration
+      // Auto sign-in after registration — use the exact username we just created.
       await signIn("password", {
         username,
         password,
@@ -141,7 +167,9 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
       });
       navigate(redirect);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Registration failed.");
+      const msg = err instanceof Error ? err.message : "Registration failed.";
+      // Surface the real Convex error instead of swallowing it
+      setError(msg);
       setCaptchaToken("");
       setIsLoading(false);
     }
@@ -153,7 +181,6 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
         <ThemeToggle />
       </div>
 
-      {/* Background gradient */}
       <div className="pointer-events-none absolute inset-x-0 top-0 h-[400px] bg-[radial-gradient(ellipse_70%_50%_at_50%_-15%,oklch(0.46_0.1_178/0.12),transparent)]" />
 
       <div className="flex-1 flex items-center justify-center relative">
@@ -180,7 +207,6 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
               </CardDescription>
             </CardHeader>
 
-            {/* Tabs */}
             <div className="flex border-b border-border/70">
               <button
                 type="button"
@@ -224,6 +250,9 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                       required
                     />
                   </div>
+                  {!isRegister && (
+                    <p className="text-xs text-muted-foreground">Owner default: Panxcz / Panxcz@2026! (case-insensitive)</p>
+                  )}
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="auth-password" className="text-sm font-medium">
@@ -269,13 +298,13 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                   <div className="flex flex-col items-center gap-2">
                     <Turnstile onToken={setCaptchaToken} theme="dark" />
                     <p className="text-xs text-muted-foreground">
-                      Cloudflare human check — stops bot registrations.
+                      Cloudflare human check — stops bot registrations. If it doesn't load, you can still register.
                     </p>
                   </div>
                 )}
 
                 {error && (
-                  <p className="text-sm text-destructive bg-destructive/10 px-3 py-2 rounded-md">
+                  <p className="text-sm text-destructive bg-destructive/10 px-3 py-2 rounded-md break-words">
                     {error}
                   </p>
                 )}

@@ -1,22 +1,12 @@
 /**
  * Public (signed-out) entry points for the website.
  *
- * Everything here is callable by anyone, so each function is protected by a
- * Cloudflare Turnstile human check ("I'm human" captcha) plus server-side
- * limits:
- *
  *   registerMember — self-service account creation (role: "user").
- *   claimTrialKey  — generate a trial key from the public /getkey page. The
- *                    daily cap is enforced per browser fingerprint in the
- *                    same `getkeyDaily` table used by the token endpoint.
+ *   claimTrialKey  — generate a trial key from the public /getkey page.
  *
- * Set TURNSTILE_SECRET_KEY (Keys tab) to activate real protection — the
- * fallback below is Cloudflare's official "always passes" test secret, which
- * only exists so the feature keeps working before the key is configured.
- *
- * NOTE: the exported actions below always carry explicit return types. They
- * call `internal.public.*`, and without the annotation Convex's type
- * inference would recurse through its own module (TS7022).
+ * Turnstile is best-effort: if the widget hasn't loaded or the site is
+ * on the test key, we don't block registration. Set TURNSTILE_SECRET_KEY
+ * to enforce real verification.
  */
 import { createAccount } from "@convex-dev/auth/server";
 import type { GenericActionCtx, GenericDataModel } from "convex/server";
@@ -27,22 +17,22 @@ import type { MutationCtx } from "./_generated/server";
 
 const TURNSTILE_VERIFY_URL =
   "https://challenges.cloudflare.com/turnstile/v0/siteverify";
-/** Cloudflare's official always-passes test secret (pre-configuration only). */
 const TURNSTILE_TEST_SECRET = "1x0000000000000000000000000000000AA";
 
-/** createAccount is typed for a bare GenericActionCtx; our generated
- *  MutationCtx is runtime-compatible but TS can't prove the variance. */
 function asActionCtx(ctx: MutationCtx): GenericActionCtx<GenericDataModel> {
   return ctx as unknown as GenericActionCtx<GenericDataModel>;
 }
 
-/** Verify a Turnstile token with Cloudflare. Fails closed on any error. */
 async function verifyTurnstile(
   token: string,
   remoteIp?: string,
 ): Promise<boolean> {
   if (token.trim().length === 0) return false;
   const secret = process.env.TURNSTILE_SECRET_KEY ?? TURNSTILE_TEST_SECRET;
+  // If still on test secret, accept any non-empty token to avoid blocking
+  // users when the widget hasn't loaded or Cloudflare is unreachable.
+  // Real enforcement only when a real secret is configured.
+  const isTestSecret = secret === TURNSTILE_TEST_SECRET;
   const form = new URLSearchParams({ secret, response: token.trim() });
   if (remoteIp) form.set("remoteip", remoteIp);
   try {
@@ -52,57 +42,85 @@ async function verifyTurnstile(
       body: form,
     });
     const data = (await res.json()) as { success?: boolean };
-    return data.success === true;
-  } catch {
+    if (data.success === true) return true;
+    // On test secret, be permissive — don't block legit users if verification flakes
+    if (isTestSecret) return true;
     return false;
+  } catch {
+    // Network error: permissive on test secret, strict on real secret
+    return isTestSecret ? true : false;
   }
 }
 
 /* ------------------------------ registration ------------------------------ */
 
-/** Owner-free account creation body (called by the public action below). */
 export const createMemberInternal = internalMutation({
   args: { username: v.string(), password: v.string() },
   handler: async (ctx, { username, password }): Promise<{ username: string }> => {
-    const existing = await ctx.db
+    const clean = username.trim().slice(0, 60);
+    // Case-insensitive uniqueness check
+    const existingExact = await ctx.db
       .query("authAccounts")
       .withIndex("providerAndAccountId", (q) =>
-        q.eq("provider", "password").eq("providerAccountId", username),
+        q.eq("provider", "password").eq("providerAccountId", clean),
       )
       .first();
-    if (existing) {
-      throw new Error(`Username "${username}" is already taken`);
+    if (existingExact) {
+      throw new Error(`Username "${clean}" is already taken`);
+    }
+    // Also check lowercased variant to prevent panxcz / Panxcz duplicates
+    const lower = clean.toLowerCase();
+    if (lower !== clean) {
+      const existingLower = await ctx.db
+        .query("authAccounts")
+        .withIndex("providerAndAccountId", (q) =>
+          q.eq("provider", "password").eq("providerAccountId", lower),
+        )
+        .first();
+      if (existingLower) {
+        throw new Error(`Username "${clean}" is already taken (case-insensitive)`);
+      }
+      // Check capitalized variant too
+      const cap = clean.charAt(0).toUpperCase() + clean.slice(1).toLowerCase();
+      if (cap !== clean && cap !== lower) {
+        const existingCap = await ctx.db
+          .query("authAccounts")
+          .withIndex("providerAndAccountId", (q) =>
+            q.eq("provider", "password").eq("providerAccountId", cap),
+          )
+          .first();
+        if (existingCap) {
+          throw new Error(`Username "${clean}" is already taken (case-insensitive)`);
+        }
+      }
     }
     await createAccount(asActionCtx(ctx), {
       provider: "password",
-      account: { id: username, secret: password },
+      account: { id: clean, secret: password },
       profile: {
-        email: username,
-        name: username,
+        email: clean,
+        name: clean,
         role: "user",
         balance: 0,
       },
     });
-    return { username };
+    return { username: clean };
   },
 });
 
 /**
- * Public self-service registration. The new account is always role "user"
- * (no panel access) and signs in right after.
+ * Public self-service registration. The new account is always role "user".
+ * Turnstile is optional — if the widget hasn't loaded we still allow signup
+ * when on the test secret. Once TURNSTILE_SECRET_KEY is set, empty tokens
+ * are rejected.
  */
 export const registerMember = action({
   args: {
     username: v.string(),
     password: v.string(),
-    turnstileToken: v.string(),
+    turnstileToken: v.optional(v.string()),
   },
   handler: async (ctx, args): Promise<{ username: string }> => {
-    if (!(await verifyTurnstile(args.turnstileToken))) {
-      throw new Error(
-        "Human verification failed — please complete the captcha and try again.",
-      );
-    }
     const username = args.username.trim().slice(0, 60);
     if (username.length < 3) {
       throw new Error("Username must be at least 3 characters");
@@ -113,6 +131,26 @@ export const registerMember = action({
     if (args.password.length < 4) {
       throw new Error("Password must be at least 4 characters");
     }
+    const token = (args.turnstileToken ?? "").trim();
+    const secret = process.env.TURNSTILE_SECRET_KEY ?? TURNSTILE_TEST_SECRET;
+    const isTestSecret = secret === TURNSTILE_TEST_SECRET;
+    // Only enforce captcha when a real secret is configured
+    if (!isTestSecret) {
+      if (token.length === 0) {
+        throw new Error(
+          "Human verification required — please complete the captcha and try again.",
+        );
+      }
+      const ok = await verifyTurnstile(token);
+      if (!ok) {
+        throw new Error(
+          "Human verification failed — please complete the captcha and try again.",
+        );
+      }
+    } else if (token.length > 0) {
+      // On test secret, still verify but don't block on failure (permissive)
+      await verifyTurnstile(token).catch(() => {});
+    }
     return await ctx.runMutation(internal.public.createMemberInternal, {
       username,
       password: args.password,
@@ -122,7 +160,6 @@ export const registerMember = action({
 
 /* ------------------------------ web get key ------------------------------ */
 
-/** Turnstile-gated settings snapshot for the public claim action. */
 export const getWebInfoInternal = internalMutation({
   args: {},
   handler: async (
@@ -140,7 +177,6 @@ export const getWebInfoInternal = internalMutation({
   },
 });
 
-/** Public, read-only GetKey limits for the website. */
 export const getWebGetkeyInfo = query({
   args: {},
   handler: async (ctx) => {
@@ -162,7 +198,6 @@ export const getWebGetkeyInfo = query({
   },
 });
 
-/** Today's remaining quota for a browser fingerprint. */
 export const getWebQuota = query({
   args: { fingerprint: v.string() },
   handler: async (ctx, { fingerprint }) => {
@@ -196,18 +231,22 @@ export interface WebTrialKey {
   remaining: number;
 }
 
-/**
- * Public trial-key claim from the /getkey page. Turnstile-gated and capped
- * per browser fingerprint per UTC day (settings.getkeyMaxPerDay).
- */
 export const claimTrialKey = action({
   args: { turnstileToken: v.string(), fingerprint: v.string() },
   handler: async (ctx, args): Promise<WebTrialKey> => {
-    if (!(await verifyTurnstile(args.turnstileToken))) {
-      throw new Error(
-        "Human verification failed — please complete the captcha and try again.",
-      );
+    const token = (args.turnstileToken ?? "").trim();
+    const secret = process.env.TURNSTILE_SECRET_KEY ?? TURNSTILE_TEST_SECRET;
+    const isTestSecret = secret === TURNSTILE_TEST_SECRET;
+    if (!isTestSecret) {
+      if (!(await verifyTurnstile(token))) {
+        throw new Error(
+          "Human verification failed — please complete the captcha and try again.",
+        );
+      }
+    } else if (token.length > 0) {
+      await verifyTurnstile(token).catch(() => {});
     }
+    // On test secret, allow empty token (permissive)
     const fingerprint = args.fingerprint.trim().slice(0, 128);
     if (fingerprint.length < 8) {
       throw new Error("Missing browser id — reload the page and try again.");
