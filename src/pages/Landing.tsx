@@ -36,6 +36,8 @@ import {
   ChevronLeft,
   ChevronRight,
   Coins,
+  Eye,
+  EyeOff,
   ExternalLink,
   Gamepad2,
   Globe,
@@ -62,6 +64,7 @@ import { Link, useNavigate } from "react-router";
 import { Suspense, useEffect, useRef, useState } from "react";
 import { useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
+import { describeAuthError } from "@/lib/auth-errors";
 
 /* ------------------------------------------------------------------ */
 /*  Animations                                                         */
@@ -167,6 +170,7 @@ function LoginForm() {
   const seedOwner = useMutation(api.nameserver.seedOwner);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showPassword, setShowPassword] = useState(false);
   const home = roleHome(user?.role);
   const seedRef = useRef<Promise<unknown> | null>(null);
 
@@ -219,8 +223,8 @@ function LoginForm() {
       }
       await attemptSignIn(u, p);
       navigate(home);
-    } catch {
-      setError("Invalid username or password. Try Panxcz / Panxcz@2026!");
+    } catch (err) {
+      setError(describeAuthError(err));
       setIsLoading(false);
     }
   };
@@ -238,7 +242,10 @@ function LoginForm() {
         <Label htmlFor="ls-pass" className="text-sm font-medium text-silver">Password</Label>
         <div className="relative">
           <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input id="ls-pass" name="password" type="password" placeholder="••••••••" autoComplete="current-password" className="pl-10 h-11 glass border-white/10 text-foreground placeholder:text-muted-foreground" disabled={isLoading} required />
+          <Input id="ls-pass" name="password" type={showPassword ? "text" : "password"} placeholder="••••••••" autoComplete="current-password" className="pl-10 pr-10 h-11 glass border-white/10 text-foreground placeholder:text-muted-foreground" disabled={isLoading} required />
+          <button type="button" onClick={() => setShowPassword((v) => !v)} aria-label={showPassword ? "Hide password" : "Show password"} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors cursor-pointer">
+            {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+          </button>
         </div>
       </div>
       {error && <p className="text-sm text-red-400 bg-red-500/10 px-3 py-2 rounded-md break-words">{error}</p>}
@@ -250,7 +257,9 @@ function LoginForm() {
         <Link to="/auth?mode=register" className="text-[#4a9a8e] hover:underline font-medium">Register</Link>
         <a href="https://t.me/" target="_blank" rel="noopener noreferrer" className="text-muted-foreground hover:text-foreground flex items-center gap-1">Support <ExternalLink className="size-3" /></a>
       </div>
-      <p className="text-[11px] text-muted-foreground/70 text-center">Owner default Panxcz / Panxcz@2026! • <Link to="/getkey" className="text-[#4a9a8e] hover:underline">Get free trial key</Link></p>
+      <p className="text-[11px] text-muted-foreground/70 text-center">
+        <Link to="/getkey" className="text-[#4a9a8e] hover:underline">Get free trial key</Link>
+      </p>
     </form>
   );
 }

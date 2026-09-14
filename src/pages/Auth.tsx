@@ -11,11 +11,12 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
 import { api } from "@/convex/_generated/api";
+import { describeAuthError } from "@/lib/auth-errors";
 import { useAuth } from "@/hooks/use-auth";
 import { roleHome } from "@/lib/roles";
 import logo from "@/assets/logo.svg";
 import { useAction, useMutation } from "convex/react";
-import { ArrowRight, Loader2, Lock, User, ExternalLink } from "lucide-react";
+import { ArrowRight, Eye, EyeOff, Loader2, Lock, User, ExternalLink } from "lucide-react";
 import { Suspense, useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import { Turnstile } from "@/components/Turnstile";
@@ -96,6 +97,8 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
     throw lastErr ?? new Error("Invalid username or password.");
   };
 
+  const [showPassword, setShowPassword] = useState(false);
+
   const handleSignIn = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setIsLoading(true);
@@ -117,8 +120,8 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
       }
       await attemptSignIn(username, password);
       navigate(redirect);
-    } catch {
-      setError("Invalid username or password. Tip: username is case-insensitive — try Panxcz / panxcz. Default owner is Panxcz / Panxcz@2026!");
+    } catch (err) {
+      setError(describeAuthError(err));
       setIsLoading(false);
     }
   };
@@ -167,9 +170,8 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
       });
       navigate(redirect);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "Registration failed.";
       // Surface the real Convex error instead of swallowing it
-      setError(msg);
+      setError(describeAuthError(err));
       setCaptchaToken("");
       setIsLoading(false);
     }
@@ -250,9 +252,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                       required
                     />
                   </div>
-                  {!isRegister && (
-                    <p className="text-xs text-muted-foreground">Owner default: Panxcz / Panxcz@2026! (case-insensitive)</p>
-                  )}
+
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="auth-password" className="text-sm font-medium">
@@ -263,13 +263,21 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                     <Input
                       id="auth-password"
                       name="password"
-                      type="password"
+                      type={showPassword ? "text" : "password"}
                       placeholder="••••••••"
                       autoComplete={isRegister ? "new-password" : "current-password"}
-                      className="pl-10 h-11"
+                      className="pl-10 pr-10 h-11"
                       disabled={isLoading}
                       required
                     />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword((v) => !v)}
+                      aria-label={showPassword ? "Hide password" : "Show password"}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                    >
+                      {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
                   </div>
                 </div>
 
