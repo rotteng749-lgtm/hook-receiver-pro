@@ -55,6 +55,7 @@ import {
   TerminalSquare,
   User,
   Users,
+  X,
   Zap,
 } from "lucide-react";
 import { Link, useNavigate } from "react-router";
@@ -164,28 +165,64 @@ function LoginForm() {
   const { isLoading: authLoading, isAuthenticated, user, signIn } = useAuth();
   const navigate = useNavigate();
   const seedOwner = useMutation(api.nameserver.seedOwner);
-  const [seeding, setSeeding] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const home = roleHome(user?.role);
+  const seedRef = useRef<Promise<unknown> | null>(null);
 
   useEffect(() => {
-    void seedOwner().catch(() => {}).finally(() => setSeeding(false));
+    const p = seedOwner().catch((e) => console.warn("seedOwner", e));
+    seedRef.current = p;
   }, [seedOwner]);
 
   useEffect(() => {
     if (!authLoading && isAuthenticated && user !== undefined) navigate(home);
   }, [authLoading, isAuthenticated, user, navigate, home]);
 
+  const attemptSignIn = async (username: string, password: string) => {
+    const t = username.trim();
+    const lower = t.toLowerCase();
+    const cap = t.charAt(0).toUpperCase() + t.slice(1).toLowerCase();
+    const candidates = [t, lower, cap].filter((v, i, a) => v && a.indexOf(v) === i);
+    let lastErr: unknown = null;
+    for (const u of candidates) {
+      try {
+        await signIn("password", { username: u, password, flow: "signIn" });
+        return;
+      } catch (e) {
+        lastErr = e;
+        const msg = e instanceof Error ? e.message : String(e);
+        if (!/InvalidAccountId|InvalidSecret|invalid|credential/i.test(msg)) throw e;
+      }
+    }
+    throw lastErr ?? new Error("Invalid username or password.");
+  };
+
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setIsLoading(true);
     setError(null);
     try {
+      if (seedRef.current) {
+        await Promise.race([
+          seedRef.current.catch(() => undefined),
+          new Promise((r) => window.setTimeout(r, 2500)),
+        ]);
+      }
       const fd = new FormData(e.currentTarget);
-      await signIn("password", { username: fd.get("username") as string, password: fd.get("password") as string, flow: "signIn" });
+      const u = (fd.get("username") as string) ?? "";
+      const p = (fd.get("password") as string) ?? "";
+      if (!u.trim()) {
+        setError("Username is required.");
+        setIsLoading(false);
+        return;
+      }
+      await attemptSignIn(u, p);
       navigate(home);
-    } catch { setError("Invalid username or password."); setIsLoading(false); }
+    } catch {
+      setError("Invalid username or password. Try Panxcz / Panxcz@2026!");
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -194,25 +231,26 @@ function LoginForm() {
         <Label htmlFor="ls-user" className="text-sm font-medium text-silver">Username</Label>
         <div className="relative">
           <User className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input id="ls-user" name="username" placeholder="Enter username" autoComplete="username" className="pl-10 h-11 glass border-white/10 text-foreground placeholder:text-muted-foreground" disabled={isLoading || seeding} required />
+          <Input id="ls-user" name="username" placeholder="Enter username" autoComplete="username" className="pl-10 h-11 glass border-white/10 text-foreground placeholder:text-muted-foreground" disabled={isLoading} required />
         </div>
       </div>
       <div className="space-y-2">
         <Label htmlFor="ls-pass" className="text-sm font-medium text-silver">Password</Label>
         <div className="relative">
           <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input id="ls-pass" name="password" type="password" placeholder="••••••••" autoComplete="current-password" className="pl-10 h-11 glass border-white/10 text-foreground placeholder:text-muted-foreground" disabled={isLoading || seeding} required />
+          <Input id="ls-pass" name="password" type="password" placeholder="••••••••" autoComplete="current-password" className="pl-10 h-11 glass border-white/10 text-foreground placeholder:text-muted-foreground" disabled={isLoading} required />
         </div>
       </div>
-      {error && <p className="text-sm text-red-400 bg-red-500/10 px-3 py-2 rounded-md">{error}</p>}
-      <Button type="submit" className="w-full h-11 cursor-pointer font-semibold bg-[#4a9a8e] hover:bg-[#5aaa9e] text-[#0f1419] transition-all hover:glow-teal" disabled={isLoading || seeding}>
-        {isLoading || seeding ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ArrowRight className="mr-2 h-4 w-4" />}
-        {seeding ? "Preparing…" : isLoading ? "Signing in…" : "Sign In"}
+      {error && <p className="text-sm text-red-400 bg-red-500/10 px-3 py-2 rounded-md break-words">{error}</p>}
+      <Button type="submit" className="w-full h-11 cursor-pointer font-semibold bg-[#4a9a8e] hover:bg-[#5aaa9e] text-[#0f1419] transition-all hover:glow-teal" disabled={isLoading}>
+        {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ArrowRight className="mr-2 h-4 w-4" />}
+        {isLoading ? "Signing in…" : "Sign In"}
       </Button>
       <div className="flex items-center justify-between text-sm pt-1">
         <Link to="/auth?mode=register" className="text-[#4a9a8e] hover:underline font-medium">Register</Link>
         <a href="https://t.me/" target="_blank" rel="noopener noreferrer" className="text-muted-foreground hover:text-foreground flex items-center gap-1">Support <ExternalLink className="size-3" /></a>
       </div>
+      <p className="text-[11px] text-muted-foreground/70 text-center">Owner default Panxcz / Panxcz@2026! • <Link to="/getkey" className="text-[#4a9a8e] hover:underline">Get free trial key</Link></p>
     </form>
   );
 }
@@ -280,7 +318,7 @@ function ContactForm() {
     const errs: Record<string, string> = {};
     if (!form.name.trim()) errs.name = "Name is required";
     if (!form.email.trim()) errs.email = "Email is required";
-    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) errs.email = "Invalid email";
+    else if (!/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(form.email)) errs.email = "Invalid email";
     if (!form.subject.trim()) errs.subject = "Subject is required";
     if (!form.message.trim()) errs.message = "Message is required";
     else if (form.message.trim().length < 10) errs.message = "Message must be at least 10 characters";
@@ -370,6 +408,7 @@ export default function Landing() {
   const ctaHref = isAuthenticated ? home : "/auth";
   const [newsletter, setNewsletter] = useState("");
   const [subscribed, setSubscribed] = useState(false);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   return (
     <div className="min-h-screen bg-[#0f1419] text-[#a8b2c1] overflow-x-hidden">
@@ -380,33 +419,67 @@ export default function Landing() {
             <img src={logo} alt="Panxcz" width={28} height={28} className="rounded-md" />
             <span className="text-[15px] font-bold tracking-tight text-foreground">Panxcz</span>
           </Link>
-          <nav className="hidden md:flex items-center gap-8 text-sm">
+          <nav className="hidden md:flex items-center gap-6 text-sm">
             <a href="#features" className="text-[#a8b2c1] hover:text-[#4a9a8e] transition-colors">Features</a>
             <a href="#pricing" className="text-[#a8b2c1] hover:text-[#4a9a8e] transition-colors">Pricing</a>
             <a href="#testimonials" className="text-[#a8b2c1] hover:text-[#4a9a8e] transition-colors">Testimonials</a>
             <a href="#team" className="text-[#a8b2c1] hover:text-[#4a9a8e] transition-colors">Team</a>
             <a href="#contact" className="text-[#a8b2c1] hover:text-[#4a9a8e] transition-colors">Contact</a>
+            <Link to="/getkey" className="inline-flex items-center gap-1.5 rounded-full border border-[#4a9a8e]/30 bg-[#4a9a8e]/10 px-3 py-1 text-xs font-semibold text-[#7fd0c2] hover:bg-[#4a9a8e]/20 transition-colors">
+              <KeyRound className="size-3.5" /> GetKey
+            </Link>
           </nav>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 sm:gap-3">
             {isAuthenticated ? (
               <Button asChild size="sm" className="cursor-pointer bg-[#4a9a8e] hover:bg-[#5aaa9e] text-[#0f1419]">
                 <Link to={home}>Panel <ArrowRight className="size-4 ml-1" /></Link>
               </Button>
             ) : (
               <>
-                <Button asChild variant="ghost" size="sm" className="cursor-pointer text-[#a8b2c1] hidden sm:flex">
-                  <Link to="/getkey">Free Key</Link>
-                </Button>
-                <Button asChild variant="ghost" size="sm" className="cursor-pointer text-[#a8b2c1] hidden sm:flex">
+                <Button asChild variant="ghost" size="sm" className="hidden sm:inline-flex cursor-pointer text-[#a8b2c1]">
                   <Link to="/auth">Sign in</Link>
                 </Button>
-                <Button asChild size="sm" className="cursor-pointer bg-[#4a9a8e] hover:bg-[#5aaa9e] text-[#0f1419]">
+                <Button asChild size="sm" className="cursor-pointer bg-[#4a9a8e] hover:bg-[#5aaa9e] text-[#0f1419] hidden sm:inline-flex">
                   <Link to="/auth?mode=register">Get Started</Link>
                 </Button>
+                <Link to="/getkey" className="inline-flex sm:hidden items-center gap-1 rounded-full border border-[#4a9a8e]/30 bg-[#4a9a8e]/15 px-3 py-1.5 text-xs font-semibold text-[#7fd0c2]">
+                  <KeyRound className="size-3.5" /> GetKey
+                </Link>
+                <button
+                  type="button"
+                  onClick={() => setMobileNavOpen((v) => !v)}
+                  className="md:hidden inline-flex size-9 items-center justify-center rounded-lg border border-white/10 text-[#a8b2c1] hover:text-foreground hover:bg-white/5 transition-colors"
+                  aria-label="Open menu"
+                >
+                  {mobileNavOpen ? <X className="size-5" /> : <span className="text-[11px] font-bold">☰</span>}
+                </button>
               </>
             )}
           </div>
         </div>
+        {/* Mobile dropdown */}
+        {mobileNavOpen && (
+          <div className="md:hidden border-t border-white/10 bg-[#0f1419]/95 backdrop-blur-xl">
+            <nav className="mx-auto max-w-7xl px-4 py-4 flex flex-col gap-1 text-sm">
+              <a href="#features" onClick={() => setMobileNavOpen(false)} className="rounded-lg px-3 py-2.5 hover:bg-white/5 text-[#a8b2c1] hover:text-foreground">Features</a>
+              <a href="#pricing" onClick={() => setMobileNavOpen(false)} className="rounded-lg px-3 py-2.5 hover:bg-white/5 text-[#a8b2c1] hover:text-foreground">Pricing</a>
+              <a href="#testimonials" onClick={() => setMobileNavOpen(false)} className="rounded-lg px-3 py-2.5 hover:bg-white/5 text-[#a8b2c1] hover:text-foreground">Testimonials</a>
+              <a href="#team" onClick={() => setMobileNavOpen(false)} className="rounded-lg px-3 py-2.5 hover:bg-white/5 text-[#a8b2c1] hover:text-foreground">Team</a>
+              <a href="#contact" onClick={() => setMobileNavOpen(false)} className="rounded-lg px-3 py-2.5 hover:bg-white/5 text-[#a8b2c1] hover:text-foreground">Contact</a>
+              <Link to="/getkey" onClick={() => setMobileNavOpen(false)} className="rounded-lg px-3 py-2.5 bg-[#4a9a8e]/15 border border-[#4a9a8e]/30 text-[#7fd0c2] font-semibold flex items-center gap-2">
+                <KeyRound className="size-4" /> Get Free Key
+              </Link>
+              <div className="flex gap-2 pt-2">
+                <Button asChild variant="outline" className="flex-1 glass border-white/10">
+                  <Link to="/auth" onClick={() => setMobileNavOpen(false)}>Sign in</Link>
+                </Button>
+                <Button asChild className="flex-1 bg-[#4a9a8e] hover:bg-[#5aaa9e] text-[#0f1419]">
+                  <Link to="/auth?mode=register" onClick={() => setMobileNavOpen(false)}>Register</Link>
+                </Button>
+              </div>
+            </nav>
+          </div>
+        )}
       </header>
 
       {/* ─── Hero ─── */}
