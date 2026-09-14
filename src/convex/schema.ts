@@ -88,6 +88,10 @@ const schema = defineSchema(
       label: v.string(), // e.g. "api-login" or a user-chosen name
       createdAt: v.number(),
       expiresAt: v.number(), // epoch ms
+      // Coin balance for the GetKey claim economy. Each trial-key claim
+      // costs settings.getkeyPrice coins (default 10). Top-ups are done by
+      // the owner (panel/Telegram) after payment via the support channel.
+      coins: v.optional(v.number()),
     }).index("by_hash", ["tokenHash"]),
 
     // Failed login attempts, used for per-IP rate limiting (5/min).

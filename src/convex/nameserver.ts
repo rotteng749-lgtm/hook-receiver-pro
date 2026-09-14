@@ -1910,6 +1910,29 @@ export const issueGetkey = internalMutation({
     const keyFormat = doc?.keyFormat ?? "";
     const day = new Date().toISOString().slice(0, 10);
 
+    // Coin economy: a claim must pay settings.getkeyPrice coins from the
+    // owning system token's balance (default 10/claim). The daily cap still
+    // applies on top of coins.
+    const tokenDoc = await ctx.db
+      .query("apiTokens")
+      .withIndex("by_hash", (q) => q.eq("tokenHash", tokenHash))
+      .first();
+    const balance = tokenDoc?.coins ?? 0;
+    if (balance < price) {
+      return {
+        ok: false as const,
+        reason: "insufficient_coins",
+        used: 0,
+        maxPerDay,
+        hours,
+        price,
+        balance,
+      };
+    }
+    if (tokenDoc) {
+      await ctx.db.patch(tokenDoc._id, { coins: balance - price });
+    }
+
     // The public /getkey page can be switched off by the owner.
     if (tokenHash.startsWith("web:") && doc?.getkeyWeb === false) {
       return { ok: false as const, reason: "web_disabled", used: 0, maxPerDay, hours };
@@ -1993,6 +2016,7 @@ export const issueGetkey = internalMutation({
       used: used + 1,
       maxPerDay,
       price,
+      balance: Math.max(0, balance - price),
       serverName: server.name,
       serverCode: server.code,
     };
@@ -2129,6 +2153,42 @@ export const resetGetkeyUsage = mutation({
       .collect();
     for (const r of rows) await ctx.db.delete(r._id);
     return { deleted: rows.length };
+  },
+});
+
+/**
+ * Owner/admin: coin balances of every system token, for top-up management.
+ * Users buy coins via the support channel; the owner credits them here.
+ */
+export const listTokenBalances = query({
+  args: {},
+  handler: async (ctx) => {
+    await requireRole(ctx, ["owner", "admin"]);
+    const tokens = await ctx.db.query("apiTokens").order("desc").collect();
+    return tokens.map((t) => ({
+      _id: t._id,
+      label: t.label,
+      createdAt: t.createdAt,
+      expiresAt: t.expiresAt,
+      coins: t.coins ?? 0,
+    }));
+  },
+});
+
+/** Owner/admin: add (or remove, negative) coins from a system token. */
+export const grantCoins = mutation({
+  args: { id: v.id("apiTokens"), amount: v.number() },
+  handler: async (ctx, { id, amount }) => {
+    await requireRole(ctx, ["owner", "admin"]);
+    const token = await ctx.db.get(id);
+    if (token === null) throw new Error("Token not found");
+    const add = Math.round(amount);
+    if (!Number.isFinite(add) || add === 0) {
+      throw new Error("Amount must be a non-zero number");
+    }
+    const next = Math.max(0, (token.coins ?? 0) + add);
+    await ctx.db.patch(id, { coins: next });
+    return { coins: next };
   },
 });
 

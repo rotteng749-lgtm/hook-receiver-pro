@@ -169,7 +169,18 @@ export const registerMember = action({
 /** A claim must be redeemed within 15 minutes of being created. */
 const CLAIM_TTL_MS = 15 * 60 * 1000;
 
-/** Read-only quota check for a fingerprint bucket. */
+/** sha256 hex of a system token (same scheme as convex/files.ts hashToken). */
+async function sha256Hex(input: string): Promise<string> {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(input),
+  );
+  return Array.from(new Uint8Array(digest))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+/** Read-only quota check for a system token bucket. */
 export const getWebUsageInternal = internalQuery({
   args: { tokenHash: v.string() },
   handler: async (ctx, { tokenHash }) => {
@@ -189,7 +200,7 @@ export const getWebUsageInternal = internalQuery({
   },
 });
 
-/** Persist a new claim row. */
+/** Persist a new claim row (tokenHash = the system token's hash). */
 export const createClaimInternal = internalMutation({
   args: { token: v.string(), tokenHash: v.string(), expiresAt: v.number() },
   handler: async (ctx, args) => {
@@ -204,14 +215,61 @@ export const createClaimInternal = internalMutation({
 });
 
 /**
- * Step 1 of the gated /getkey flow: verify the human check, create a claim
- * token, wrap the continue URL in a ShrtFly short link (the owner's monetized
- * link) and hand it back. The trial key itself is NOT issued here.
+ * Public status of a system token for the /getkey page: coin balance,
+ * price per claim and today's quota usage. Takes the raw token (hashed
+ * server-side, never stored client-side beyond localStorage by the user
+ * themselves).
+ */
+export const getWebTokenStatus = action({
+  args: { systemToken: v.string() },
+  handler: async (
+    ctx,
+    args,
+  ): Promise<{
+    valid: boolean;
+    coins: number;
+    price: number;
+    used: number;
+    maxPerDay: number;
+    remaining: number;
+  }> => {
+    const systemToken = args.systemToken.trim();
+    if (systemToken.length < 8) {
+      return { valid: false, coins: 0, price: 10, used: 0, maxPerDay: 3, remaining: 3 };
+    }
+    const tokenHash = await sha256Hex(systemToken);
+    const tokenDoc = await ctx.runQuery(internal.files.getTokenByHash, {
+      tokenHash,
+    });
+    if (tokenDoc === null) {
+      return { valid: false, coins: 0, price: 10, used: 0, maxPerDay: 3, remaining: 3 };
+    }
+    const info = await ctx.runMutation(internal.public.getWebInfoInternal, {});
+    const quota = await ctx.runQuery(internal.public.getWebUsageInternal, {
+      tokenHash,
+    });
+    return {
+      valid: true,
+      coins: tokenDoc.coins ?? 0,
+      price: info.price,
+      used: quota.used,
+      maxPerDay: quota.maxPerDay,
+      remaining: Math.max(0, quota.maxPerDay - quota.used),
+    };
+  },
+});
+
+/**
+ * Step 1 of the gated /getkey flow. Requires a valid SYSTEM TOKEN (the same
+ * token used at POST /getkey) — every claim later costs the token's coins
+ * (settings.getkeyPrice, default 10). Creates a claim token, wraps the
+ * continue URL in a ShrtFly short link (owner's monetized link) and hands it
+ * back. The trial key itself is NOT issued here.
  */
 export const startTrialClaim = action({
   args: {
     turnstileToken: v.string(),
-    fingerprint: v.string(),
+    systemToken: v.string(),
     origin: v.string(),
   },
   handler: async (
@@ -231,9 +289,19 @@ export const startTrialClaim = action({
       await verifyTurnstile(token).catch(() => {});
     }
 
-    const fingerprint = args.fingerprint.trim().slice(0, 128);
-    if (fingerprint.length < 8) {
-      throw new Error("Missing browser id — reload the page and try again.");
+    // The claim is bound to a system token — no token, no claim, no bypass.
+    const systemToken = args.systemToken.trim();
+    if (systemToken.length < 8) {
+      throw new Error(
+        "System token required — paste the API token from the panel (API page).",
+      );
+    }
+    const tokenHash = await sha256Hex(systemToken);
+    const tokenDoc = await ctx.runQuery(internal.files.getTokenByHash, {
+      tokenHash,
+    });
+    if (tokenDoc === null) {
+      throw new Error("Invalid or expired system token.");
     }
 
     let origin: string;
@@ -249,10 +317,16 @@ export const startTrialClaim = action({
       throw new Error("The free key page is currently disabled.");
     }
 
-    // Quota is checked up-front so users get a clear message before clicking
-    // through the short link (issueGetkey re-checks at redemption).
+    // Coins + daily quota are checked up-front so users get a clear message
+    // before clicking through the short link (issueGetkey re-checks both).
+    const coins = tokenDoc.coins ?? 0;
+    if (coins < info.price) {
+      throw new Error(
+        `Not enough coins — a claim costs ${info.price} but this token has ${coins}. Top up via the support channel.`,
+      );
+    }
     const quota = await ctx.runQuery(internal.public.getWebUsageInternal, {
-      tokenHash: `web:${fingerprint}`,
+      tokenHash,
     });
     if (quota.used >= quota.maxPerDay) {
       throw new Error(
@@ -268,7 +342,7 @@ export const startTrialClaim = action({
 
     await ctx.runMutation(internal.public.createClaimInternal, {
       token: claimToken,
-      tokenHash: `web:${fingerprint}`,
+      tokenHash,
       expiresAt,
     });
 
@@ -310,11 +384,12 @@ export const startTrialClaim = action({
 
 /**
  * Step 2: after the user returns via the short link (/getkey?claim=…),
- * redeem the claim and finally issue the trial key. Bound to the same
- * browser fingerprint that started the claim.
+ * redeem the claim and finally issue the trial key. The same system token
+ * that started the claim must be present — coins are deducted inside
+ * issueGetkey (atomic with the daily cap).
  */
 export const redeemClaim = mutation({
-  args: { claimToken: v.string(), fingerprint: v.string() },
+  args: { claimToken: v.string(), systemToken: v.string() },
   handler: async (ctx, args): Promise<WebTrialKey> => {
     const token = args.claimToken.trim().toLowerCase();
     const claim = await ctx.db
@@ -330,19 +405,24 @@ export const redeemClaim = mutation({
     if (Date.now() > claim.expiresAt) {
       throw new Error("Claim expired — generate a new link.");
     }
-    const expectedHash = `web:${args.fingerprint.trim().slice(0, 128)}`;
-    if (claim.tokenHash !== expectedHash) {
+    const systemToken = args.systemToken.trim();
+    if (systemToken.length < 8) {
+      throw new Error("System token required — paste your API token first.");
+    }
+    const tokenHash = await sha256Hex(systemToken);
+    if (claim.tokenHash !== tokenHash) {
       throw new Error(
-        "Claim was created in a different browser — generate a new link.",
+        "This claim belongs to a different system token — use the token that generated the link.",
       );
     }
 
     const res = await ctx.runMutation(internal.nameserver.issueGetkey, {
-      tokenHash: claim.tokenHash,
+      tokenHash,
     });
     if (!res.ok) {
       const messages: Record<string, string> = {
         daily_limit: `Daily limit reached — ${res.used}/${res.maxPerDay} keys today. Come back tomorrow.`,
+        insufficient_coins: `Not enough coins — a claim costs ${res.price} but this token has ${res.balance}. Top up via the support channel.`,
         no_server: "No active server configured yet.",
         no_owner: "Server not fully configured yet.",
         web_disabled: "The free key page is currently disabled.",
@@ -361,6 +441,7 @@ export const redeemClaim = mutation({
       usedToday: res.used,
       maxPerDay: res.maxPerDay,
       remaining: Math.max(0, res.maxPerDay - res.used),
+      coins: res.balance,
     };
   },
 });
@@ -371,7 +452,12 @@ export const getWebInfoInternal = internalMutation({
   args: {},
   handler: async (
     ctx,
-  ): Promise<{ enabled: boolean; hours: number; maxPerDay: number }> => {
+  ): Promise<{
+    enabled: boolean;
+    hours: number;
+    maxPerDay: number;
+    price: number;
+  }> => {
     const doc = await ctx.db
       .query("settings")
       .withIndex("by_scope", (q) => q.eq("scope", "global"))
@@ -380,6 +466,7 @@ export const getWebInfoInternal = internalMutation({
       enabled: doc?.getkeyWeb !== false,
       hours: doc?.getkeyHours ?? 5,
       maxPerDay: doc?.getkeyMaxPerDay ?? 3,
+      price: doc?.getkeyPrice ?? 10,
     };
   },
 });
@@ -400,32 +487,13 @@ export const getWebGetkeyInfo = query({
       enabled: doc?.getkeyWeb !== false,
       hours: doc?.getkeyHours ?? 5,
       maxPerDay: doc?.getkeyMaxPerDay ?? 3,
+      price: doc?.getkeyPrice ?? 10,
       serverName: activeServer?.name ?? "main",
+      botUsername: doc?.telegramBotUsername ?? "",
     };
   },
 });
 
-export const getWebQuota = query({
-  args: { fingerprint: v.string() },
-  handler: async (ctx, { fingerprint }) => {
-    const doc = await ctx.db
-      .query("settings")
-      .withIndex("by_scope", (q) => q.eq("scope", "global"))
-      .first();
-    const maxPerDay = doc?.getkeyMaxPerDay ?? 3;
-    const fp = fingerprint.trim().slice(0, 128);
-    if (fp.length < 8) return { used: 0, maxPerDay, remaining: maxPerDay };
-    const day = new Date().toISOString().slice(0, 10);
-    const usage = await ctx.db
-      .query("getkeyDaily")
-      .withIndex("by_token_day", (q) =>
-        q.eq("tokenHash", `web:${fp}`).eq("day", day),
-      )
-      .first();
-    const used = usage?.count ?? 0;
-    return { used, maxPerDay, remaining: Math.max(0, maxPerDay - used) };
-  },
-});
 
 export interface WebTrialKey {
   key: string;
@@ -436,10 +504,11 @@ export interface WebTrialKey {
   usedToday: number;
   maxPerDay: number;
   remaining: number;
+  coins: number;
 }
 
 export const claimTrialKey = action({
-  args: { turnstileToken: v.string(), fingerprint: v.string() },
+  args: { turnstileToken: v.string(), systemToken: v.string() },
   handler: async (ctx, args): Promise<WebTrialKey> => {
     const token = (args.turnstileToken ?? "").trim();
     const secret = process.env.TURNSTILE_SECRET_KEY ?? TURNSTILE_TEST_SECRET;
@@ -453,21 +522,37 @@ export const claimTrialKey = action({
     } else if (token.length > 0) {
       await verifyTurnstile(token).catch(() => {});
     }
-    // On test secret, allow empty token (permissive)
-    const fingerprint = args.fingerprint.trim().slice(0, 128);
-    if (fingerprint.length < 8) {
-      throw new Error("Missing browser id — reload the page and try again.");
+    // Direct (one-step) claim: same rules as the gated flow — system token
+    // + coins + daily cap, just without the shortener detour.
+    const systemToken = args.systemToken.trim();
+    if (systemToken.length < 8) {
+      throw new Error(
+        "System token required — paste the API token from the panel (API page).",
+      );
+    }
+    const tokenHash = await sha256Hex(systemToken);
+    const tokenDoc = await ctx.runQuery(internal.files.getTokenByHash, {
+      tokenHash,
+    });
+    if (tokenDoc === null) {
+      throw new Error("Invalid or expired system token.");
     }
     const info = await ctx.runMutation(internal.public.getWebInfoInternal, {});
     if (!info.enabled) {
       throw new Error("The free key page is currently disabled.");
     }
+    if ((tokenDoc.coins ?? 0) < info.price) {
+      throw new Error(
+        `Not enough coins — a claim costs ${info.price} but this token has ${tokenDoc.coins ?? 0}. Top up via the support channel.`,
+      );
+    }
     const res = await ctx.runMutation(internal.nameserver.issueGetkey, {
-      tokenHash: `web:${fingerprint}`,
+      tokenHash,
     });
     if (!res.ok) {
       const messages: Record<string, string> = {
         daily_limit: `Daily limit reached — ${res.used}/${res.maxPerDay} keys today. Come back tomorrow.`,
+        insufficient_coins: `Not enough coins — a claim costs ${res.price} but this token has ${res.balance}. Top up via the support channel.`,
         no_server: "No active server configured yet.",
         no_owner: "Server not fully configured yet.",
         web_disabled: "The free key page is currently disabled.",
@@ -483,6 +568,7 @@ export const claimTrialKey = action({
       usedToday: res.used,
       maxPerDay: res.maxPerDay,
       remaining: Math.max(0, res.maxPerDay - res.used),
+      coins: res.balance,
     };
   },
 });
