@@ -62,9 +62,12 @@ import {
 } from "lucide-react";
 import { Link, useNavigate } from "react-router";
 import { Suspense, useEffect, useRef, useState } from "react";
-import { useMutation } from "convex/react";
+import { useAction, useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
-import { describeAuthError } from "@/lib/auth-errors";
+import {
+  describeAuthError,
+  attemptSignInWithLookup,
+} from "@/lib/auth-errors";
 
 /* ------------------------------------------------------------------ */
 /*  Animations                                                         */
@@ -168,6 +171,7 @@ function LoginForm() {
   const { isLoading: authLoading, isAuthenticated, user, signIn } = useAuth();
   const navigate = useNavigate();
   const seedOwner = useMutation(api.nameserver.seedOwner);
+  const lookupUsername = useAction(api.public.lookupUsername);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
@@ -184,22 +188,12 @@ function LoginForm() {
   }, [authLoading, isAuthenticated, user, navigate, home]);
 
   const attemptSignIn = async (username: string, password: string) => {
-    const t = username.trim();
-    const lower = t.toLowerCase();
-    const cap = t.charAt(0).toUpperCase() + t.slice(1).toLowerCase();
-    const candidates = [t, lower, cap].filter((v, i, a) => v && a.indexOf(v) === i);
-    let lastErr: unknown = null;
-    for (const u of candidates) {
-      try {
-        await signIn("password", { username: u, password, flow: "signIn" });
-        return;
-      } catch (e) {
-        lastErr = e;
-        const msg = e instanceof Error ? e.message : String(e);
-        if (!/InvalidAccountId|InvalidSecret|invalid|credential/i.test(msg)) throw e;
-      }
-    }
-    throw lastErr ?? new Error("Invalid username or password.");
+    await attemptSignInWithLookup(
+      (args) => lookupUsername(args),
+      (provider, params) => signIn(provider, params),
+      username,
+      password,
+    );
   };
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {

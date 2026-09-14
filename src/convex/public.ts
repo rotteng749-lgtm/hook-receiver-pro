@@ -164,6 +164,55 @@ export const registerMember = action({
   },
 });
 
+/* ------------------------------ sign-in helper ---------------------------- */
+
+/**
+ * Resolve the exact stored username for a sign-in attempt. Convex Auth matches
+ * account IDs case-sensitively and reports every failure (bad username, bad
+ * password, rate limit) to the browser as an opaque "Server Error", so the
+ * login form cannot tell "no such user" from "wrong password". This lookup
+ * (public info only — the account id is the username itself) lets the form
+ * pick the correct casing first and show an honest "no account" message
+ * without burning a rate-limited sign-in attempt.
+ */
+export const lookupUsernameInternal = internalQuery({
+  args: { username: v.string() },
+  handler: async (
+    ctx,
+    { username },
+  ): Promise<{ found: boolean; exactUsername: string | null }> => {
+    const t = username.trim().slice(0, 60);
+    if (!t) return { found: false, exactUsername: null };
+    const lower = t.toLowerCase();
+    const cap = t.charAt(0).toUpperCase() + t.slice(1).toLowerCase();
+    const variants = [t, lower, cap].filter(
+      (x, i, a) => x && a.indexOf(x) === i,
+    );
+    for (const candidate of variants) {
+      const doc = await ctx.db
+        .query("authAccounts")
+        .withIndex("providerAndAccountId", (q) =>
+          q.eq("provider", "password").eq("providerAccountId", candidate),
+        )
+        .first();
+      if (doc) return { found: true, exactUsername: candidate };
+    }
+    return { found: false, exactUsername: null };
+  },
+});
+
+export const lookupUsername = action({
+  args: { username: v.string() },
+  handler: async (
+    ctx,
+    args,
+  ): Promise<{ found: boolean; exactUsername: string | null }> => {
+    return await ctx.runQuery(internal.public.lookupUsernameInternal, {
+      username: args.username,
+    });
+  },
+});
+
 /* ------------------- shortener-gated trial keys (/getkey) ------------------ */
 
 /** A claim must be redeemed within 15 minutes of being created. */
