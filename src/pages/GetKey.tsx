@@ -2,28 +2,24 @@ import { Button } from "@/components/ui/button";
 import { CopyButton } from "@/components/panel/CopyButton";
 import { Turnstile } from "@/components/Turnstile";
 import { api } from "@/convex/_generated/api";
-import { useAction, useQuery } from "convex/react";
+import { useAction, useMutation, useQuery } from "convex/react";
 import {
   ArrowLeft,
   BadgeCheck,
   Clock,
+  ExternalLink,
   KeyRound,
   Loader2,
   MonitorSmartphone,
+  MousePointerClick,
   ShieldCheck,
   Sparkles,
   Terminal,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router";
+import { Link, useSearchParams } from "react-router";
 import { toast } from "sonner";
-
-const CONVEX_SITE =
-  (import.meta.env.VITE_CONVEX_URL as string | undefined)?.replace(
-    /\.convex\.cloud$/,
-    ".convex.site",
-  ) ?? "https://your-deployment.convex.site";
 
 const FINGERPRINT_KEY = "panxcz.webid";
 
@@ -53,58 +49,98 @@ const fadeUp = {
   show: { opacity: 1, y: 0, transition: { duration: 0.45, ease: "easeOut" as const } },
 };
 
+interface IssuedKey {
+  key: string;
+  expiresAt: number;
+  hours: number;
+  serverName: string;
+  remaining: number;
+  maxPerDay: number;
+}
+
 export default function PublicGetKey() {
   const fingerprint = useFingerprint();
+  const [searchParams, setSearchParams] = useSearchParams();
   const info = useQuery(api.public.getWebGetkeyInfo);
   const quota = useQuery(
     api.public.getWebQuota,
     fingerprint ? { fingerprint } : "skip",
   );
-  const claimTrialKey = useAction(api.public.claimTrialKey);
+  const startTrialClaim = useAction(api.public.startTrialClaim);
+  const redeemClaim = useMutation(api.public.redeemClaim);
 
-  const [token, setToken] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [issued, setIssued] = useState<{
-    key: string;
-    expiresAt: number;
-    hours: number;
-    serverName: string;
-    remaining: number;
-    maxPerDay: number;
+  const claimParam = searchParams.get("claim");
+  const [pendingClaim, setPendingClaim] = useState<{
+    token: string;
+    shortUrl: string;
   } | null>(null);
+  const [issued, setIssued] = useState<IssuedKey | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [redeemError, setRedeemError] = useState<string | null>(null);
+  const [token, setToken] = useState("");
 
   const remaining = quota?.remaining ?? info?.maxPerDay ?? 0;
   const disabled =
     busy || token.length === 0 || remaining <= 0 || info?.enabled === false;
 
+  // Auto-redeem when arriving back from the short link with ?claim=<token>.
+  useEffect(() => {
+    if (!claimParam || !fingerprint || issued || busy) return;
+    setBusy(true);
+    setRedeemError(null);
+    redeemClaim({ claimToken: claimParam, fingerprint })
+      .then((res) => {
+        setIssued({
+          key: res.key,
+          expiresAt: res.expiresAt,
+          hours: res.hours,
+          serverName: res.serverName,
+          remaining: res.remaining,
+          maxPerDay: res.maxPerDay,
+        });
+        toast.success("Trial key generated — copy it now");
+      })
+      .catch((err) => {
+        setRedeemError(
+          err instanceof Error ? err.message : "Could not redeem the claim.",
+        );
+      })
+      .finally(() => {
+        setBusy(false);
+        // Clean the URL so a refresh doesn't double-redeem.
+        searchParams.delete("claim");
+        setSearchParams(searchParams, { replace: true });
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [claimParam, fingerprint]);
+
   const connectCommand = useMemo(
     () =>
       issued
-        ? `curl -X POST ${CONVEX_SITE}/connect \\\n  -H 'Content-Type: application/json' \\\n  -d '{"license":"${issued.key}","device":"YOUR-DEVICE-ID"}'`
+        ? `curl -X POST https://brave-lobster-493.convex.site/connect \\\n  -H 'Content-Type: application/json' \\\n  -d '{"license":"${issued.key}","device":"YOUR-DEVICE-ID"}'`
         : "",
     [issued],
   );
 
-  const handleClaim = async () => {
+  const handleStart = async () => {
     if (token.length === 0) {
       toast.error("Complete the human check first");
       return;
     }
     setBusy(true);
+    setRedeemError(null);
     try {
-      const res = await claimTrialKey({ turnstileToken: token, fingerprint });
-      setIssued({
-        key: res.key,
-        expiresAt: res.expiresAt,
-        hours: res.hours,
-        serverName: res.serverName,
-        remaining: res.remaining,
-        maxPerDay: res.maxPerDay,
+      const res = await startTrialClaim({
+        turnstileToken: token,
+        fingerprint,
+        origin: window.location.origin,
       });
       setToken("");
-      toast.success("Trial key generated — copy it now");
+      setPendingClaim({ token: res.claimToken, shortUrl: res.shortUrl });
+      // Continue immediately — the short link is the gate, not a detour.
+      window.location.href = res.shortUrl;
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not generate a key");
+      toast.error(err instanceof Error ? err.message : "Could not start the claim");
     } finally {
       setBusy(false);
     }
@@ -222,6 +258,57 @@ export default function PublicGetKey() {
                   </Button>
                 </div>
               </div>
+            ) : claimParam ? (
+              /* --- Returning from the short link: redeeming --- */
+              <div className="space-y-5 py-6 text-center">
+                <Loader2 className="mx-auto size-8 animate-spin text-[#4a9a8e]" />
+                <p className="font-medium">Verifying your claim…</p>
+                {busy && (
+                  <p className="text-sm text-[#a8b2c1]">
+                    Almost there — your key unlocks right after this.
+                  </p>
+                )}
+                {redeemError && (
+                  <div className="space-y-4">
+                    <p className="text-sm text-red-400">{redeemError}</p>
+                    <Button
+                      variant="outline"
+                      className="cursor-pointer border-white/15 bg-transparent text-white hover:bg-white/10"
+                      onClick={() => {
+                        setRedeemError(null);
+                        searchParams.delete("claim");
+                        setSearchParams(searchParams, { replace: true });
+                      }}
+                    >
+                      Try again
+                    </Button>
+                  </div>
+                )}
+              </div>
+            ) : pendingClaim ? (
+              /* --- Link ready (fallback view if the redirect is blocked) --- */
+              <div className="space-y-5">
+                <div className="flex items-center gap-2 text-sm font-medium text-[#7fd0c2]">
+                  <MousePointerClick className="size-4" />
+                  One more step — continue through the link
+                </div>
+                <p className="text-sm text-[#a8b2c1]">
+                  Your claim is ready and valid for 15 minutes. If the page didn't
+                  continue automatically, tap the button below to proceed.
+                </p>
+                <Button
+                  onClick={() =>
+                    pendingClaim && window.location.assign(pendingClaim.shortUrl)
+                  }
+                  className="h-12 w-full cursor-pointer bg-[#4a9a8e] text-base font-semibold text-[#0f1419] transition-colors hover:bg-[#58b3a5]"
+                >
+                  <ExternalLink className="mr-2 size-5" />
+                  Continue to my key
+                </Button>
+                <p className="text-center text-xs text-[#a8b2c1]">
+                  The link supports this site through our sponsor gateway.
+                </p>
+              </div>
             ) : (
               <div className="space-y-6">
                 <div className="flex flex-wrap items-center justify-between gap-3">
@@ -237,7 +324,7 @@ export default function PublicGetKey() {
                 <Turnstile onToken={setToken} className="flex justify-center" />
 
                 <Button
-                  onClick={handleClaim}
+                  onClick={handleStart}
                   disabled={disabled}
                   className="h-12 w-full cursor-pointer bg-[#4a9a8e] text-base font-semibold text-[#0f1419] transition-colors hover:bg-[#58b3a5] disabled:opacity-40"
                 >
@@ -250,7 +337,8 @@ export default function PublicGetKey() {
                 </Button>
 
                 <p className="text-center text-xs text-[#a8b2c1]">
-                  Keys are capped per browser per day. Already have an account?{" "}
+                  You'll pass through a short supported link, then your key unlocks
+                  right here. Already have an account?{" "}
                   <Link to="/auth" className="text-[#7fd0c2] underline">
                     Sign in
                   </Link>
@@ -281,7 +369,7 @@ export default function PublicGetKey() {
             {
               icon: ShieldCheck,
               title: "Abuse protection",
-              desc: "Cloudflare Turnstile plus a strict daily cap per visitor.",
+              desc: "Human check plus a strict daily cap per visitor.",
             },
           ].map((card) => (
             <div

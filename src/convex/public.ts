@@ -11,7 +11,13 @@
 import { createAccount } from "@convex-dev/auth/server";
 import type { GenericActionCtx, GenericDataModel } from "convex/server";
 import { v } from "convex/values";
-import { action, internalMutation, query } from "./_generated/server";
+import {
+  action,
+  internalMutation,
+  internalQuery,
+  mutation,
+  query,
+} from "./_generated/server";
 import { internal } from "./_generated/api";
 import type { MutationCtx } from "./_generated/server";
 
@@ -155,6 +161,207 @@ export const registerMember = action({
       username,
       password: args.password,
     });
+  },
+});
+
+/* ------------------- shortener-gated trial keys (/getkey) ------------------ */
+
+/** A claim must be redeemed within 15 minutes of being created. */
+const CLAIM_TTL_MS = 15 * 60 * 1000;
+
+/** Read-only quota check for a fingerprint bucket. */
+export const getWebUsageInternal = internalQuery({
+  args: { tokenHash: v.string() },
+  handler: async (ctx, { tokenHash }) => {
+    const doc = await ctx.db
+      .query("settings")
+      .withIndex("by_scope", (q) => q.eq("scope", "global"))
+      .first();
+    const maxPerDay = doc?.getkeyMaxPerDay ?? 3;
+    const day = new Date().toISOString().slice(0, 10);
+    const usage = await ctx.db
+      .query("getkeyDaily")
+      .withIndex("by_token_day", (q) =>
+        q.eq("tokenHash", tokenHash).eq("day", day),
+      )
+      .first();
+    return { used: usage?.count ?? 0, maxPerDay };
+  },
+});
+
+/** Persist a new claim row. */
+export const createClaimInternal = internalMutation({
+  args: { token: v.string(), tokenHash: v.string(), expiresAt: v.number() },
+  handler: async (ctx, args) => {
+    await ctx.db.insert("keyClaims", {
+      token: args.token,
+      tokenHash: args.tokenHash,
+      createdAt: Date.now(),
+      expiresAt: args.expiresAt,
+    });
+    return true;
+  },
+});
+
+/**
+ * Step 1 of the gated /getkey flow: verify the human check, create a claim
+ * token, wrap the continue URL in a ShrtFly short link (the owner's monetized
+ * link) and hand it back. The trial key itself is NOT issued here.
+ */
+export const startTrialClaim = action({
+  args: {
+    turnstileToken: v.string(),
+    fingerprint: v.string(),
+    origin: v.string(),
+  },
+  handler: async (
+    ctx,
+    args,
+  ): Promise<{ claimToken: string; shortUrl: string; expiresAt: number }> => {
+    const token = (args.turnstileToken ?? "").trim();
+    const secret = process.env.TURNSTILE_SECRET_KEY ?? TURNSTILE_TEST_SECRET;
+    const isTestSecret = secret === TURNSTILE_TEST_SECRET;
+    if (!isTestSecret) {
+      if (!(await verifyTurnstile(token))) {
+        throw new Error(
+          "Human verification failed — please complete the captcha and try again.",
+        );
+      }
+    } else if (token.length > 0) {
+      await verifyTurnstile(token).catch(() => {});
+    }
+
+    const fingerprint = args.fingerprint.trim().slice(0, 128);
+    if (fingerprint.length < 8) {
+      throw new Error("Missing browser id — reload the page and try again.");
+    }
+
+    let origin: string;
+    try {
+      origin = new URL(args.origin).origin;
+      if (!origin.startsWith("http")) throw new Error("bad origin");
+    } catch {
+      throw new Error("Invalid page origin.");
+    }
+
+    const info = await ctx.runMutation(internal.public.getWebInfoInternal, {});
+    if (!info.enabled) {
+      throw new Error("The free key page is currently disabled.");
+    }
+
+    // Quota is checked up-front so users get a clear message before clicking
+    // through the short link (issueGetkey re-checks at redemption).
+    const quota = await ctx.runQuery(internal.public.getWebUsageInternal, {
+      tokenHash: `web:${fingerprint}`,
+    });
+    if (quota.used >= quota.maxPerDay) {
+      throw new Error(
+        `Daily limit reached — ${quota.used}/${quota.maxPerDay} keys today. Come back tomorrow.`,
+      );
+    }
+
+    const claimToken = (
+      crypto.randomUUID().replace(/-/g, "") +
+      crypto.randomUUID().replace(/-/g, "")
+    ).slice(0, 64);
+    const expiresAt = Date.now() + CLAIM_TTL_MS;
+
+    await ctx.runMutation(internal.public.createClaimInternal, {
+      token: claimToken,
+      tokenHash: `web:${fingerprint}`,
+      expiresAt,
+    });
+
+    // Wrap the continue URL in a ShrtFly short link. If ShrtFly is down we
+    // fall back to the direct continue URL so the flow never hard-fails.
+    const continueUrl = `${origin}/getkey?claim=${claimToken}`;
+    let shortUrl = continueUrl;
+    const settings = await ctx.runQuery(
+      internal.shortener.getShortenerSettings,
+      {},
+    );
+    const apiKey = settings.shortenerApiKey || "ea3e5b3e3dcd0019ac9f395f2d8e4062";
+    const params = new URLSearchParams({
+      api: apiKey,
+      url: continueUrl,
+      type: String(settings.shortenerAdType === 2 ? 2 : 1),
+      format: "json",
+    });
+    try {
+      const res = await fetch(`https://shrtfly.com/api?${params.toString()}`);
+      const data = (await res.json()) as {
+        status?: string;
+        result?: { shorten_url?: string } | string;
+      };
+      if (
+        data?.status === "success" &&
+        typeof data.result === "object" &&
+        typeof data.result.shorten_url === "string"
+      ) {
+        shortUrl = data.result.shorten_url;
+      }
+    } catch {
+      // keep direct continue URL
+    }
+
+    return { claimToken, shortUrl, expiresAt };
+  },
+});
+
+/**
+ * Step 2: after the user returns via the short link (/getkey?claim=…),
+ * redeem the claim and finally issue the trial key. Bound to the same
+ * browser fingerprint that started the claim.
+ */
+export const redeemClaim = mutation({
+  args: { claimToken: v.string(), fingerprint: v.string() },
+  handler: async (ctx, args): Promise<WebTrialKey> => {
+    const token = args.claimToken.trim().toLowerCase();
+    const claim = await ctx.db
+      .query("keyClaims")
+      .withIndex("by_token", (q) => q.eq("token", token))
+      .first();
+    if (!claim) {
+      throw new Error("Claim not found — start again with the Generate button.");
+    }
+    if (claim.redeemed) {
+      throw new Error("This claim was already used — generate a new link.");
+    }
+    if (Date.now() > claim.expiresAt) {
+      throw new Error("Claim expired — generate a new link.");
+    }
+    const expectedHash = `web:${args.fingerprint.trim().slice(0, 128)}`;
+    if (claim.tokenHash !== expectedHash) {
+      throw new Error(
+        "Claim was created in a different browser — generate a new link.",
+      );
+    }
+
+    const res = await ctx.runMutation(internal.nameserver.issueGetkey, {
+      tokenHash: claim.tokenHash,
+    });
+    if (!res.ok) {
+      const messages: Record<string, string> = {
+        daily_limit: `Daily limit reached — ${res.used}/${res.maxPerDay} keys today. Come back tomorrow.`,
+        no_server: "No active server configured yet.",
+        no_owner: "Server not fully configured yet.",
+        web_disabled: "The free key page is currently disabled.",
+      };
+      throw new Error(messages[res.reason] ?? res.reason);
+    }
+
+    await ctx.db.patch(claim._id, { redeemed: true, key: res.key });
+
+    return {
+      key: res.key,
+      hours: res.hours,
+      serverName: res.serverName,
+      serverCode: res.serverCode,
+      expiresAt: res.expiresAt,
+      usedToday: res.used,
+      maxPerDay: res.maxPerDay,
+      remaining: Math.max(0, res.maxPerDay - res.used),
+    };
   },
 });
 

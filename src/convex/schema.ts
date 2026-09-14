@@ -48,6 +48,19 @@ const schema = defineSchema(
     })
       .index("by_token_day", ["tokenHash", "day"]),
 
+    // Trial-key claim gate for the public /getkey page: a claim is created
+    // first (startTrialClaim), wrapped in a ShrtFly short link, and the trial
+    // key is only issued when the user comes back to /getkey?claim=<token>
+    // (redeemClaim) — i.e. after passing through the monetized short link.
+    keyClaims: defineTable({
+      token: v.string(), // random claim id embedded in the continue URL
+      tokenHash: v.string(), // quota bucket, e.g. "web:<fingerprint>"
+      createdAt: v.number(),
+      expiresAt: v.number(), // claims expire after ~15 minutes
+      redeemed: v.optional(v.boolean()),
+      key: v.optional(v.string()), // trial key after redemption
+    }).index("by_token", ["token"]),
+
     // Every uploaded file. The bytes live in Convex object storage (S3-backed);
     // this table holds the metadata: display name, version, note, size,
     // SHA-256 checksum, content type, and download counter. Public download

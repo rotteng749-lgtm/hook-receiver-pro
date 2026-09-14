@@ -96,7 +96,8 @@ export const createShortLinkByKey = internalAction({
       throw new Error("Please enter a valid URL (must start with http:// or https://)");
     }
     const settings = await ctx.runQuery(internal.shortener.getShortenerSettings, {});
-    const apiKey = settings.shortenerApiKey;
+    // Owner's ShrtFly key as fallback so the shortener works out of the box.
+    const apiKey = settings.shortenerApiKey || "ea3e5b3e3dcd0019ac9f395f2d8e4062";
     if (!apiKey) {
       throw new Error("No ShrtFly API key configured — set it in Settings > Shortener");
     }
