@@ -49,17 +49,46 @@ const schema = defineSchema(
       .index("by_token_day", ["tokenHash", "day"]),
 
     // Trial-key claim gate for the public /getkey page: a claim is created
-    // first (startTrialClaim), wrapped in a ShrtFly short link, and the trial
-    // key is only issued when the user comes back to /getkey?claim=<token>
+    // first (startClaim), wrapped in a ShrtFly short link, and the trial key
+    // is only issued when the user comes back to /getkey?claim=<token>
     // (redeemClaim) — i.e. after passing through the monetized short link.
     keyClaims: defineTable({
       token: v.string(), // random claim id embedded in the continue URL
-      tokenHash: v.string(), // quota bucket, e.g. "web:<fingerprint>"
+      tokenHash: v.string(), // quota bucket ("account:<handle>", or a token hash for the old API flow)
       createdAt: v.number(),
       expiresAt: v.number(), // claims expire after ~15 minutes
       redeemed: v.optional(v.boolean()),
       key: v.optional(v.string()), // trial key after redemption
+      // Panxcz-coin account flow (public /getkey page).
+      handle: v.optional(v.string()), // normalized account handle the claim is bound to
+      accountId: v.optional(v.id("getkeyAccounts")),
+      serverId: v.optional(v.id("servers")), // product the key is minted for
     }).index("by_token", ["token"]),
+
+    // Panxcz-coin accounts — the identity behind the public /getkey page.
+    // No system token needed: the user picks a handle (Telegram id, @username
+    // or anything stable), the account is created automatically with
+    // `getkeyWelcomeCoins` coins, and each trial key costs `getkeyPrice`
+    // (default 5 coins = 5 hours). Accounts can be linked to a Telegram chat,
+    // which makes the bot and the website share one coin balance.
+    getkeyAccounts: defineTable({
+      handle: v.string(), // normalized (lowercase, no spaces/@) — the identity
+      displayHandle: v.string(), // what the user typed, for display
+      telegramId: v.optional(v.string()), // linked Telegram chat id (digits)
+      telegramUsername: v.optional(v.string()),
+      coins: v.number(), // Panxcz coins
+      totalClaims: v.number(), // keys ever issued
+      totalSpent: v.number(), // coins ever spent
+      day: v.optional(v.string()), // UTC date of the last claim
+      dayCount: v.optional(v.number()), // keys issued on `day`
+      banned: v.optional(v.boolean()),
+      lastKey: v.optional(v.string()), // last key issued (resend from the bot)
+      lastKeyExpiresAt: v.optional(v.number()),
+      createdAt: v.number(),
+      lastSeen: v.number(),
+    })
+      .index("by_handle", ["handle"])
+      .index("by_telegram", ["telegramId"]),
 
     // Every uploaded file. The bytes live in Convex object storage (S3-backed);
     // this table holds the metadata: display name, version, note, size,
@@ -110,6 +139,9 @@ const schema = defineSchema(
       status: v.union(v.literal("active"), v.literal("off")),
       createdBy: v.id("users"),
       customSeal: v.optional(v.string()), // custom MD5 seal for this server (e.g. from PHP file)
+      // Listed as a product on the public /getkey page. undefined/true = shown,
+      // false = hidden (owner controls what is available — e.g. only MLBB).
+      publicGetkey: v.optional(v.boolean()),
     }).index("by_code", ["code"]),
 
     // Generated connect keys. Generating one deducts `cost` from the
@@ -220,6 +252,9 @@ const schema = defineSchema(
       getkeyWeb: v.optional(v.boolean()),
       // Server that GetKey keys are generated on (optional — owner picks).
       getkeyServerId: v.optional(v.id("servers")),
+      // Coins handed to a brand-new /getkey account on first use (default 5
+      // = one free trial key). Top-ups are done by the owner afterwards.
+      getkeyWelcomeCoins: v.optional(v.number()),
     }).index("by_scope", ["scope"]),
 
     // User-created custom HTTP endpoints. Each row becomes a live route

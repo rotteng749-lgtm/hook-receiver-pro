@@ -107,11 +107,12 @@ export default function SettingsPage() {
   const [serverDomain, setServerDomain] = useState("");
   const [endpointAuthToken, setEndpointAuthToken] = useState("");
   const [webhookUrl, setWebhookUrl] = useState("");
-  const [getkeyPrice, setGetkeyPrice] = useState("10");
+  const [getkeyPrice, setGetkeyPrice] = useState("5");
   const [getkeyHours, setGetkeyHours] = useState("5");
   const [getkeyMaxPerDay, setGetkeyMaxPerDay] = useState("3");
   const [getkeyServerId, setGetkeyServerId] = useState("");
   const [getkeyWeb, setGetkeyWeb] = useState(true);
+  const [getkeyWelcomeCoins, setGetkeyWelcomeCoins] = useState("5");
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -131,6 +132,7 @@ export default function SettingsPage() {
       setGetkeyMaxPerDay(String(settings.getkeyMaxPerDay));
       setGetkeyServerId(settings.getkeyServerId ?? "");
       setGetkeyWeb(settings.getkeyWeb ?? true);
+      setGetkeyWelcomeCoins(String(settings.getkeyWelcomeCoins ?? 5));
     }
   }, [settings]);
 
@@ -202,6 +204,7 @@ export default function SettingsPage() {
         getkeyHours: Number(getkeyHours) || 0,
         getkeyMaxPerDay: Number(getkeyMaxPerDay) || 1,
         getkeyWeb,
+        getkeyWelcomeCoins: Number(getkeyWelcomeCoins) || 0,
         getkeyServerId: getkeyServerId
           ? (getkeyServerId as Parameters<typeof updateSettings>[0]["getkeyServerId"])
           : undefined,
@@ -523,8 +526,9 @@ export default function SettingsPage() {
                   GetKey trial keys
                 </CardTitle>
                 <CardDescription>
-                  Controls the token-based /getkey endpoint — how long trial keys last and how
-                  many a single API token may mint per day.
+                  Controls the public /getkey page and the API endpoint — how long
+                  trial keys last, their coin price, and how many each account may
+                  claim per day.
                 </CardDescription>
               </CardHeader>
               <CardContent className="grid grid-cols-1 gap-5 sm:grid-cols-3">
@@ -559,7 +563,22 @@ export default function SettingsPage() {
                     value={getkeyPrice}
                     onChange={(e) => setGetkeyPrice(e.target.value)}
                   />
-                  <p className="text-xs text-muted-foreground">Logged per issued key.</p>
+                  <p className="text-xs text-muted-foreground">
+                    Panxcz coins spent per key (default 5).
+                  </p>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="getkey-welcome">Welcome coins / new account</Label>
+                  <Input
+                    id="getkey-welcome"
+                    type="number"
+                    min={0}
+                    value={getkeyWelcomeCoins}
+                    onChange={(e) => setGetkeyWelcomeCoins(e.target.value)}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Granted when an account is first created (default 5 = one free key).
+                  </p>
                 </div>
                 <div className="flex items-center justify-between rounded-lg border border-border bg-muted/40 px-4 py-3 sm:col-span-3">
                   <div>

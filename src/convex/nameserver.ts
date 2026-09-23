@@ -54,13 +54,15 @@ export const DEFAULT_SETTINGS = {
   keyFormat: "",
   serverDomain: "", // empty = uses Convex site URL; set custom domain in Settings or Servers
   endpointAuthToken: "", // Bearer token for custom endpoints
-  // GetKey (coin system): 10 coins per key, key lasts 5 hours,
-  // max 3 generations per day per user.
-  getkeyPrice: 10,
+  // GetKey (Panxcz coin system): 5 coins per key, key lasts 5 hours,
+  // max 3 keys per day per account. New accounts get 5 welcome coins
+  // (one free trial key) — top-ups are credited by the owner.
+  getkeyPrice: 5,
   getkeyHours: 5,
   getkeyMaxPerDay: 3,
   getkeyWeb: true,
   getkeyServerId: undefined as Id<"servers"> | undefined,
+  getkeyWelcomeCoins: 5,
 } as const;
 
 /** Look up the single global settings doc (or null when never saved). */
@@ -122,6 +124,8 @@ export const getSettings = query({
       getkeyMaxPerDay: doc?.getkeyMaxPerDay ?? DEFAULT_SETTINGS.getkeyMaxPerDay,
       getkeyWeb: doc?.getkeyWeb ?? DEFAULT_SETTINGS.getkeyWeb,
       getkeyServerId: doc?.getkeyServerId,
+      getkeyWelcomeCoins:
+        doc?.getkeyWelcomeCoins ?? DEFAULT_SETTINGS.getkeyWelcomeCoins,
     };
   },
 });
@@ -146,6 +150,7 @@ export const updateSettings = mutation({
     getkeyMaxPerDay: v.optional(v.number()),
     getkeyWeb: v.optional(v.boolean()),
     getkeyServerId: v.optional(v.id("servers")),
+    getkeyWelcomeCoins: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
     await requireRole(ctx, ["owner"]);
@@ -185,6 +190,12 @@ export const updateSettings = mutation({
       Math.round(args.getkeyMaxPerDay ?? DEFAULT_SETTINGS.getkeyMaxPerDay),
     );
     const getkeyServerId = args.getkeyServerId ?? undefined;
+    const getkeyWelcomeCoins = Math.max(
+      0,
+      Math.round(
+        args.getkeyWelcomeCoins ?? DEFAULT_SETTINGS.getkeyWelcomeCoins,
+      ),
+    );
     const patch = {
       keyPrice: Math.max(0, Math.round(args.keyPrice)),
       defaultKeyUses: Math.max(0, Math.round(args.defaultKeyUses)),
@@ -204,6 +215,7 @@ export const updateSettings = mutation({
       getkeyMaxPerDay,
       getkeyWeb: args.getkeyWeb ?? DEFAULT_SETTINGS.getkeyWeb,
       getkeyServerId,
+      getkeyWelcomeCoins,
     };
     const doc = await getSettingsDoc(ctx);
     if (doc) {
@@ -410,6 +422,8 @@ export const updateServer = mutation({
     description: v.optional(v.string()),
     status: v.optional(v.union(v.literal("active"), v.literal("off"))),
     customSeal: v.optional(v.string()),
+    // Listed as a product on the public /getkey page.
+    publicGetkey: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     const { user } = await requireRole(ctx, ["owner", "admin"]);
@@ -431,6 +445,7 @@ export const updateServer = mutation({
     if (args.customSeal !== undefined) {
       patch.customSeal = args.customSeal.trim() || undefined;
     }
+    if (args.publicGetkey !== undefined) patch.publicGetkey = args.publicGetkey;
     await ctx.db.patch(args.id, patch);
   },
 });

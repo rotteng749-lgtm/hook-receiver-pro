@@ -7,22 +7,28 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { CopyButton } from "@/components/panel/CopyButton";
 import { PageHeader } from "@/components/panel/PageHeader";
+import { CopyButton } from "@/components/panel/CopyButton";
 import { api } from "@/convex/_generated/api";
 import { useMutation, useQuery } from "convex/react";
 import {
-  Clock,
+  Ban,
+  Coins,
   KeyRound,
   Loader2,
+  Minus,
+  Plus,
   RotateCcw,
-  Sparkles,
+  Search,
+  ShieldCheck,
   Terminal,
-  Zap,
+  Trash2,
+  Users,
 } from "lucide-react";
 import { motion } from "framer-motion";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { toast } from "sonner";
 
 const CONVEX_SITE =
@@ -41,17 +47,60 @@ const stagger = {
 };
 
 export default function GetKeyPage() {
-  const usage = useQuery(api.nameserver.listGetkeyUsage);
-  const mintTrialKey = useMutation(api.nameserver.mintTrialKey);
-  const resetUsage = useMutation(api.nameserver.resetGetkeyUsage);
+  const info = useQuery(api.getkey.info);
+  const accounts = useQuery(api.getkey.listAccounts);
+  const grantCoins = useMutation(api.getkey.grantCoins);
+  const setAccountBanned = useMutation(api.getkey.setAccountBanned);
+  const resetAccountDaily = useMutation(api.getkey.resetAccountDaily);
+  const deleteAccount = useMutation(api.getkey.deleteAccount);
 
-  const [busy, setBusy] = useState(false);
-  const [issued, setIssued] = useState<{ key: string; expiresAt: number } | null>(null);
-  const [resetting, setResetting] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  const [grantAmount, setGrantAmount] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState<string | null>(null);
 
-  const endpoint = `${CONVEX_SITE}/getkey`;
+  const rows = accounts ?? [];
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return rows;
+    return rows.filter(
+      (a) =>
+        a.handle.includes(q) ||
+        (a.telegramUsername ?? "").toLowerCase().includes(q) ||
+        (a.telegramId ?? "").includes(q) ||
+        (a.lastKey ?? "").toLowerCase().includes(q),
+    );
+  }, [rows, query]);
 
-  if (usage === undefined) {
+  const totalCoins = rows.reduce((sum, a) => sum + a.coins, 0);
+  const claimsToday = rows.reduce((sum, a) => sum + a.usedToday, 0);
+
+  const run = async (id: string, fn: () => Promise<unknown>, done: string) => {
+    setBusy(id);
+    try {
+      await fn();
+      toast.success(done);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Action failed");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const grant = (id: string, sign: 1 | -1) => {
+    const raw = grantAmount[id];
+    const amount = Math.abs(Number(raw ?? ""));
+    if (!Number.isFinite(amount) || amount === 0) {
+      toast.error("Enter an amount first");
+      return;
+    }
+    void run(
+      id,
+      () => grantCoins({ id: id as never, amount: amount * sign }),
+      `${sign > 0 ? "Added" : "Removed"} ${amount} coins`,
+    );
+  };
+
+  if (info === undefined || accounts === undefined) {
     return (
       <div className="flex min-h-[40vh] items-center justify-center">
         <Loader2 className="size-6 animate-spin text-muted-foreground" />
@@ -59,62 +108,11 @@ export default function GetKeyPage() {
     );
   }
 
-  const totalToday = usage.rows.reduce((sum, r) => sum + r.count, 0);
-
-  const handleMint = async () => {
-    setBusy(true);
-    try {
-      const res = await mintTrialKey({});
-      setIssued({ key: res.key, expiresAt: res.expiresAt });
-      toast.success(`Trial key issued on ${res.serverName}`);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not issue a trial key");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const handleReset = async (id?: string) => {
-    setResetting(id ?? "all");
-    try {
-      const res = await resetUsage(id ? { id: id as never } : {});
-      toast.success(`Cleared ${res.deleted} usage record(s)`);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not reset usage");
-    } finally {
-      setResetting(null);
-    }
-  };
-
   return (
     <div className="space-y-8">
       <PageHeader
         title="GetKey"
-        description="Token-based trial keys — 5 hours, a capped number per day, no account needed."
-        actions={
-          <>
-            <Button
-              variant="outline"
-              onClick={() => handleReset()}
-              disabled={resetting === "all" || usage.rows.length === 0}
-            >
-              {resetting === "all" ? (
-                <Loader2 className="size-4 animate-spin" />
-              ) : (
-                <RotateCcw className="size-4" />
-              )}
-              Reset today
-            </Button>
-            <Button onClick={handleMint} disabled={busy}>
-              {busy ? (
-                <Loader2 className="size-4 animate-spin" />
-              ) : (
-                <Sparkles className="size-4" />
-              )}
-              Issue trial key
-            </Button>
-          </>
-        }
+        description="Panxcz coin accounts — the public /getkey page spends coins (5 per 5-hour key) and links to the Telegram bot."
       />
 
       <motion.div
@@ -125,28 +123,28 @@ export default function GetKeyPage() {
       >
         {[
           {
-            icon: Clock,
-            label: "Key lifetime",
-            value: `${usage.hours}h`,
-            hint: "set in Settings → GetKey",
+            icon: Users,
+            label: "Coin accounts",
+            value: String(rows.length),
+            hint: "auto-created on first claim",
           },
           {
-            icon: Zap,
-            label: "Max per day / token",
-            value: String(usage.maxPerDay),
-            hint: "counted per API token",
+            icon: Coins,
+            label: "Coins outstanding",
+            value: String(totalCoins),
+            hint: "sum of all balances",
           },
           {
             icon: KeyRound,
-            label: "Issued today",
-            value: String(totalToday),
-            hint: `${usage.rows.length} token(s) used`,
+            label: "Keys claimed today",
+            value: String(claimsToday),
+            hint: `max ${info.maxPerDay} per account/day`,
           },
           {
-            icon: Sparkles,
-            label: "Coin price",
-            value: String(usage.price),
-            hint: "logged per issued key",
+            icon: ShieldCheck,
+            label: "Price / lifetime",
+            value: `${info.price} / ${info.hours}h`,
+            hint: `new accounts get ${info.welcomeCoins} coins`,
           },
         ].map((stat, i) => (
           <motion.div key={stat.label} custom={i} variants={stagger}>
@@ -158,7 +156,9 @@ export default function GetKeyPage() {
                 <div>
                   <p className="text-xs text-muted-foreground">{stat.label}</p>
                   <p className="text-xl font-semibold tracking-tight">{stat.value}</p>
-                  <p className="mt-0.5 text-[11px] text-muted-foreground/80">{stat.hint}</p>
+                  <p className="mt-0.5 text-[11px] text-muted-foreground/80">
+                    {stat.hint}
+                  </p>
                 </div>
               </CardContent>
             </Card>
@@ -166,139 +166,235 @@ export default function GetKeyPage() {
         ))}
       </motion.div>
 
-      {issued && (
-        <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
-          <Card className="border-primary/40 bg-primary/5">
-            <CardHeader>
-              <CardTitle className="text-base">Trial key issued</CardTitle>
-              <CardDescription>
-                Expires {new Date(issued.expiresAt).toLocaleString()} — 1 device, unlimited
-                connects until then.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="flex items-center gap-2">
-                <code className="flex-1 truncate rounded-lg border border-border/70 bg-background/70 px-3 py-2 font-mono text-sm">
-                  {issued.key}
-                </code>
-                <CopyButton value={issued.key} label="Key" />
-              </div>
-            </CardContent>
-          </Card>
-        </motion.div>
-      )}
-
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">How clients get a trial key</CardTitle>
-          <CardDescription>
-            The user's app sends its API token — the server issues a fresh trial key and
-            enforces the daily cap per token.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="space-y-2">
-            <Label className="text-xs text-muted-foreground">POST — issue a key</Label>
-            <div className="flex items-start gap-2">
-              <pre className="flex-1 overflow-x-auto rounded-lg border border-border/70 bg-background/70 p-3 text-xs leading-relaxed">
-                <code>{`curl -X POST ${endpoint} \\
-  -H 'Content-Type: application/json' \\
-  -d '{"token":"YOUR_API_TOKEN"}'`}</code>
-              </pre>
-              <CopyButton
-                value={`curl -X POST ${endpoint} -H 'Content-Type: application/json' -d '{"token":"YOUR_API_TOKEN"}'`}
-                label="Command"
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <CardTitle className="text-base">Coin accounts</CardTitle>
+              <CardDescription>
+                Top up after payment (Telegram / support channel). Users link their
+                account with <code className="font-mono">/link &lt;handle&gt;</code>{" "}
+                in the bot.
+              </CardDescription>
+            </div>
+            <div className="relative w-full sm:w-64">
+              <Search className="absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search handle, @username, key…"
+                className="pl-9"
               />
             </div>
           </div>
-
-          <div className="space-y-2">
-            <Label className="text-xs text-muted-foreground">
-              GET — check the remaining quota
-            </Label>
-            <div className="flex items-start gap-2">
-              <pre className="flex-1 overflow-x-auto rounded-lg border border-border/70 bg-background/70 p-3 text-xs leading-relaxed">
-                <code>{`${endpoint}?token=YOUR_API_TOKEN`}</code>
-              </pre>
-              <CopyButton value={`${endpoint}?token=YOUR_API_TOKEN`} label="URL" />
-            </div>
-          </div>
-
-          <div className="rounded-lg border border-border/70 bg-muted/30 p-3 text-xs text-muted-foreground">
-            Success returns{" "}
-            <code className="font-mono text-foreground">
-              {`{ ok, key, hours, expiresAt, usedToday, maxPerDay, remaining }`}
-            </code>
-            . When the cap is hit it returns HTTP 429 with{" "}
-            <code className="font-mono text-foreground">daily limit reached</code>.
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <div>
-              <CardTitle className="text-base">Today's usage</CardTitle>
-              <CardDescription>{usage.day} · UTC</CardDescription>
-            </div>
-            <Badge variant="outline" className="gap-1 font-normal">
-              <Terminal className="size-3" />
-              {usage.rows.length} token(s)
-            </Badge>
-          </div>
         </CardHeader>
         <CardContent>
-          {usage.rows.length === 0 ? (
+          {filtered.length === 0 ? (
             <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed border-border/70 py-10 text-center">
-              <KeyRound className="size-5 text-muted-foreground" />
+              <Coins className="size-5 text-muted-foreground" />
               <p className="text-sm text-muted-foreground">
-                No trial keys issued today.
+                No coin accounts yet.
               </p>
               <p className="max-w-sm text-xs text-muted-foreground/80">
-                Create an API token on the API page, then call the endpoint above to test the
-                full flow.
+                They appear automatically the first time someone claims a key on{" "}
+                <code className="font-mono">/getkey</code> or starts the bot.
               </p>
             </div>
           ) : (
             <div className="divide-y divide-border/60">
-              {usage.rows.map((row) => (
+              {filtered.map((a) => (
                 <div
-                  key={row._id}
-                  className="flex flex-wrap items-center justify-between gap-3 py-3"
+                  key={a._id}
+                  className="flex flex-col gap-3 py-4 lg:flex-row lg:items-center lg:justify-between"
                 >
                   <div className="min-w-0">
-                    <p className="truncate text-sm font-medium">{row.tokenLabel}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {row.count}/{usage.maxPerDay} used · {row.remaining} left ·{" "}
-                      {row.spentCoins} coins
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="truncate font-mono text-sm font-medium">
+                        {a.displayHandle || a.handle}
+                      </p>
+                      {a.banned ? (
+                        <Badge variant="destructive" className="font-normal">
+                          banned
+                        </Badge>
+                      ) : (
+                        <Badge variant="secondary" className="font-normal">
+                          {a.coins} coins
+                        </Badge>
+                      )}
+                      {a.telegramId && (
+                        <Badge variant="outline" className="font-normal">
+                          TG {a.telegramUsername ? `@${a.telegramUsername}` : a.telegramId}
+                        </Badge>
+                      )}
+                    </div>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {a.totalClaims} keys issued · {a.totalSpent} coins spent ·{" "}
+                      {a.usedToday} today
                     </p>
+                    {a.lastKey && (
+                      <p className="mt-1 flex items-center gap-1 font-mono text-xs text-muted-foreground">
+                        {a.lastKey}
+                        <CopyButton value={a.lastKey} label="Key" variant="ghost" size="icon" />
+                      </p>
+                    )}
                   </div>
-                  <div className="flex items-center gap-2">
-                    <Badge
-                      variant={row.remaining > 0 ? "secondary" : "destructive"}
-                      className="font-normal"
+
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Input
+                      value={grantAmount[a._id] ?? ""}
+                      onChange={(e) =>
+                        setGrantAmount((m) => ({ ...m, [a._id]: e.target.value }))
+                      }
+                      placeholder="coins"
+                      inputMode="numeric"
+                      className="w-20"
+                    />
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="cursor-pointer"
+                      disabled={busy === a._id}
+                      onClick={() => grant(a._id, 1)}
                     >
-                      {row.remaining > 0 ? "active" : "capped"}
-                    </Badge>
+                      <Plus className="size-3.5" />
+                      Add
+                    </Button>
                     <Button
                       size="sm"
                       variant="ghost"
-                      onClick={() => handleReset(row._id)}
-                      disabled={resetting === row._id}
+                      className="cursor-pointer"
+                      disabled={busy === a._id}
+                      onClick={() => grant(a._id, -1)}
                     >
-                      {resetting === row._id ? (
+                      <Minus className="size-3.5" />
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="cursor-pointer"
+                      disabled={busy === a._id}
+                      title="Clear today's counter"
+                      onClick={() =>
+                        void run(
+                          a._id,
+                          () => resetAccountDaily({ id: a._id as never }),
+                          "Daily counter cleared",
+                        )
+                      }
+                    >
+                      <RotateCcw className="size-3.5" />
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className={`cursor-pointer ${a.banned ? "text-emerald-500" : "text-destructive"}`}
+                      disabled={busy === a._id}
+                      title={a.banned ? "Re-enable account" : "Suspend account"}
+                      onClick={() =>
+                        void run(
+                          a._id,
+                          () =>
+                            setAccountBanned({
+                              id: a._id as never,
+                              banned: !a.banned,
+                            }),
+                          a.banned ? "Account re-enabled" : "Account suspended",
+                        )
+                      }
+                    >
+                      {busy === a._id ? (
                         <Loader2 className="size-3.5 animate-spin" />
                       ) : (
-                        <RotateCcw className="size-3.5" />
+                        <Ban className="size-3.5" />
                       )}
-                      Reset
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="cursor-pointer text-muted-foreground hover:text-destructive"
+                      disabled={busy === a._id}
+                      title="Delete account"
+                      onClick={() =>
+                        void run(
+                          a._id,
+                          () => deleteAccount({ id: a._id as never }),
+                          "Account deleted",
+                        )
+                      }
+                    >
+                      <Trash2 className="size-3.5" />
                     </Button>
                   </div>
                 </div>
               ))}
             </div>
           )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">How the claim flow works</CardTitle>
+          <CardDescription>
+            No system token needed — identity is the user&apos;s handle, coins pay
+            for keys, and the shortener is the gate.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4 text-sm">
+          <ol className="space-y-2 text-muted-foreground">
+            <li>
+              <span className="font-medium text-foreground">1.</span> User opens{" "}
+              <code className="font-mono">/getkey</code>, enters their Telegram ID or
+              handle → the account is created with{" "}
+              <span className="font-medium text-foreground">
+                {info.welcomeCoins} welcome coins
+              </span>
+              .
+            </li>
+            <li>
+              <span className="font-medium text-foreground">2.</span> They pick an
+              available product (manage the list in{" "}
+              <span className="font-medium text-foreground">Servers → Show on GetKey</span>
+              ) and pass a human check.
+            </li>
+            <li>
+              <span className="font-medium text-foreground">3.</span> Their claim goes
+              through your ShrtFly short link, then the key is issued and{" "}
+              <span className="font-medium text-foreground">
+                {info.price} coins
+              </span>{" "}
+              are deducted (max {info.maxPerDay}/day).
+            </li>
+          </ol>
+
+          <div className="space-y-2">
+            <Label className="text-xs text-muted-foreground">
+              Bot — link a web account
+            </Label>
+            <pre className="overflow-x-auto rounded-lg border border-border/70 bg-background/70 p-3 text-xs leading-relaxed">
+              <code>{`/start          → your Telegram ID + coin balance
+/link panxcz    → bind this chat to the "panxcz" account
+/getkey         → spend ${info.price} coins, get a ${info.hours}h key right in Telegram`}</code>
+            </pre>
+          </div>
+
+          <div className="space-y-2">
+            <Label className="flex items-center gap-2 text-xs text-muted-foreground">
+              <Terminal className="size-3.5" />
+              API — still available for apps (token + coins)
+            </Label>
+            <div className="flex items-start gap-2">
+              <pre className="flex-1 overflow-x-auto rounded-lg border border-border/70 bg-background/70 p-3 text-xs leading-relaxed">
+                <code>{`curl -X POST ${CONVEX_SITE}/getkey \\
+  -H 'Content-Type: application/json' \\
+  -d '{"token":"YOUR_API_TOKEN"}'`}</code>
+              </pre>
+              <CopyButton
+                value={`curl -X POST ${CONVEX_SITE}/getkey -H 'Content-Type: application/json' -d '{"token":"YOUR_API_TOKEN"}'`}
+                label="Command"
+              />
+            </div>
+          </div>
         </CardContent>
       </Card>
     </div>

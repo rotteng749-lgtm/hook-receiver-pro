@@ -367,6 +367,19 @@ export default function Servers() {
     }
   };
 
+  /** Show / hide this server as a product on the public /getkey page. */
+  const toggleGetkey = async (server: ServerRow) => {
+    try {
+      const next = server.publicGetkey === false;
+      await updateServer({ id: server._id, publicGetkey: next });
+      toast.success(
+        `"${server.name}" ${next ? "now shows" : "is hidden"} on the GetKey page`,
+      );
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to update");
+    }
+  };
+
   const remove = async (server: ServerRow) => {
     try {
       await deleteServer({ id: server._id });
@@ -535,6 +548,11 @@ echo $data["ok"] ? "OK!" : "Gagal: " . $data["reason"];`}</pre>
                     >
                       {server.status === "active" ? "active" : "off"}
                     </Badge>
+                    {server.publicGetkey !== false && server.status === "active" && (
+                      <Badge variant="outline" className="font-normal text-[11px]">
+                        on GetKey
+                      </Badge>
+                    )}
                   </div>
                   <p className="mt-1 flex items-center gap-2 font-mono text-xs text-muted-foreground">
                     {server.code}
@@ -562,6 +580,15 @@ echo $data["ok"] ? "OK!" : "Gagal: " . $data["reason"];`}</pre>
                       onClick={() => toggle(server)}
                     >
                       {server.status === "active" ? "Turn off" : "Turn on"}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="cursor-pointer"
+                      title="Include this server as a product on the public /getkey page"
+                      onClick={() => void toggleGetkey(server)}
+                    >
+                      {server.publicGetkey === false ? "Show on GetKey" : "Hide from GetKey"}
                     </Button>
                     <EditServerDialog server={server} />
                     <AlertDialog>

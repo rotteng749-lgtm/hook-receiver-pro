@@ -201,6 +201,15 @@ export default function TelegramPage() {
                 Token: configured (override with{" "}
                 <code className="rounded bg-muted px-1 py-0.5">TELEGRAM_BOT_TOKEN</code>)
               </p>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                Optional:{" "}
+                <code className="rounded bg-muted px-1 py-0.5">TELEGRAM_CHANNEL_ID</code>{" "}
+                + <code className="rounded bg-muted px-1 py-0.5">TELEGRAM_CHANNEL_URL</code>{" "}
+                require a channel join, and{" "}
+                <code className="rounded bg-muted px-1 py-0.5">TELEGRAM_SUPPORT_URL</code>{" "}
+                adds the support button. Users get keys and Panxcz coins in the bot
+                — linked to the website through /link.
+              </p>
             </div>
             <div className="flex gap-2">
               <Button
