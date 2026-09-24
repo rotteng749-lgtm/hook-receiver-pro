@@ -12,7 +12,9 @@ import {
   Coins,
   ExternalLink,
   Gamepad2,
+  Gift,
   IdCard,
+  Link2,
   Loader2,
   MonitorSmartphone,
   MousePointerClick,
@@ -86,6 +88,10 @@ interface AccountStatus {
   remaining: number;
   banned: boolean;
   welcomeCoins: number;
+  earnCoins: number;
+  earnMaxPerDay: number;
+  earnedToday: number;
+  earnRemaining: number;
 }
 
 export default function PublicGetKey() {
@@ -94,8 +100,11 @@ export default function PublicGetKey() {
   const accountStatus = useAction(api.getkey.accountStatus);
   const startClaim = useAction(api.getkey.startClaim);
   const redeemClaim = useMutation(api.getkey.redeemClaim);
+  const startEarn = useAction(api.getkey.startEarn);
+  const redeemEarn = useMutation(api.getkey.redeemEarn);
 
   const claimParam = searchParams.get("claim");
+  const coinsParam = searchParams.get("coins");
   const claimHandle = searchParams.get("h");
   const [handle, setHandle] = useStoredHandle();
   const [status, setStatus] = useState<AccountStatus | null>(null);
@@ -105,6 +114,11 @@ export default function PublicGetKey() {
   const [checking, setChecking] = useState(false);
   const [redeemError, setRedeemError] = useState<string | null>(null);
   const [token, setToken] = useState("");
+  const [earnToken, setEarnToken] = useState("");
+  const [earnBusy, setEarnBusy] = useState(false);
+  const [earnNotice, setEarnNotice] = useState<
+    { kind: "ok" | "error"; text: string } | null
+  >(null);
 
   const products = info?.products ?? [];
   const activeProduct =
@@ -196,6 +210,55 @@ export default function PublicGetKey() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [claimParam]);
 
+  // Auto-redeem when arriving back from the coin short link (?coins=<token>).
+  useEffect(() => {
+    if (!coinsParam) return;
+    const h = (claimHandle ?? handle).trim();
+    if (h.length < 3) {
+      setEarnNotice({
+        kind: "error",
+        text: "Open this coin link in the same browser you started with.",
+      });
+      return;
+    }
+    setEarnBusy(true);
+    setEarnNotice(null);
+    redeemEarn({ claimToken: coinsParam, handle: h })
+      .then((res) => {
+        setHandle(h);
+        setStatus((s) =>
+          s
+            ? {
+                ...s,
+                found: true,
+                coins: res.coins,
+                earnedToday: res.earnedToday,
+                earnRemaining: res.earnRemaining,
+              }
+            : s,
+        );
+        setEarnNotice({
+          kind: "ok",
+          text: `+${res.added} coins added — you now have ${res.coins}.`,
+        });
+        toast.success(`+${res.added} Panxcz coins`);
+      })
+      .catch((err) => {
+        setEarnNotice({
+          kind: "error",
+          text:
+            err instanceof Error ? err.message : "Could not credit the coins.",
+        });
+      })
+      .finally(() => {
+        setEarnBusy(false);
+        searchParams.delete("coins");
+        searchParams.delete("h");
+        setSearchParams(searchParams, { replace: true });
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [coinsParam]);
+
   const connectCommand = useMemo(
     () =>
       issued
@@ -227,9 +290,47 @@ export default function PublicGetKey() {
     }
   };
 
+  const handleEarn = async () => {
+    const captcha = earnToken || token;
+    if (captcha.length === 0) {
+      toast.error("Complete the human check first");
+      return;
+    }
+    setEarnBusy(true);
+    setEarnNotice(null);
+    try {
+      const res = await startEarn({
+        turnstileToken: captcha,
+        handle: handle.trim(),
+        origin: window.location.origin,
+      });
+      setEarnToken("");
+      setToken("");
+      // The short link is the gate — continue straight away.
+      window.location.href = res.shortUrl;
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Could not start the coin link",
+      );
+      setEarnBusy(false);
+    }
+  };
+
   const botLink = info?.botUsername
     ? `https://t.me/${info.botUsername}`
     : "https://t.me/";
+
+  const earnCoins = info?.earnCoins ?? 5;
+  const earnMaxPerDay = status?.earnMaxPerDay ?? info?.earnMaxPerDay ?? 3;
+  const earnLeft = status?.earnRemaining ?? earnMaxPerDay;
+  const earnDisabled =
+    earnBusy ||
+    handle.trim().length < 3 ||
+    earnCoins <= 0 ||
+    earnMaxPerDay <= 0 ||
+    earnLeft <= 0 ||
+    status?.banned === true ||
+    info?.enabled === false;
 
   return (
     <div className="relative min-h-screen overflow-hidden bg-[#0f1419] text-[#e7edf3]">
@@ -420,8 +521,8 @@ export default function PublicGetKey() {
                     <IdCard className="mt-0.5 size-3.5 shrink-0" />
                     New here? Your account is created automatically with{" "}
                     {status?.welcomeCoins ?? info?.welcomeCoins ?? 5} free coins —
-                    one trial key. Top up more coins through the bot or the
-                    support channel.
+                    one trial key. Earn more coins below (one short link pass ={" "}
+                    {info?.earnCoins ?? 5} coins) or ask the owner for a top-up.
                   </p>
                   {status?.banned === true && (
                     <p className="flex items-start gap-1.5 text-xs text-red-400">
@@ -433,7 +534,8 @@ export default function PublicGetKey() {
                     <p className="flex items-start gap-1.5 text-xs text-amber-400">
                       <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
                       Not enough coins — a key costs {status?.price ?? 5} but this
-                      account has {coins}. Top up below.
+                      account has {coins}. Earn more with the “Get coins” button
+                      below, or ask the owner for a top-up.
                     </p>
                   )}
                 </div>
@@ -515,30 +617,87 @@ export default function PublicGetKey() {
             )}
           </div>
 
-          {/* Top-up card */}
-          <div className="glass mt-6 rounded-2xl border border-white/10 p-6">
-            <div className="flex flex-wrap items-center justify-between gap-4">
+          {/* Earn coins (short-link) card */}
+          <div className="glass mt-6 rounded-2xl border border-[#4a9a8e]/25 p-6">
+            <div className="flex flex-wrap items-start justify-between gap-5">
               <div className="flex items-start gap-3">
-                <Coins className="mt-0.5 size-5 text-[#4a9a8e]" />
+                <div className="rounded-lg border border-[#4a9a8e]/30 bg-[#4a9a8e]/10 p-2">
+                  <Gift className="size-5 text-[#7fd0c2]" />
+                </div>
                 <div>
-                  <p className="font-medium">Need more coins?</p>
+                  <p className="font-semibold">Get coins</p>
                   <p className="mt-1 max-w-md text-sm text-[#a8b2c1]">
-                    Panxcz coins top up through the owner — open the support
-                    channel or the Telegram bot, send your handle + amount, and it
-                    gets credited after payment.
+                    Pass one short link and earn{" "}
+                    <span className="font-semibold text-white">
+                      +{earnCoins} Panxcz coins
+                    </span>{" "}
+                    — that&apos;s one {info?.hours ?? 5}-hour key. Up to{" "}
+                    {earnMaxPerDay} link{earnMaxPerDay === 1 ? "" : "s"} per day.
                   </p>
+                  <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
+                    <span className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[#a8b2c1]">
+                      <Coins className="size-3 text-[#7fd0c2]" />
+                      {status?.found ? `${coins} coins` : "balance after first login"}
+                    </span>
+                    <span className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[#a8b2c1]">
+                      <Link2 className="size-3 text-[#7fd0c2]" />
+                      {status?.earnedToday ?? 0}/{earnMaxPerDay} link passes today
+                    </span>
+                  </div>
                 </div>
               </div>
-              <a
-                href={botLink}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex h-10 cursor-pointer items-center gap-2 rounded-lg bg-[#4a9a8e] px-4 text-sm font-semibold text-[#0f1419] transition-colors hover:bg-[#58b3a5]"
-              >
-                <Send className="size-4" />
-                Contact support
-              </a>
+
+              <div className="flex w-full flex-col items-stretch gap-3 sm:w-56">
+                {issued !== null && (
+                  <Turnstile onToken={setEarnToken} className="flex justify-center" />
+                )}
+                <Button
+                  onClick={handleEarn}
+                  disabled={earnDisabled}
+                  className="h-11 cursor-pointer bg-[#4a9a8e] font-semibold text-[#0f1419] transition-colors hover:bg-[#58b3a5] disabled:opacity-40"
+                >
+                  {earnBusy ? (
+                    <Loader2 className="mr-2 size-4 animate-spin" />
+                  ) : (
+                    <Coins className="mr-2 size-4" />
+                  )}
+                  {earnLeft <= 0
+                    ? "Daily earn limit reached"
+                    : `Get +${earnCoins} coins`}
+                </Button>
+                <a
+                  href={botLink}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex h-10 cursor-pointer items-center justify-center gap-2 rounded-lg border border-white/15 text-sm font-medium text-white transition-colors hover:bg-white/10"
+                >
+                  <Send className="size-4" />
+                  Telegram top-up
+                </a>
+              </div>
             </div>
+
+            {earnNotice && (
+              <p
+                className={`mt-4 flex items-start gap-1.5 rounded-xl border p-3 text-xs ${
+                  earnNotice.kind === "ok"
+                    ? "border-[#4a9a8e]/40 bg-[#4a9a8e]/10 text-[#9be0d3]"
+                    : "border-red-500/30 bg-red-500/10 text-red-300"
+                }`}
+              >
+                {earnNotice.kind === "ok" ? (
+                  <BadgeCheck className="mt-0.5 size-3.5 shrink-0" />
+                ) : (
+                  <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
+                )}
+                {earnNotice.text}
+              </p>
+            )}
+
+            <p className="mt-4 text-[11px] leading-relaxed text-[#6b7a8d]">
+              Coins are also credited by the owner after payment — open the
+              Telegram bot, send your handle and you can top up there too.
+            </p>
             <p className="mt-4 border-t border-white/10 pt-3 text-[11px] leading-relaxed text-[#6b7a8d]">
               📌 Disclaimer: The information shared in this channel is for
               educational purposes only and is not professional advice. Please

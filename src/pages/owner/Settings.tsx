@@ -113,6 +113,8 @@ export default function SettingsPage() {
   const [getkeyServerId, setGetkeyServerId] = useState("");
   const [getkeyWeb, setGetkeyWeb] = useState(true);
   const [getkeyWelcomeCoins, setGetkeyWelcomeCoins] = useState("5");
+  const [getkeyEarnCoins, setGetkeyEarnCoins] = useState("5");
+  const [getkeyEarnMaxPerDay, setGetkeyEarnMaxPerDay] = useState("3");
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -133,6 +135,8 @@ export default function SettingsPage() {
       setGetkeyServerId(settings.getkeyServerId ?? "");
       setGetkeyWeb(settings.getkeyWeb ?? true);
       setGetkeyWelcomeCoins(String(settings.getkeyWelcomeCoins ?? 5));
+      setGetkeyEarnCoins(String(settings.getkeyEarnCoins ?? 5));
+      setGetkeyEarnMaxPerDay(String(settings.getkeyEarnMaxPerDay ?? 3));
     }
   }, [settings]);
 
@@ -205,6 +209,11 @@ export default function SettingsPage() {
         getkeyMaxPerDay: Number(getkeyMaxPerDay) || 1,
         getkeyWeb,
         getkeyWelcomeCoins: Number(getkeyWelcomeCoins) || 0,
+        getkeyEarnCoins: Number(getkeyEarnCoins) || 0,
+        getkeyEarnMaxPerDay:
+          getkeyEarnMaxPerDay.trim() === ""
+            ? 0
+            : Math.max(0, Number(getkeyEarnMaxPerDay) || 0),
         getkeyServerId: getkeyServerId
           ? (getkeyServerId as Parameters<typeof updateSettings>[0]["getkeyServerId"])
           : undefined,
@@ -527,8 +536,9 @@ export default function SettingsPage() {
                 </CardTitle>
                 <CardDescription>
                   Controls the public /getkey page and the API endpoint — how long
-                  trial keys last, their coin price, and how many each account may
-                  claim per day.
+                  trial keys last, their coin price, how many each account may
+                  claim per day, and how fast they earn coins from your short
+                  links.
                 </CardDescription>
               </CardHeader>
               <CardContent className="grid grid-cols-1 gap-5 sm:grid-cols-3">
@@ -578,6 +588,32 @@ export default function SettingsPage() {
                   />
                   <p className="text-xs text-muted-foreground">
                     Granted when an account is first created (default 5 = one free key).
+                  </p>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="getkey-earn">Coins per short-link pass</Label>
+                  <Input
+                    id="getkey-earn"
+                    type="number"
+                    min={0}
+                    value={getkeyEarnCoins}
+                    onChange={(e) => setGetkeyEarnCoins(e.target.value)}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Credited when a user passes your ShrtFly link (default 5 = one key).
+                  </p>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="getkey-earn-max">Coin passes per day</Label>
+                  <Input
+                    id="getkey-earn-max"
+                    type="number"
+                    min={0}
+                    value={getkeyEarnMaxPerDay}
+                    onChange={(e) => setGetkeyEarnMaxPerDay(e.target.value)}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    How many times one account can earn coins per day (0 = earn off).
                   </p>
                 </div>
                 <div className="flex items-center justify-between rounded-lg border border-border bg-muted/40 px-4 py-3 sm:col-span-3">

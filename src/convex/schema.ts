@@ -63,6 +63,12 @@ const schema = defineSchema(
       handle: v.optional(v.string()), // normalized account handle the claim is bound to
       accountId: v.optional(v.id("getkeyAccounts")),
       serverId: v.optional(v.id("servers")), // product the key is minted for
+      // What the claim pays out when it is redeemed:
+      //   "key"   → a trial key (startClaim/redeemClaim)
+      //   "coins" → Panxcz coins (startEarn/redeemEarn, "Get coins" button)
+      // undefined = legacy key claim.
+      kind: v.optional(v.string()),
+      coins: v.optional(v.number()), // coin payout for a "coins" claim
     }).index("by_token", ["token"]),
 
     // Panxcz-coin accounts — the identity behind the public /getkey page.
@@ -81,6 +87,10 @@ const schema = defineSchema(
       totalSpent: v.number(), // coins ever spent
       day: v.optional(v.string()), // UTC date of the last claim
       dayCount: v.optional(v.number()), // keys issued on `day`
+      // Short-link coin earnings ("Get coins" on /getkey).
+      earnDay: v.optional(v.string()), // UTC date of the last coin earn
+      earnCount: v.optional(v.number()), // short links passed on `earnDay`
+      totalEarned: v.optional(v.number()), // coins ever earned from short links
       banned: v.optional(v.boolean()),
       lastKey: v.optional(v.string()), // last key issued (resend from the bot)
       lastKeyExpiresAt: v.optional(v.number()),
@@ -255,6 +265,12 @@ const schema = defineSchema(
       // Coins handed to a brand-new /getkey account on first use (default 5
       // = one free trial key). Top-ups are done by the owner afterwards.
       getkeyWelcomeCoins: v.optional(v.number()),
+      // Coins credited every time a user passes a ShrtFly short link
+      // ("Get coins" button on /getkey). Default 5 = one key.
+      getkeyEarnCoins: v.optional(v.number()),
+      // How many short-link passes one account may redeem per UTC day
+      // (default 3). 0 = the earn button is disabled.
+      getkeyEarnMaxPerDay: v.optional(v.number()),
     }).index("by_scope", ["scope"]),
 
     // User-created custom HTTP endpoints. Each row becomes a live route

@@ -11,9 +11,16 @@
  *               →  pass through the monetized short link
  *               →  /getkey?claim=… auto-redeems  →  key valid 5 hours
  *
+ * Coins themselves are earned the same way, with the "Get coins" button:
+ *
+ *   tap Get coins  →  startEarn (daily earn quota checked, ShrtFly short link)
+ *                  →  pass through the monetized short link
+ *                  →  /getkey?coins=… auto-redeems  →  +N coins
+ *
  * Every claim costs `settings.getkeyPrice` coins (default 5) and the account
  * can be linked to a Telegram chat (`/link <handle>`), so the bot and the
- * website share one balance.
+ * website share one balance. The owner can also top an account up by hand
+ * (panel GetKey page or the bot's `/addcoins`).
  *
  * Self-contained module (own settings helpers, own key generator) so Convex's
  * type inference cannot form a circular reference through nameserver.ts.
@@ -37,7 +44,12 @@ const PRICE_DEFAULT = 5; // coins per key
 const HOURS_DEFAULT = 5; // key lifetime
 const MAX_PER_DAY_DEFAULT = 3;
 const WELCOME_DEFAULT = 5; // coins given to a brand-new account
+const EARN_DEFAULT = 5; // coins per short-link pass
+const EARN_MAX_PER_DAY_DEFAULT = 3; // short-link passes per account/day
 const CLAIM_TTL_MS = 15 * 60 * 1000;
+
+/** ShrtFly fallback key — same key the shortener page ships with. */
+const SHRTFLY_FALLBACK_KEY = "ea3e5b3e3dcd0019ac9f395f2d8e4062";
 
 const TURNSTILE_VERIFY_URL =
   "https://challenges.cloudflare.com/turnstile/v0/siteverify";
@@ -58,6 +70,10 @@ export interface GetkeyInfo {
   hours: number;
   maxPerDay: number;
   welcomeCoins: number;
+  /** Coins credited per ShrtFly short-link pass (0 = earning disabled). */
+  earnCoins: number;
+  /** Short-link passes an account may redeem per UTC day. */
+  earnMaxPerDay: number;
   products: GetkeyProduct[];
   botUsername: string;
 }
@@ -73,6 +89,10 @@ export interface AccountStatus {
   remaining: number;
   banned: boolean;
   welcomeCoins: number;
+  earnCoins: number;
+  earnMaxPerDay: number;
+  earnedToday: number;
+  earnRemaining: number;
 }
 
 export type IssueResult =
@@ -258,6 +278,42 @@ async function verifyTurnstile(token: string): Promise<boolean> {
   }
 }
 
+/**
+ * Wrap a URL in the owner's ShrtFly short link. Returns the original URL when
+ * ShrtFly is unreachable or answers with an error, so the flow never
+ * hard-fails on the shortener.
+ */
+async function shortenWithShrtFly(
+  settings: Doc<"settings"> | null,
+  targetUrl: string,
+): Promise<string> {
+  const apiKey = settings?.shortenerApiKey || SHRTFLY_FALLBACK_KEY;
+  const params = new URLSearchParams({
+    api: apiKey,
+    url: targetUrl,
+    type: String(settings?.shortenerAdType === 2 ? 2 : 1),
+    format: "json",
+  });
+  try {
+    const res = await fetch(`https://shrtfly.com/api?${params.toString()}`);
+    const data = (await res.json()) as {
+      status?: string;
+      result?: { shorten_url?: string } | string;
+    };
+    if (
+      data?.status === "success" &&
+      typeof data.result === "object" &&
+      typeof data.result?.shorten_url === "string" &&
+      data.result.shorten_url.startsWith("http")
+    ) {
+      return data.result.shorten_url;
+    }
+  } catch {
+    /* fall through to the direct URL */
+  }
+  return targetUrl;
+}
+
 /** Owner/admin guard for the panel-side endpoints. */
 async function requirePanelRole(ctx: QueryCtx | MutationCtx) {
   const userId = await getAuthUserId(ctx);
@@ -284,6 +340,8 @@ export const info = query({
       hours: doc?.getkeyHours ?? HOURS_DEFAULT,
       maxPerDay: doc?.getkeyMaxPerDay ?? MAX_PER_DAY_DEFAULT,
       welcomeCoins: doc?.getkeyWelcomeCoins ?? WELCOME_DEFAULT,
+      earnCoins: doc?.getkeyEarnCoins ?? EARN_DEFAULT,
+      earnMaxPerDay: doc?.getkeyEarnMaxPerDay ?? EARN_MAX_PER_DAY_DEFAULT,
       products,
       botUsername: doc?.telegramBotUsername ?? "",
     };
@@ -302,6 +360,8 @@ export const accountStatus = action({
     const hours = doc?.getkeyHours ?? HOURS_DEFAULT;
     const maxPerDay = doc?.getkeyMaxPerDay ?? MAX_PER_DAY_DEFAULT;
     const welcomeCoins = doc?.getkeyWelcomeCoins ?? WELCOME_DEFAULT;
+    const earnCoins = doc?.getkeyEarnCoins ?? EARN_DEFAULT;
+    const earnMaxPerDay = doc?.getkeyEarnMaxPerDay ?? EARN_MAX_PER_DAY_DEFAULT;
     const handle = normalizeHandle(args.handle);
     const base = {
       handle,
@@ -309,8 +369,12 @@ export const accountStatus = action({
       hours,
       maxPerDay,
       welcomeCoins,
+      earnCoins,
+      earnMaxPerDay,
       remaining: maxPerDay,
       usedToday: 0,
+      earnedToday: 0,
+      earnRemaining: earnMaxPerDay,
     };
     if (handle.length < 3) {
       return { ...base, found: false, coins: 0, banned: false };
@@ -323,6 +387,7 @@ export const accountStatus = action({
     }
     const today = utcDay();
     const used = account.day === today ? (account.dayCount ?? 0) : 0;
+    const earned = account.earnDay === today ? (account.earnCount ?? 0) : 0;
     return {
       ...base,
       found: true,
@@ -330,6 +395,8 @@ export const accountStatus = action({
       banned: account.banned === true,
       usedToday: used,
       remaining: Math.max(0, maxPerDay - used),
+      earnedToday: earned,
+      earnRemaining: Math.max(0, earnMaxPerDay - earned),
     };
   },
 });
@@ -425,7 +492,7 @@ export const linkTelegramInternal = internalMutation({
   },
 });
 
-/** Create the claim row for the shortener gate. */
+/** Create the claim row for the shortener gate (key or coin payout). */
 export const createClaimInternal = internalMutation({
   args: {
     token: v.string(),
@@ -433,6 +500,8 @@ export const createClaimInternal = internalMutation({
     accountId: v.id("getkeyAccounts"),
     serverId: v.optional(v.id("servers")),
     expiresAt: v.number(),
+    kind: v.optional(v.string()),
+    coins: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
     await ctx.db.insert("keyClaims", {
@@ -441,6 +510,8 @@ export const createClaimInternal = internalMutation({
       handle: args.handle,
       accountId: args.accountId,
       serverId: args.serverId,
+      kind: args.kind,
+      coins: args.coins,
       createdAt: Date.now(),
       expiresAt: args.expiresAt,
       redeemed: false,
@@ -669,35 +740,13 @@ export const startClaim = action({
       accountId: account._id,
       serverId,
       expiresAt,
+      kind: "key",
     });
 
     // Wrap the continue URL in the owner's ShrtFly short link. If ShrtFly is
     // down we fall back to the direct URL so the flow never hard-fails.
     const continueUrl = `${origin}/getkey?claim=${claimToken}&h=${encodeURIComponent(handle)}`;
-    let shortUrl = continueUrl;
-    const apiKey = settings?.shortenerApiKey || "ea3e5b3e3dcd0019ac9f395f2d8e4062";
-    const params = new URLSearchParams({
-      api: apiKey,
-      url: continueUrl,
-      type: String(settings?.shortenerAdType === 2 ? 2 : 1),
-      format: "json",
-    });
-    try {
-      const res = await fetch(`https://shrtfly.com/api?${params.toString()}`);
-      const data = (await res.json()) as {
-        status?: string;
-        result?: { shorten_url?: string } | string;
-      };
-      if (
-        data?.status === "success" &&
-        typeof data.result === "object" &&
-        typeof data.result?.shorten_url === "string"
-      ) {
-        shortUrl = data.result.shorten_url;
-      }
-    } catch {
-      // keep the direct continue URL
-    }
+    const shortUrl = await shortenWithShrtFly(settings, continueUrl);
 
     return { claimToken, shortUrl, expiresAt, handle };
   },
@@ -739,6 +788,10 @@ export const redeemClaim = mutation({
       throw new Error("This claim belongs to a different account.");
     }
 
+    if (claim.kind === "coins") {
+      throw new Error("This link pays out coins — use the Get coins button.");
+    }
+
     const res: IssueResult = await ctx.runMutation(
       internal.getkey.issueForKey,
       { handle, serverId: claim.serverId },
@@ -756,6 +809,202 @@ export const redeemClaim = mutation({
       maxPerDay: res.maxPerDay,
       remaining: Math.max(0, res.maxPerDay - res.used),
       coins: res.coins,
+    };
+  },
+});
+
+/* -------------------- public coin-earn flow (web) ---------------------- */
+
+/** Coins credited by one short-link pass (0 disables the earn button). */
+async function earnConfig(ctx: QueryCtx | MutationCtx) {
+  const settings = await readSettings(ctx);
+  const earnCoins = Math.max(
+    0,
+    settings?.getkeyEarnCoins ?? EARN_DEFAULT,
+  );
+  const earnMaxPerDay = Math.max(
+    0,
+    settings?.getkeyEarnMaxPerDay ?? EARN_MAX_PER_DAY_DEFAULT,
+  );
+  return { earnCoins, earnMaxPerDay };
+}
+
+/**
+ * Step 1 of "Get coins": validate the account and hand back a ShrtFly short
+ * link wrapping `/getkey?coins=<token>&h=<handle>`. The coins are only
+ * credited when the user comes back through the link (redeemEarn).
+ */
+export const startEarn = action({
+  args: {
+    turnstileToken: v.optional(v.string()),
+    handle: v.string(),
+    origin: v.string(),
+  },
+  handler: async (
+    ctx,
+    args,
+  ): Promise<{
+    claimToken: string;
+    shortUrl: string;
+    coins: number;
+    expiresAt: number;
+    handle: string;
+    earnedToday: number;
+    earnMaxPerDay: number;
+  }> => {
+    const captcha = (args.turnstileToken ?? "").trim();
+    const secret = process.env.TURNSTILE_SECRET_KEY ?? TURNSTILE_TEST_SECRET;
+    if (secret !== TURNSTILE_TEST_SECRET) {
+      if (!(await verifyTurnstile(captcha))) {
+        throw new Error(
+          "Human verification failed — please complete the captcha and try again.",
+        );
+      }
+    } else if (captcha.length > 0) {
+      await verifyTurnstile(captcha).catch(() => {});
+    }
+
+    const handle = normalizeHandle(args.handle);
+    if (handle.length < 3) {
+      throw new Error(
+        "Enter your Telegram ID or a handle of at least 3 characters.",
+      );
+    }
+
+    const settings = await ctx.runQuery(internal.getkey.settingsInternal, {});
+    if (settings?.getkeyWeb === false) {
+      throw new Error("The free key page is currently disabled.");
+    }
+    const earnCoins = Math.max(0, settings?.getkeyEarnCoins ?? EARN_DEFAULT);
+    const earnMaxPerDay = Math.max(
+      0,
+      settings?.getkeyEarnMaxPerDay ?? EARN_MAX_PER_DAY_DEFAULT,
+    );
+    if (earnCoins <= 0 || earnMaxPerDay <= 0) {
+      throw new Error(
+        "Free coins are switched off right now — ask the owner for a top-up.",
+      );
+    }
+
+    const account = await ctx.runMutation(
+      internal.getkey.getOrCreateAccountInternal,
+      { handle },
+    );
+    if (account.banned === true) {
+      throw new Error("This account is suspended — contact support.");
+    }
+    const today = utcDay();
+    const earnedToday = account.earnDay === today ? (account.earnCount ?? 0) : 0;
+    if (earnedToday >= earnMaxPerDay) {
+      throw new Error(
+        `Daily earn limit reached — ${earnedToday}/${earnMaxPerDay} link passes today. Come back tomorrow or ask the owner for a top-up.`,
+      );
+    }
+
+    let origin: string;
+    try {
+      origin = new URL(args.origin).origin;
+      if (!origin.startsWith("http")) throw new Error("bad origin");
+    } catch {
+      throw new Error("Invalid page origin.");
+    }
+
+    const claimToken = (
+      crypto.randomUUID().replace(/-/g, "") +
+      crypto.randomUUID().replace(/-/g, "")
+    ).slice(0, 64);
+    const expiresAt = Date.now() + CLAIM_TTL_MS;
+    await ctx.runMutation(internal.getkey.createClaimInternal, {
+      token: claimToken,
+      handle,
+      accountId: account._id,
+      expiresAt,
+      kind: "coins",
+      coins: earnCoins,
+    });
+
+    const continueUrl = `${origin}/getkey?coins=${claimToken}&h=${encodeURIComponent(handle)}`;
+    const shortUrl = await shortenWithShrtFly(settings, continueUrl);
+
+    return {
+      claimToken,
+      shortUrl,
+      coins: earnCoins,
+      expiresAt,
+      handle,
+      earnedToday,
+      earnMaxPerDay,
+    };
+  },
+});
+
+/** What a redeemed coin claim paid out. */
+export interface EarnedCoins {
+  added: number;
+  coins: number;
+  earnedToday: number;
+  earnMaxPerDay: number;
+  earnRemaining: number;
+}
+
+/** Step 2 of "Get coins": back from the short link — credit the coins. */
+export const redeemEarn = mutation({
+  args: { claimToken: v.string(), handle: v.string() },
+  handler: async (ctx, args): Promise<EarnedCoins> => {
+    const token = args.claimToken.trim().toLowerCase();
+    const claim = await ctx.db
+      .query("keyClaims")
+      .withIndex("by_token", (q) => q.eq("token", token))
+      .first();
+    if (!claim || claim.accountId === undefined || claim.kind !== "coins") {
+      throw new Error("Coin link not found — press Get coins to start again.");
+    }
+    if (claim.redeemed === true) {
+      throw new Error("This coin link was already used — generate a new one.");
+    }
+    if (Date.now() > claim.expiresAt) {
+      throw new Error("This coin link expired — generate a new one.");
+    }
+    const handle = normalizeHandle(args.handle);
+    if (claim.handle !== undefined && claim.handle !== handle) {
+      throw new Error("This coin link belongs to a different account.");
+    }
+
+    const account = await ctx.db.get(claim.accountId);
+    if (account === null) {
+      throw new Error("Account not found — start over from the GetKey page.");
+    }
+    if (account.banned === true) {
+      throw new Error("This account is suspended — contact support.");
+    }
+
+    const { earnMaxPerDay } = await earnConfig(ctx);
+    const today = utcDay();
+    const earnedToday = account.earnDay === today ? (account.earnCount ?? 0) : 0;
+    if (earnMaxPerDay <= 0 || earnedToday >= earnMaxPerDay) {
+      throw new Error(
+        `Daily earn limit reached — ${earnedToday}/${earnMaxPerDay} link passes today.`,
+      );
+    }
+
+    const added = Math.max(0, Math.round(claim.coins ?? 0));
+    const coins = (account.coins ?? 0) + added;
+    const nextEarned = earnedToday + 1;
+    await ctx.db.patch(account._id, {
+      coins,
+      totalEarned: (account.totalEarned ?? 0) + added,
+      earnDay: today,
+      earnCount: nextEarned,
+      lastSeen: Date.now(),
+    });
+    await ctx.db.patch(claim._id, { redeemed: true });
+
+    return {
+      added,
+      coins,
+      earnedToday: nextEarned,
+      earnMaxPerDay,
+      earnRemaining: Math.max(0, earnMaxPerDay - nextEarned),
     };
   },
 });
@@ -795,8 +1044,10 @@ export const listAccounts = query({
       coins: a.coins ?? 0,
       totalClaims: a.totalClaims ?? 0,
       totalSpent: a.totalSpent ?? 0,
+      totalEarned: a.totalEarned ?? 0,
       banned: a.banned === true,
       usedToday: a.day === utcDay() ? (a.dayCount ?? 0) : 0,
+      earnedToday: a.earnDay === utcDay() ? (a.earnCount ?? 0) : 0,
       lastKey: a.lastKey ?? null,
       createdAt: a.createdAt,
       lastSeen: a.lastSeen,
@@ -889,12 +1140,17 @@ export const deleteAccount = mutation({
   },
 });
 
-/** Owner/admin: clear an account's daily counter. */
+/** Owner/admin: clear an account's daily counters (keys + coin earns). */
 export const resetAccountDaily = mutation({
   args: { id: v.id("getkeyAccounts") },
   handler: async (ctx, { id }) => {
     await requirePanelRole(ctx);
-    await ctx.db.patch(id, { day: undefined, dayCount: 0 });
+    await ctx.db.patch(id, {
+      day: undefined,
+      dayCount: 0,
+      earnDay: undefined,
+      earnCount: 0,
+    });
     return { ok: true };
   },
 });

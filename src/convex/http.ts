@@ -198,10 +198,23 @@ function safeLog(str: string, maxLen = 512): string {
 
 /* --- Global rate limiter for admin-write endpoints --- */
 const ADMIN_RATE_BUCKETS = new Map<string, { count: number; ts: number }>();
-const ADMIN_RATE_MAX = 30; // max 30 admin actions per minute per IP
+const ADMIN_RATE_MAX = 30; // max 30 admin actions per minute per IP (bucket)
 
 function adminRateLimit(ip: string): boolean {
   return rateHit(`admin:${ip}`, ADMIN_RATE_MAX, ADMIN_RATE_BUCKETS);
+}
+
+/**
+ * A key that has reached its usage limit may still be used by a device that is
+ * already bound to it. `uses` counts device activations (see recordConnect),
+ * not connects — so a device that already works keeps working until the key
+ * expires, and only brand-new devices are rejected once the limit is hit.
+ */
+function deviceAlreadyBound(doc: Doc<"connectKeys">, rawDevice: string): boolean {
+  const device = rawDevice.trim().toUpperCase();
+  if (device.length === 0) return false;
+  const bound = doc.devices ?? (doc.deviceId ? [doc.deviceId] : []);
+  return bound.some((d) => d.toUpperCase() === device);
 }
 
 /* ------------------------------------------------------------------ */
@@ -421,7 +434,7 @@ const connect = httpAction(async (ctx, request) => {
   }
   if (keyDoc.status === "revoked") return await fail(403, "revoked", "key has been revoked");
   if (keyDoc.expiresAt > 0 && Date.now() > keyDoc.expiresAt) return await fail(403, "expired", "key has expired");
-  if (keyDoc.maxUses > 0 && keyDoc.uses >= keyDoc.maxUses) return await fail(403, "usage_limit", "key has reached its usage limit");
+  if (keyDoc.maxUses > 0 && keyDoc.uses >= keyDoc.maxUses && !deviceAlreadyBound(keyDoc, device)) return await fail(403, "usage_limit", "key has reached its usage limit");
 
   const boundDevices = keyDoc.devices ?? (keyDoc.deviceId ? [keyDoc.deviceId] : []);
   const knownDevice = device.length > 0 && boundDevices.some((d) => d.toUpperCase() === device);
@@ -825,7 +838,7 @@ const login = httpAction(async (ctx, request) => {
     accessLog(request, 403, "expired");
     return json({ ok: false, status: false, reason: `License expired: ${expiredDate}`, seal, data: {} }, 403, cors);
   }
-  if (keyDoc.maxUses > 0 && keyDoc.uses >= keyDoc.maxUses) {
+  if (keyDoc.maxUses > 0 && keyDoc.uses >= keyDoc.maxUses && !deviceAlreadyBound(keyDoc, hwid)) {
     accessLog(request, 403, "usage_limit");
     return json({ ok: false, status: false, reason: "Key has reached its usage limit", seal, data: {} }, 403, cors);
   }

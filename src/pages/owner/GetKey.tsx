@@ -16,6 +16,7 @@ import { useMutation, useQuery } from "convex/react";
 import {
   Ban,
   Coins,
+  Gift,
   KeyRound,
   Loader2,
   Minus,
@@ -73,6 +74,7 @@ export default function GetKeyPage() {
 
   const totalCoins = rows.reduce((sum, a) => sum + a.coins, 0);
   const claimsToday = rows.reduce((sum, a) => sum + a.usedToday, 0);
+  const earnedTotal = rows.reduce((sum, a) => sum + (a.totalEarned ?? 0), 0);
 
   const run = async (id: string, fn: () => Promise<unknown>, done: string) => {
     setBusy(id);
@@ -145,6 +147,12 @@ export default function GetKeyPage() {
             label: "Price / lifetime",
             value: `${info.price} / ${info.hours}h`,
             hint: `new accounts get ${info.welcomeCoins} coins`,
+          },
+          {
+            icon: Gift,
+            label: "Coins earned via links",
+            value: String(earnedTotal),
+            hint: `+${info.earnCoins} per ShrtFly pass · max ${info.earnMaxPerDay}/day`,
           },
         ].map((stat, i) => (
           <motion.div key={stat.label} custom={i} variants={stagger}>
@@ -229,7 +237,7 @@ export default function GetKeyPage() {
                     </div>
                     <p className="mt-1 text-xs text-muted-foreground">
                       {a.totalClaims} keys issued · {a.totalSpent} coins spent ·{" "}
-                      {a.usedToday} today
+                      {a.usedToday} today · {a.totalEarned ?? 0} earned via links
                     </p>
                     {a.lastKey && (
                       <p className="mt-1 flex items-center gap-1 font-mono text-xs text-muted-foreground">
@@ -364,6 +372,21 @@ export default function GetKeyPage() {
                 {info.price} coins
               </span>{" "}
               are deducted (max {info.maxPerDay}/day).
+            </li>
+            <li>
+              <span className="font-medium text-foreground">4.</span> Out of coins?
+              The same page has a{" "}
+              <span className="font-medium text-foreground">Get coins</span> button:
+              one more pass through your ShrtFly link credits{" "}
+              <span className="font-medium text-foreground">
+                +{info.earnCoins} coins
+              </span>{" "}
+              (max {info.earnMaxPerDay}/day per account).
+            </li>
+            <li>
+              <span className="font-medium text-foreground">5.</span> You can always
+              top an account up by hand with the +/− buttons above, or with
+              <code className="font-mono"> /addcoins</code> in the bot.
             </li>
           </ol>
 
