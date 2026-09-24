@@ -323,12 +323,16 @@ export default function PublicGetKey() {
   const earnCoins = info?.earnCoins ?? 5;
   const earnMaxPerDay = status?.earnMaxPerDay ?? info?.earnMaxPerDay ?? 3;
   const earnLeft = status?.earnRemaining ?? earnMaxPerDay;
+  // The coin flow needs its own human-check token. It can reuse the one from
+  // the key step, so the widget below only shows when there isn't one yet.
+  const hasCaptcha = earnToken.length > 0 || token.length > 0;
   const earnDisabled =
     earnBusy ||
     handle.trim().length < 3 ||
     earnCoins <= 0 ||
     earnMaxPerDay <= 0 ||
     earnLeft <= 0 ||
+    !hasCaptcha ||
     status?.banned === true ||
     info?.enabled === false;
 
@@ -648,12 +652,17 @@ export default function PublicGetKey() {
               </div>
 
               <div className="flex w-full flex-col items-stretch gap-3 sm:w-56">
-                {issued !== null && (
+                {issued !== null || token.length === 0 ? (
                   <Turnstile onToken={setEarnToken} className="flex justify-center" />
-                )}
+                ) : null}
                 <Button
                   onClick={handleEarn}
                   disabled={earnDisabled}
+                  title={
+                    !hasCaptcha
+                      ? "Complete the human check above to earn coins"
+                      : undefined
+                  }
                   className="h-11 cursor-pointer bg-[#4a9a8e] font-semibold text-[#0f1419] transition-colors hover:bg-[#58b3a5] disabled:opacity-40"
                 >
                   {earnBusy ? (
@@ -665,6 +674,15 @@ export default function PublicGetKey() {
                     ? "Daily earn limit reached"
                     : `Get +${earnCoins} coins`}
                 </Button>
+                {!hasCaptcha &&
+                  earnCoins > 0 &&
+                  earnLeft > 0 &&
+                  status?.banned !== true &&
+                  info?.enabled !== false && (
+                    <p className="text-center text-[11px] text-[#6b7a8d]">
+                      Pass the human check above, then tap to earn.
+                    </p>
+                  )}
                 <a
                   href={botLink}
                   target="_blank"
