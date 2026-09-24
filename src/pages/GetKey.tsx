@@ -74,6 +74,8 @@ interface IssuedKey {
   serverName: string;
   remaining: number;
   maxPerDay: number;
+  /** Devices the key may bind — 0 means unlimited (no device lock). */
+  maxDevices: number;
   coins: number;
 }
 
@@ -190,6 +192,7 @@ export default function PublicGetKey() {
           serverName: res.serverName,
           remaining: res.remaining,
           maxPerDay: res.maxPerDay,
+          maxDevices: res.maxDevices,
           coins: res.coins,
         });
         setStatus((s) => (s ? { ...s, coins: res.coins, found: true } : s));
@@ -320,6 +323,8 @@ export default function PublicGetKey() {
     ? `https://t.me/${info.botUsername}`
     : "https://t.me/";
 
+  // Devices the trial key may bind (0 = the owner left them unlimited).
+  const deviceLimit = issued?.maxDevices ?? info?.maxDevices ?? 0;
   const earnCoins = info?.earnCoins ?? 5;
   const earnMaxPerDay = status?.earnMaxPerDay ?? info?.earnMaxPerDay ?? 3;
   const earnLeft = status?.earnRemaining ?? earnMaxPerDay;
@@ -440,7 +445,10 @@ export default function PublicGetKey() {
                 <div className="flex flex-wrap items-center justify-between gap-3 border-t border-white/10 pt-4">
                   <p className="text-xs text-[#a8b2c1]">
                     Expires {new Date(issued.expiresAt).toLocaleString()} ·{" "}
-                    {issued.remaining} of {issued.maxPerDay} keys left today
+                    {issued.remaining} of {issued.maxPerDay} keys left today ·{" "}
+                    {deviceLimit === 0
+                      ? "works on any device"
+                      : `binds ${deviceLimit} device${deviceLimit === 1 ? "" : "s"}`}
                   </p>
                   <Button
                     variant="outline"
@@ -740,8 +748,16 @@ export default function PublicGetKey() {
             },
             {
               icon: MonitorSmartphone,
-              title: "1 key = 1 device",
-              desc: "The key binds to the first device that connects with it.",
+              title:
+                deviceLimit === 0
+                  ? "Any device, until it expires"
+                  : deviceLimit === 1
+                    ? "1 key = 1 device"
+                    : `Up to ${deviceLimit} devices`,
+              desc:
+                deviceLimit === 0
+                  ? "No device lock — the wallet + short link are the gate, and the key simply runs out of time."
+                  : "The key binds to the first device that connects with it.",
             },
             {
               icon: ShieldCheck,

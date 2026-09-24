@@ -47,6 +47,9 @@ const WELCOME_DEFAULT = 5; // coins given to a brand-new account
 const EARN_DEFAULT = 5; // coins per short-link pass
 const EARN_MAX_PER_DAY_DEFAULT = 3; // short-link passes per account/day
 const CLAIM_TTL_MS = 15 * 60 * 1000;
+// Devices a trial key may bind. 0 = unlimited: a claimed key keeps working
+// from any device until it expires (coins + the short link are the gate).
+const MAX_DEVICES_DEFAULT = 0;
 
 /** ShrtFly fallback key — same key the shortener page ships with. */
 const SHRTFLY_FALLBACK_KEY = "ea3e5b3e3dcd0019ac9f395f2d8e4062";
@@ -70,6 +73,8 @@ export interface GetkeyInfo {
   hours: number;
   maxPerDay: number;
   welcomeCoins: number;
+  /** Devices one trial key may bind (0 = unlimited). */
+  maxDevices: number;
   /** Coins credited per ShrtFly short-link pass (0 = earning disabled). */
   earnCoins: number;
   /** Short-link passes an account may redeem per UTC day. */
@@ -105,6 +110,8 @@ export type IssueResult =
       coins: number;
       serverName: string;
       serverCode: string;
+      /** Devices the key may bind (0 = unlimited). */
+      maxDevices: number;
       used: number;
       maxPerDay: number;
       price: number;
@@ -340,6 +347,7 @@ export const info = query({
       hours: doc?.getkeyHours ?? HOURS_DEFAULT,
       maxPerDay: doc?.getkeyMaxPerDay ?? MAX_PER_DAY_DEFAULT,
       welcomeCoins: doc?.getkeyWelcomeCoins ?? WELCOME_DEFAULT,
+      maxDevices: doc?.getkeyMaxDevices ?? MAX_DEVICES_DEFAULT,
       earnCoins: doc?.getkeyEarnCoins ?? EARN_DEFAULT,
       earnMaxPerDay: doc?.getkeyEarnMaxPerDay ?? EARN_MAX_PER_DAY_DEFAULT,
       products,
@@ -534,6 +542,10 @@ export const issueForKey = internalMutation({
     const hours = settings?.getkeyHours ?? HOURS_DEFAULT;
     const maxPerDay = settings?.getkeyMaxPerDay ?? MAX_PER_DAY_DEFAULT;
     const price = settings?.getkeyPrice ?? PRICE_DEFAULT;
+    const maxDevices = Math.max(
+      0,
+      Math.round(settings?.getkeyMaxDevices ?? MAX_DEVICES_DEFAULT),
+    );
     const prefix = settings?.keyPrefix ?? "NS";
     const keyFormat = settings?.keyFormat ?? "";
     const today = utcDay();
@@ -604,7 +616,7 @@ export const issueForKey = internalMutation({
       expiresAt,
       cost: price,
       note: `getkey:${account.handle}`,
-      maxDevices: 1,
+      maxDevices,
     });
 
     await ctx.db.patch(account._id, {
@@ -627,6 +639,7 @@ export const issueForKey = internalMutation({
       coins: balance - price,
       serverName: server.name,
       serverCode: server.code,
+      maxDevices,
       used: usedToday + 1,
       maxPerDay,
       price,
@@ -759,6 +772,7 @@ export interface RedeemedKey {
   expiresAt: number;
   serverName: string;
   serverCode: string;
+  maxDevices: number;
   usedToday: number;
   maxPerDay: number;
   remaining: number;
@@ -805,6 +819,7 @@ export const redeemClaim = mutation({
       expiresAt: res.expiresAt,
       serverName: res.serverName,
       serverCode: res.serverCode,
+      maxDevices: res.maxDevices,
       usedToday: res.used,
       maxPerDay: res.maxPerDay,
       remaining: Math.max(0, res.maxPerDay - res.used),

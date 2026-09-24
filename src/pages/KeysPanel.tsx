@@ -260,6 +260,10 @@ function GenerateKeyCard({ scope }: { scope: "owner" | "admin" }) {
             <div className="space-y-2">
               <Label htmlFor="key-uses">Max uses <span className="font-normal text-muted-foreground">(0 = unlimited)</span></Label>
               <Input id="key-uses" type="number" min={0} value={uses} onChange={(e) => setUses(e.target.value)} placeholder={String(settings?.defaultKeyUses ?? 0)} />
+              <p className="text-xs text-muted-foreground">
+                Counts new devices only — a device that already connected keeps
+                working until the key expires.
+              </p>
             </div>
 
             <div className="space-y-2">

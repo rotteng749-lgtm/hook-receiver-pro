@@ -63,6 +63,10 @@ export const DEFAULT_SETTINGS = {
   getkeyWeb: true,
   getkeyServerId: undefined as Id<"servers"> | undefined,
   getkeyWelcomeCoins: 5,
+  // Devices one trial key may bind. 0 = unlimited (default): trial keys are
+  // gated by coins + the short link + their lifetime, so a claimed key keeps
+  // working from any device until it expires. Set 1+ to lock them.
+  getkeyMaxDevices: 0,
   // "Get coins" on /getkey: every ShrtFly short-link pass credits this many
   // coins, at most getkeyEarnMaxPerDay passes per account per UTC day.
   getkeyEarnCoins: 5,
@@ -130,6 +134,8 @@ export const getSettings = query({
       getkeyServerId: doc?.getkeyServerId,
       getkeyWelcomeCoins:
         doc?.getkeyWelcomeCoins ?? DEFAULT_SETTINGS.getkeyWelcomeCoins,
+      getkeyMaxDevices:
+        doc?.getkeyMaxDevices ?? DEFAULT_SETTINGS.getkeyMaxDevices,
       getkeyEarnCoins: doc?.getkeyEarnCoins ?? DEFAULT_SETTINGS.getkeyEarnCoins,
       getkeyEarnMaxPerDay:
         doc?.getkeyEarnMaxPerDay ?? DEFAULT_SETTINGS.getkeyEarnMaxPerDay,
@@ -158,6 +164,7 @@ export const updateSettings = mutation({
     getkeyWeb: v.optional(v.boolean()),
     getkeyServerId: v.optional(v.id("servers")),
     getkeyWelcomeCoins: v.optional(v.number()),
+    getkeyMaxDevices: v.optional(v.number()),
     getkeyEarnCoins: v.optional(v.number()),
     getkeyEarnMaxPerDay: v.optional(v.number()),
   },
@@ -205,6 +212,10 @@ export const updateSettings = mutation({
         args.getkeyWelcomeCoins ?? DEFAULT_SETTINGS.getkeyWelcomeCoins,
       ),
     );
+    const getkeyMaxDevices = Math.max(
+      0,
+      Math.round(args.getkeyMaxDevices ?? DEFAULT_SETTINGS.getkeyMaxDevices),
+    );
     const getkeyEarnCoins = Math.max(
       0,
       Math.round(args.getkeyEarnCoins ?? DEFAULT_SETTINGS.getkeyEarnCoins),
@@ -235,6 +246,7 @@ export const updateSettings = mutation({
       getkeyWeb: args.getkeyWeb ?? DEFAULT_SETTINGS.getkeyWeb,
       getkeyServerId,
       getkeyWelcomeCoins,
+      getkeyMaxDevices,
       getkeyEarnCoins,
       getkeyEarnMaxPerDay,
     };

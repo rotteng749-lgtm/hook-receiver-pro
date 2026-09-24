@@ -146,7 +146,10 @@ export default function GetKeyPage() {
             icon: ShieldCheck,
             label: "Price / lifetime",
             value: `${info.price} / ${info.hours}h`,
-            hint: `new accounts get ${info.welcomeCoins} coins`,
+            hint:
+              info.maxDevices === 0
+                ? `any device · ${info.welcomeCoins} welcome coins`
+                : `${info.maxDevices} device(s) · ${info.welcomeCoins} welcome coins`,
           },
           {
             icon: Gift,
@@ -371,7 +374,13 @@ export default function GetKeyPage() {
               <span className="font-medium text-foreground">
                 {info.price} coins
               </span>{" "}
-              are deducted (max {info.maxPerDay}/day).
+              are deducted (max {info.maxPerDay}/day). Trial keys are{" "}
+              <span className="font-medium text-foreground">
+                {info.maxDevices === 0
+                  ? "not device-locked"
+                  : `limited to ${info.maxDevices} device${info.maxDevices === 1 ? "" : "s"}`}
+              </span>
+              , so a claimed key keeps working until it expires.
             </li>
             <li>
               <span className="font-medium text-foreground">4.</span> Out of coins?

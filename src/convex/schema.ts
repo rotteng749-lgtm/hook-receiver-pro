@@ -265,6 +265,10 @@ const schema = defineSchema(
       // Coins handed to a brand-new /getkey account on first use (default 5
       // = one free trial key). Top-ups are done by the owner afterwards.
       getkeyWelcomeCoins: v.optional(v.number()),
+      // How many devices one trial key may bind (default 0 = unlimited).
+      // Trial keys are already gated by coins, the short link and their
+      // lifetime, so they are NOT device-locked unless the owner sets this.
+      getkeyMaxDevices: v.optional(v.number()),
       // Coins credited every time a user passes a ShrtFly short link
       // ("Get coins" button on /getkey). Default 5 = one key.
       getkeyEarnCoins: v.optional(v.number()),

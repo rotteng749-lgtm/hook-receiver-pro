@@ -113,6 +113,7 @@ export default function SettingsPage() {
   const [getkeyServerId, setGetkeyServerId] = useState("");
   const [getkeyWeb, setGetkeyWeb] = useState(true);
   const [getkeyWelcomeCoins, setGetkeyWelcomeCoins] = useState("5");
+  const [getkeyMaxDevices, setGetkeyMaxDevices] = useState("0");
   const [getkeyEarnCoins, setGetkeyEarnCoins] = useState("5");
   const [getkeyEarnMaxPerDay, setGetkeyEarnMaxPerDay] = useState("3");
   const [busy, setBusy] = useState(false);
@@ -135,6 +136,7 @@ export default function SettingsPage() {
       setGetkeyServerId(settings.getkeyServerId ?? "");
       setGetkeyWeb(settings.getkeyWeb ?? true);
       setGetkeyWelcomeCoins(String(settings.getkeyWelcomeCoins ?? 5));
+      setGetkeyMaxDevices(String(settings.getkeyMaxDevices ?? 0));
       setGetkeyEarnCoins(String(settings.getkeyEarnCoins ?? 5));
       setGetkeyEarnMaxPerDay(String(settings.getkeyEarnMaxPerDay ?? 3));
     }
@@ -209,6 +211,10 @@ export default function SettingsPage() {
         getkeyMaxPerDay: Number(getkeyMaxPerDay) || 1,
         getkeyWeb,
         getkeyWelcomeCoins: Number(getkeyWelcomeCoins) || 0,
+        getkeyMaxDevices:
+          getkeyMaxDevices.trim() === ""
+            ? 0
+            : Math.max(0, Number(getkeyMaxDevices) || 0),
         getkeyEarnCoins: Number(getkeyEarnCoins) || 0,
         getkeyEarnMaxPerDay:
           getkeyEarnMaxPerDay.trim() === ""
@@ -588,6 +594,20 @@ export default function SettingsPage() {
                   />
                   <p className="text-xs text-muted-foreground">
                     Granted when an account is first created (default 5 = one free key).
+                  </p>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="getkey-devices">Max devices per trial key</Label>
+                  <Input
+                    id="getkey-devices"
+                    type="number"
+                    min={0}
+                    value={getkeyMaxDevices}
+                    onChange={(e) => setGetkeyMaxDevices(e.target.value)}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    0 = unlimited (default) — a claimed key keeps working on any
+                    device until it expires. Set 1+ to lock it.
                   </p>
                 </div>
                 <div className="space-y-2">

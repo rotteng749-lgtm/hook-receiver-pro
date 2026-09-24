@@ -193,6 +193,7 @@ function safeFilename(name: string): string {
 
 /** Strip control chars from a string for safe logging/display. */
 function safeLog(str: string, maxLen = 512): string {
+  // Control bytes are stripped so a log line cannot be spoofed.
   return str.replace(/[\u0000-\u001f\u007f]/g, "?").slice(0, maxLen);
 }
 
