@@ -41,7 +41,10 @@ function asActionCtx(ctx: MutationCtx): GenericActionCtx<GenericDataModel> {
 }
 
 export const DEFAULT_SETTINGS = {
+  // Flat price for a key that never expires (hours = 0 on the key).
   keyPrice: 10,
+  // Price per day for keys that do expire — a 7-day key costs 7× this.
+  keyPricePerDay: 10,
   defaultKeyUses: 0, // 0 = unlimited
   defaultKeyHours: 0, // 0 = never expires
   maintenance: false,
@@ -95,6 +98,24 @@ function roleOf(user: Doc<"users"> | null | undefined): PanelRole {
   return (user?.role ?? "user") as PanelRole;
 }
 
+/**
+ * What one key costs the generator:
+ *   - keys with an expiry → keyPricePerDay × days (partial days round up,
+ *     so a 5-hour key counts as one day)
+ *   - keys with no expiry (hours = 0) → the flat keyPrice
+ * keyPricePerDay falls back to keyPrice so existing installs keep the price
+ * they had before per-day pricing existed.
+ */
+function keyCost(settings: Doc<"settings"> | null, hours: number) {
+  const perDay = Math.max(
+    0,
+    Math.round(settings?.keyPricePerDay ?? settings?.keyPrice ?? DEFAULT_SETTINGS.keyPricePerDay),
+  );
+  const lifetime = Math.max(0, Math.round(settings?.keyPrice ?? DEFAULT_SETTINGS.keyPrice));
+  const days = hours > 0 ? Math.ceil(hours / 24) : 0;
+  return { perDay, lifetime, days, cost: days > 0 ? perDay * days : lifetime };
+}
+
 async function requireRole(ctx: QueryCtx | MutationCtx, roles: PanelRole[]) {
   const { userId, user } = await getAuthUser(ctx);
   const userRole = roleOf(user);
@@ -116,6 +137,8 @@ export const getSettings = query({
     const doc = await getSettingsDoc(ctx);
     return {
       keyPrice: doc?.keyPrice ?? DEFAULT_SETTINGS.keyPrice,
+      keyPricePerDay:
+        doc?.keyPricePerDay ?? doc?.keyPrice ?? DEFAULT_SETTINGS.keyPricePerDay,
       defaultKeyUses: doc?.defaultKeyUses ?? DEFAULT_SETTINGS.defaultKeyUses,
       defaultKeyHours: doc?.defaultKeyHours ?? DEFAULT_SETTINGS.defaultKeyHours,
       maintenance: doc?.maintenance ?? DEFAULT_SETTINGS.maintenance,
@@ -146,6 +169,7 @@ export const getSettings = query({
 export const updateSettings = mutation({
   args: {
     keyPrice: v.number(),
+    keyPricePerDay: v.optional(v.number()),
     defaultKeyUses: v.number(),
     defaultKeyHours: v.number(),
     maintenance: v.boolean(),
@@ -226,8 +250,15 @@ export const updateSettings = mutation({
         args.getkeyEarnMaxPerDay ?? DEFAULT_SETTINGS.getkeyEarnMaxPerDay,
       ),
     );
+    const keyPricePerDay = Math.max(
+      0,
+      Math.round(
+        args.keyPricePerDay ?? DEFAULT_SETTINGS.keyPricePerDay,
+      ),
+    );
     const patch = {
       keyPrice: Math.max(0, Math.round(args.keyPrice)),
+      keyPricePerDay,
       defaultKeyUses: Math.max(0, Math.round(args.defaultKeyUses)),
       defaultKeyHours: Math.max(0, Math.round(args.defaultKeyHours)),
       maintenance: args.maintenance,
@@ -603,7 +634,7 @@ export const generateKey = mutation({
       0,
       Math.round(args.hours ?? settings?.defaultKeyHours ?? DEFAULT_SETTINGS.defaultKeyHours),
     );
-    const cost = settings?.keyPrice ?? DEFAULT_SETTINGS.keyPrice;
+    const { cost, days } = keyCost(settings, hours);
     const prefix = settings?.keyPrefix ?? DEFAULT_SETTINGS.keyPrefix;
     const keyFormat = settings?.keyFormat ?? "";
     const isOwner = roleOf(user) === "owner";
@@ -611,7 +642,7 @@ export const generateKey = mutation({
     // The owner's wallet is unlimited — no check, nothing is deducted.
     if (!isOwner && balance < cost) {
       throw new Error(
-        `Insufficient balance — this key costs ${cost}, your balance is ${balance}`,
+        `Insufficient balance — this key costs ${cost} (${days > 0 ? `${days} day${days === 1 ? "" : "s"} × per-day price` : "no expiry"}), your balance is ${balance}`,
       );
     }
 
@@ -673,7 +704,7 @@ export const generateKey = mutation({
     if (!isOwner) {
       await ctx.db.patch(userId!, { balance: balance - cost });
     }
-    return { id, key, cost, balance: isOwner ? balance : balance - cost };
+    return { id, key, cost, days, balance: isOwner ? balance : balance - cost };
   },
 });
 
@@ -1285,7 +1316,8 @@ export const batchGenerateKeys = mutation({
     const settings = await getSettingsDoc(ctx);
     const maxUses = Math.max(0, Math.round(args.uses ?? settings?.defaultKeyUses ?? DEFAULT_SETTINGS.defaultKeyUses));
     const hours = Math.max(0, Math.round(args.hours ?? settings?.defaultKeyHours ?? DEFAULT_SETTINGS.defaultKeyHours));
-    const cost = (settings?.keyPrice ?? DEFAULT_SETTINGS.keyPrice) * count;
+    const perKey = keyCost(settings, hours).cost;
+    const cost = perKey * count;
     const prefix = settings?.keyPrefix ?? DEFAULT_SETTINGS.keyPrefix;
     const keyFormat = settings?.keyFormat ?? "";
     const isOwner = roleOf(user) === "owner";
@@ -1309,7 +1341,7 @@ export const batchGenerateKeys = mutation({
         maxUses,
         uses: 0,
         expiresAt,
-        cost: settings?.keyPrice ?? DEFAULT_SETTINGS.keyPrice,
+        cost: perKey,
         note: args.note?.trim().slice(0, 160) || undefined,
         maxDevices,
         game: args.game?.trim() || undefined,

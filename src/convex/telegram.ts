@@ -885,7 +885,7 @@ const webhook = httpAction(async (ctx, request) => {
             "💰 <b>Balance</b>",
             "",
             `Your balance: <code>${s.unlimited ? "∞ (unlimited)" : s.balance}</code>`,
-            `Key price: <code>${settings?.keyPrice ?? 10}</code> per key`,
+            `Key price: <code>${settings?.keyPricePerDay ?? settings?.keyPrice ?? 10}</code> / day · no expiry: <code>${settings?.keyPrice ?? 10}</code>`,
             `GetKey coins: <code>${price}</code> per trial key`,
           ].join("\n"),
           adminMenu(),

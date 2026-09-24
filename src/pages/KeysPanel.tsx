@@ -110,7 +110,8 @@ function GenerateKeyCard({ scope }: { scope: "owner" | "admin" }) {
   const [customKey, setCustomKey] = useState("");
   const [note, setNote] = useState("");
   const [uses, setUses] = useState("");
-  const [hours, setHours] = useState("");
+  const [lifetime, setLifetime] = useState("");
+  const [lifetimeUnit, setLifetimeUnit] = useState<"hours" | "days">("days");
   const [maxDevices, setMaxDevices] = useState("");
   const [game, setGame] = useState("");
   const [ipWhitelist, setIpWhitelist] = useState("");
@@ -126,11 +127,25 @@ function GenerateKeyCard({ scope }: { scope: "owner" | "admin" }) {
   } | null>(null);
 
   const cost = settings?.keyPrice ?? 0;
+  const perDay = settings?.keyPricePerDay ?? cost;
   const balance = stats?.balance ?? 0;
   const unlimited = scope === "owner" && stats?.unlimited === true;
   const activeServers = servers.filter((s) => s.status === "active");
   const keyFormat =
     settings?.keyFormat || `${settings?.keyPrefix ?? "NS"}-XXXX-XXXX-XXXX-XXXX-XXXX`;
+
+  // Lifetime can be typed in hours or days — pricing is per day either way
+  // (part days round up), and keys with no expiry cost the lifetime price.
+  const lifetimeHours =
+    lifetime === ""
+      ? undefined
+      : Math.max(0, Math.round(Number(lifetime) || 0)) *
+        (lifetimeUnit === "days" ? 24 : 1);
+  const pricedHours = lifetimeHours ?? settings?.defaultKeyHours ?? 0;
+  const pricedDays = pricedHours > 0 ? Math.ceil(pricedHours / 24) : 0;
+  const keyPrice = pricedDays > 0 ? perDay * pricedDays : cost;
+  const batchTotal =
+    keyPrice * (batchMode ? Math.max(1, Math.min(100, Number(batchCount) || 10)) : 1);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -144,7 +159,7 @@ function GenerateKeyCard({ scope }: { scope: "owner" | "admin" }) {
         serverId: serverId as Doc<"servers">["_id"],
         note: note || undefined,
         uses: uses === "" ? undefined : Number(uses),
-        hours: hours === "" ? undefined : Number(hours),
+        hours: lifetimeHours,
         maxDevices: maxDevices === "" ? undefined : Number(maxDevices),
         game: game || undefined,
         ipWhitelist: ipWhitelist.split(",").map((s) => s.trim()).filter(Boolean),
@@ -162,7 +177,7 @@ function GenerateKeyCard({ scope }: { scope: "owner" | "admin" }) {
       setCustomKey("");
       setNote("");
       setUses("");
-      setHours("");
+      setLifetime("");
       setMaxDevices("");
       setGame("");
       setIpWhitelist("");
@@ -192,9 +207,7 @@ function GenerateKeyCard({ scope }: { scope: "owner" | "admin" }) {
             <div>
               <CardTitle className="text-base">Generate keys</CardTitle>
               <CardDescription>
-                {unlimited
-                  ? `Each key costs ${cost} balance — your wallet is unlimited.`
-                  : `Each key costs ${cost} balance — you have ${balance} left.`}
+                {`${pricedDays > 0 ? `${pricedDays} day${pricedDays === 1 ? "" : "s"} × ${perDay} = ${keyPrice}` : `no expiry = ${keyPrice}`} balance per key${batchMode ? ` · ${batchCount || 10} keys = ${batchTotal}` : ""} — ${unlimited ? "your wallet is unlimited." : `you have ${balance} left.`}`}
               </CardDescription>
             </div>
             <div className="flex items-center gap-2">
@@ -267,8 +280,33 @@ function GenerateKeyCard({ scope }: { scope: "owner" | "admin" }) {
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="key-hours">Lifetime (hours) <span className="font-normal text-muted-foreground">(0 = never)</span></Label>
-              <Input id="key-hours" type="number" min={0} value={hours} onChange={(e) => setHours(e.target.value)} placeholder={String(settings?.defaultKeyHours ?? 0)} />
+              <Label htmlFor="key-lifetime">Lifetime <span className="font-normal text-muted-foreground">(0 = never expires)</span></Label>
+              <div className="flex gap-2">
+                <Input
+                  id="key-lifetime"
+                  type="number"
+                  min={0}
+                  value={lifetime}
+                  onChange={(e) => setLifetime(e.target.value)}
+                  placeholder={
+                    lifetimeUnit === "days"
+                      ? String(Math.ceil((settings?.defaultKeyHours ?? 0) / 24))
+                      : String(settings?.defaultKeyHours ?? 0)
+                  }
+                />
+                <Select value={lifetimeUnit} onValueChange={(v) => setLifetimeUnit(v as "hours" | "days")}>
+                  <SelectTrigger className="w-28"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="days">Days</SelectItem>
+                    <SelectItem value="hours">Hours</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {pricedDays > 0
+                  ? `${pricedDays} day${pricedDays === 1 ? "" : "s"} → ${keyPrice} balance (${perDay}/day)`
+                  : `No expiry → ${keyPrice} balance`}
+              </p>
             </div>
 
             <div className="space-y-2">
@@ -292,11 +330,11 @@ function GenerateKeyCard({ scope }: { scope: "owner" | "admin" }) {
             </div>
 
             <div className="flex items-end sm:col-span-2">
-              <Button type="submit" disabled={busy || activeServers.length === 0 || (!unlimited && balance < cost)} className="w-full cursor-pointer sm:w-auto">
+              <Button type="submit" disabled={busy || activeServers.length === 0 || (!unlimited && balance < batchTotal)} className="w-full cursor-pointer sm:w-auto">
                 {busy ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />}
                 {batchMode
-                  ? `Generate ${batchCount || 10} keys`
-                  : unlimited ? "Generate key" : `Generate key — ${cost} balance`}
+                  ? `Generate ${batchCount || 10} keys — ${batchTotal} balance`
+                  : `Generate key — ${keyPrice} balance`}
               </Button>
             </div>
           </form>

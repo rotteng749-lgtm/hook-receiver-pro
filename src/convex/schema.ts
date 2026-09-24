@@ -216,7 +216,12 @@ const schema = defineSchema(
     // Global owner settings (single doc, scope = "global").
     settings: defineTable({
       scope: v.string(),
-      keyPrice: v.number(), // balance deducted per generated key
+      keyPrice: v.number(), // balance charged for a key with no expiry
+      // Balance charged per day for keys that do expire: a key lasting N
+      // days costs keyPricePerDay × N (partial days round up, so 5 hours = 1
+      // day). Falls back to keyPrice when unset so existing installs keep
+      // their old pricing until the owner edits it.
+      keyPricePerDay: v.optional(v.number()),
       defaultKeyUses: v.number(), // 0 = unlimited
       defaultKeyHours: v.number(), // 0 = never expires
       maintenance: v.boolean(), // blocks all /connect calls

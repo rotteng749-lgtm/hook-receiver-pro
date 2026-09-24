@@ -338,6 +338,7 @@ export default function Servers() {
     try {
       await updateSettings({
         keyPrice: settings.keyPrice,
+        keyPricePerDay: settings.keyPricePerDay,
         defaultKeyUses: settings.defaultKeyUses,
         defaultKeyHours: settings.defaultKeyHours,
         maintenance: settings.maintenance,

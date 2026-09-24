@@ -98,6 +98,7 @@ export default function SettingsPage() {
   }, [profile]);
 
   const [keyPrice, setKeyPrice] = useState("10");
+  const [keyPricePerDay, setKeyPricePerDay] = useState("10");
   const [defaultKeyUses, setDefaultKeyUses] = useState("0");
   const [defaultKeyHours, setDefaultKeyHours] = useState("0");
   const [keyPrefix, setKeyPrefix] = useState("NS");
@@ -121,6 +122,7 @@ export default function SettingsPage() {
   useEffect(() => {
     if (settings) {
       setKeyPrice(String(settings.keyPrice));
+      setKeyPricePerDay(String(settings.keyPricePerDay ?? settings.keyPrice));
       setDefaultKeyUses(String(settings.defaultKeyUses));
       setDefaultKeyHours(String(settings.defaultKeyHours));
       setKeyPrefix(settings.keyPrefix);
@@ -197,6 +199,7 @@ export default function SettingsPage() {
     try {
       await updateSettings({
         keyPrice: Number(keyPrice) || 0,
+        keyPricePerDay: Number(keyPricePerDay) || 0,
         defaultKeyUses: Number(defaultKeyUses) || 0,
         defaultKeyHours: Number(defaultKeyHours) || 0,
         keyPrefix: keyPrefix || undefined,
@@ -461,12 +464,18 @@ export default function SettingsPage() {
               <CardHeader>
                 <CardTitle className="text-base">Key pricing & defaults</CardTitle>
                 <CardDescription>
-                  Generating a key always deducts the price from the generator's balance.
+                  Timed keys cost the per-day price × how many days they last
+                  (part days round up). Keys with no expiry cost the lifetime price.
                 </CardDescription>
               </CardHeader>
               <CardContent className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-4">
                 <div className="space-y-2">
-                  <Label htmlFor="key-price">Key price (balance per key)</Label>
+                  <Label htmlFor="key-price-per-day">Key price per day (balance)</Label>
+                  <Input id="key-price-per-day" type="number" min={0} value={keyPricePerDay} onChange={(e) => setKeyPricePerDay(e.target.value)} />
+                  <p className="text-xs text-muted-foreground">A 7-day key costs 7× this.</p>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="key-price">Lifetime price (0 hours = never expires)</Label>
                   <Input id="key-price" type="number" min={0} value={keyPrice} onChange={(e) => setKeyPrice(e.target.value)} />
                 </div>
                 <div className="space-y-2">
