@@ -39,7 +39,7 @@ import { CopyButton } from "@/components/panel/CopyButton";
 import { PageHeader } from "@/components/panel/PageHeader";
 import { api } from "@/convex/_generated/api";
 import type { Doc } from "@/convex/_generated/dataModel";
-import { formatExpiry, formatRelative, formatUses } from "@/lib/format";
+import { formatExpiry, formatKeyDuration, formatRelative, formatUses } from "@/lib/format";
 import { useMutation, useQuery } from "convex/react";
 import {
   AlertTriangle,
@@ -207,7 +207,7 @@ function GenerateKeyCard({ scope }: { scope: "owner" | "admin" }) {
             <div>
               <CardTitle className="text-base">Generate keys</CardTitle>
               <CardDescription>
-                {`${pricedDays > 0 ? `${pricedDays} day${pricedDays === 1 ? "" : "s"} × ${perDay} = ${keyPrice}` : `no expiry = ${keyPrice}`} balance per key${batchMode ? ` · ${batchCount || 10} keys = ${batchTotal}` : ""} — ${unlimited ? "your wallet is unlimited." : `you have ${balance} left.`}`}
+                {`${pricedDays > 0 ? `${pricedDays} day${pricedDays === 1 ? "" : "s"} × ${perDay} = ${keyPrice}` : `No expiry = ${keyPrice}`} balance per key${batchMode ? ` · ${batchCount || 10} keys = ${batchTotal}` : ""} — ${unlimited ? "your wallet is unlimited." : `you have ${balance} left.`}`}
               </CardDescription>
             </div>
             <div className="flex items-center gap-2">
@@ -312,11 +312,6 @@ function GenerateKeyCard({ scope }: { scope: "owner" | "admin" }) {
             <div className="space-y-2">
               <Label htmlFor="key-max-devices">Max devices <span className="font-normal text-muted-foreground">(0 = unlimited)</span></Label>
               <Input id="key-max-devices" type="number" min={0} value={maxDevices} onChange={(e) => setMaxDevices(e.target.value)} placeholder="1" />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="key-uses2">Placeholder</Label>
-              <div />
             </div>
 
             <div className="space-y-2 sm:col-span-2">
@@ -477,7 +472,11 @@ export default function KeysPanel({ scope }: { scope: "owner" | "admin" }) {
   const renew = async (key: KeyRow, days: number) => {
     try {
       const res = await renewKey({ id: key._id, days });
-      toast.success(`Key renewed +${days} days`);
+      toast.success(
+        res.cost > 0
+          ? `Key renewed +${res.days} days — ${res.cost} balance deducted`
+          : `Key renewed +${res.days} days`,
+      );
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed");
     }
@@ -582,6 +581,7 @@ export default function KeysPanel({ scope }: { scope: "owner" | "admin" }) {
                   <th className="px-4 py-3 font-medium">Uses</th>
                   <th className="px-4 py-3 font-medium">Device</th>
                   <th className="px-4 py-3 font-medium">Expires</th>
+                  <th className="px-4 py-3 font-medium">Price</th>
                   {scope === "owner" && <th className="px-4 py-3 font-medium">Created by</th>}
                   <th className="px-4 py-3 font-medium">Created</th>
                   <th className="px-4 py-3 font-medium text-right">Actions</th>
@@ -631,7 +631,11 @@ export default function KeysPanel({ scope }: { scope: "owner" | "admin" }) {
                         <span className="text-xs text-muted-foreground">unbound</span>
                       )}
                     </td>
-                    <td className="px-4 py-3 text-xs">{formatExpiry(key.expiresAt)}</td>
+                    <td className="px-4 py-3 text-xs">
+                      {formatExpiry(key.expiresAt)}
+                      <p className="text-[11px] text-muted-foreground">{formatKeyDuration(key._creationTime, key.expiresAt)}</p>
+                    </td>
+                    <td className="px-4 py-3 text-xs tabular-nums" title={`${key.cost} balance`}>{key.cost}</td>
                     {scope === "owner" && (
                       <td className="px-4 py-3 text-xs text-muted-foreground">{key.creatorEmail}</td>
                     )}
@@ -679,7 +683,8 @@ export default function KeysPanel({ scope }: { scope: "owner" | "admin" }) {
                               <AlertDialogHeader>
                                 <AlertDialogTitle>Renew key?</AlertDialogTitle>
                                 <AlertDialogDescription>
-                                  Extend this key's expiry. If expired, starts from today.
+                                  Extend this key's expiry — billed per day at the
+                                  configured price. If expired, starts from today.
                                 </AlertDialogDescription>
                               </AlertDialogHeader>
                               <div className="flex gap-2 px-6 pb-4">

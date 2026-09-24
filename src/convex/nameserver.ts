@@ -766,20 +766,41 @@ export const renewKey = mutation({
     days: v.optional(v.number()),
   },
   handler: async (ctx, { id, days }) => {
-    const { user } = await requireRole(ctx, ["owner", "admin"]);
+    const { userId, user } = await requireRole(ctx, ["owner", "admin"]);
     const key = await ctx.db.get(id);
     if (key === null) throw new Error("Key not found");
     if (roleOf(user) !== "owner" && key.createdBy !== user._id) {
       throw new Error("Forbidden");
     }
-    const addMs = (days ?? 30) * 86400000;
+    const addDays = Math.max(1, Math.round(days ?? 30));
+    const addMs = addDays * 86400000;
     const base = Date.now() > (key.expiresAt ?? 0) ? Date.now() : (key.expiresAt ?? 0);
     const newExpiry = base + addMs;
+    // Extensions are billed with the same per-day price as new keys. The
+    // owner's wallet is unlimited and is never deducted.
+    const settings = await getSettingsDoc(ctx);
+    const isOwner = roleOf(user) === "owner";
+    const cost = keyCost(settings, addDays * 24).cost;
+    const balance = user.balance ?? 0;
+    if (!isOwner && cost > 0 && balance < cost) {
+      throw new Error(
+        `Insufficient balance — renewing ${addDays} day${addDays === 1 ? "" : "s"} costs ${cost}, your balance is ${balance}`,
+      );
+    }
     await ctx.db.patch(id, {
       expiresAt: newExpiry,
       status: "active",
+      cost: (key.cost ?? 0) + (isOwner ? 0 : cost),
     });
-    return { expiresAt: newExpiry };
+    if (!isOwner && cost > 0) {
+      await ctx.db.patch(userId, { balance: balance - cost });
+    }
+    return {
+      expiresAt: newExpiry,
+      days: addDays,
+      cost: isOwner ? 0 : cost,
+      balance: isOwner ? balance : balance - cost,
+    };
   },
 });
 

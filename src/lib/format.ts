@@ -23,6 +23,16 @@ export function formatExpiry(expiresAt: number): string {
   return `${(days / 365).toFixed(1)}y`;
 }
 
+/** "3d" / "12h" / "never" — how long a key lasts (created → expires). */
+export function formatKeyDuration(createdAt: number, expiresAt: number): string {
+  if (expiresAt === 0) return "never";
+  const ms = expiresAt - createdAt;
+  if (ms <= 0) return "—";
+  const hours = ms / 3600000;
+  if (hours < 48) return `${Math.max(1, Math.round(hours))}h`;
+  return `${Math.round(hours / 24)}d`;
+}
+
 export function formatUses(uses: number, maxUses: number): string {
   if (maxUses === 0) return `${uses} / ∞`;
   return `${uses} / ${maxUses}`;
