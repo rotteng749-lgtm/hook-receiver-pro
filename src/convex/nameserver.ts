@@ -951,6 +951,57 @@ export const deleteKey = mutation({
 });
 
 /**
+ * Bulk delete / revoke straight from the keys table. Keys the caller may not
+ * manage are skipped instead of failing the whole batch, so the panel can
+ * report how many actually went through.
+ */
+export const bulkKeyAction = mutation({
+  args: {
+    ids: v.array(v.id("connectKeys")),
+    action: v.union(v.literal("delete"), v.literal("revoke")),
+  },
+  handler: async (ctx, { ids, action }) => {
+    const { user } = await requireRole(ctx, ["owner", "admin"]);
+    const isOwner = roleOf(user) === "owner";
+    let done = 0;
+    let skipped = 0;
+    // De-dupe so a double click can never process the same key twice.
+    for (const id of new Set(ids)) {
+      const key = await ctx.db.get(id);
+      if (key === null) {
+        skipped++;
+        continue;
+      }
+      if (!isOwner && key.createdBy !== user._id) {
+        skipped++;
+        continue;
+      }
+      if (action === "revoke") {
+        if (key.status !== "revoked") {
+          await ctx.db.patch(id, { status: "revoked" });
+        }
+        done++;
+        continue;
+      }
+      // Delete cascades: connection log + live-guard sessions go with the key.
+      const conns = await ctx.db
+        .query("connections")
+        .withIndex("by_key", (q) => q.eq("keyId", id))
+        .collect();
+      for (const c of conns) await ctx.db.delete(c._id);
+      const sessions = await ctx.db
+        .query("heartbeats")
+        .withIndex("by_key", (q) => q.eq("keyId", id))
+        .collect();
+      for (const s of sessions) await ctx.db.delete(s._id);
+      await ctx.db.delete(id);
+      done++;
+    }
+    return { done, skipped };
+  },
+});
+
+/**
  * Change a key's max devices on an existing key (0 = unlimited, N = mass
  * key) — no need to regenerate. Owner, or the admin who generated the key.
  * Existing bound devices are untouched; the new limit applies immediately.

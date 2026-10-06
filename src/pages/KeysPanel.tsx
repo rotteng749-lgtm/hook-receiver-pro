@@ -25,6 +25,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -496,11 +497,14 @@ export default function KeysPanel({ scope }: { scope: "owner" | "admin" }) {
   const updateKeyDevices = useMutation(api.nameserver.updateKeyDevices);
   const heartbeats = useQuery(api.nameserver.listHeartbeats) ?? [];
   const resetKeyGuard = useMutation(api.nameserver.resetKeyGuard);
+  const bulkKeyAction = useMutation(api.nameserver.bulkKeyAction);
   const balance = stats?.balance ?? 0;
   const [editKey, setEditKey] = useState<KeyRow | null>(null);
   const [editMaxDevices, setEditMaxDevices] = useState("1");
   const [editBusy, setEditBusy] = useState(false);
   const [historyKey, setHistoryKey] = useState<KeyRow | null>(null);
+  const [selected, setSelected] = useState<Doc<"connectKeys">["_id"][]>([]);
+  const [bulkBusy, setBulkBusy] = useState(false);
 
   // Live-guard rollup per key: how many sessions are online right now, the
   // deepest miss streak, and how many strikes have fired.
@@ -531,6 +535,39 @@ export default function KeysPanel({ scope }: { scope: "owner" | "admin" }) {
     }
   };
 
+  // Bulk selection — only keys the caller may manage can be picked.
+  const manageableIds = (keys ?? []).filter((k) => k.canManage).map((k) => k._id);
+  const allSelected =
+    manageableIds.length > 0 && manageableIds.every((id) => selected.includes(id));
+  const someSelected = selected.length > 0 && !allSelected;
+
+  const toggleOne = (id: Doc<"connectKeys">["_id"]) => {
+    setSelected((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  };
+
+  const toggleAll = () => {
+    setSelected(allSelected ? [] : manageableIds);
+  };
+
+  const runBulk = async (action: "delete" | "revoke") => {
+    if (selected.length === 0) return;
+    setBulkBusy(true);
+    try {
+      const res = await bulkKeyAction({ ids: selected, action });
+      const noun = `${res.done} key${res.done === 1 ? "" : "s"}`;
+      toast.success(
+        `${noun} ${action === "delete" ? "deleted" : "revoked"}${
+          res.skipped > 0 ? ` — ${res.skipped} skipped (gone or not yours)` : ""
+        }`,
+      );
+      setSelected([]);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed");
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+
   const saveDevices = async () => {
     if (!editKey) return;
     setEditBusy(true);
@@ -549,6 +586,7 @@ export default function KeysPanel({ scope }: { scope: "owner" | "admin" }) {
   const revoke = async (key: KeyRow) => {
     try {
       await revokeKey({ id: key._id });
+      setSelected((prev) => prev.filter((id) => id !== key._id));
       toast.success("Key revoked");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed");
@@ -571,6 +609,7 @@ export default function KeysPanel({ scope }: { scope: "owner" | "admin" }) {
   const remove = async (key: KeyRow) => {
     try {
       await deleteKey({ id: key._id });
+      setSelected((prev) => prev.filter((id) => id !== key._id));
       toast.success("Key deleted");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed");
@@ -646,6 +685,70 @@ export default function KeysPanel({ scope }: { scope: "owner" | "admin" }) {
           )}
         </motion.div>
 
+        {selected.length > 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: -6 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="flex flex-wrap items-center gap-3 rounded-xl border border-primary/40 bg-primary/5 px-4 py-3"
+          >
+            <p className="text-sm font-medium">{selected.length} selected</p>
+            <div className="flex flex-1 flex-wrap items-center justify-end gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                className="cursor-pointer gap-1.5"
+                disabled={bulkBusy}
+                onClick={() => void runBulk("revoke")}
+              >
+                {bulkBusy ? <Loader2 className="size-3.5 animate-spin" /> : <XCircle className="size-3.5" />}
+                Revoke
+              </Button>
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="cursor-pointer gap-1.5 text-destructive"
+                    disabled={bulkBusy}
+                  >
+                    <Trash2 className="size-3.5" />
+                    Delete
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>
+                      Delete {selected.length} selected key{selected.length === 1 ? "" : "s"}?
+                    </AlertDialogTitle>
+                    <AlertDialogDescription>
+                      Permanent — each key is removed together with its connection
+                      history and live-guard sessions. This cannot be undone.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel className="cursor-pointer">Cancel</AlertDialogCancel>
+                    <AlertDialogAction
+                      className="cursor-pointer bg-destructive text-white hover:bg-destructive/90"
+                      onClick={() => void runBulk("delete")}
+                    >
+                      Delete {selected.length}
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="cursor-pointer"
+                disabled={bulkBusy}
+                onClick={() => setSelected([])}
+              >
+                Clear
+              </Button>
+            </div>
+          </motion.div>
+        )}
+
         {keys.length === 0 ? (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
             <Card className="border-dashed border-border bg-card/50">
@@ -660,6 +763,14 @@ export default function KeysPanel({ scope }: { scope: "owner" | "admin" }) {
             <table className="w-full text-left text-sm">
               <thead>
                 <tr className="border-b border-border text-xs text-muted-foreground">
+                  <th className="w-10 px-4 py-3 font-medium">
+                    <Checkbox
+                      checked={allSelected ? true : someSelected ? "indeterminate" : false}
+                      onCheckedChange={toggleAll}
+                      disabled={manageableIds.length === 0}
+                      aria-label="Select all keys"
+                    />
+                  </th>
                   <th className="px-4 py-3 font-medium">Key</th>
                   <th className="px-4 py-3 font-medium">Server</th>
                   <th className="px-4 py-3 font-medium">Status</th>
@@ -683,6 +794,17 @@ export default function KeysPanel({ scope }: { scope: "owner" | "admin" }) {
                     animate="visible"
                     className="hover:bg-muted/30"
                   >
+                    <td className="px-4 py-3">
+                      {key.canManage ? (
+                        <Checkbox
+                          checked={selected.includes(key._id)}
+                          onCheckedChange={() => toggleOne(key._id)}
+                          aria-label={`Select key ${key.key}`}
+                        />
+                      ) : (
+                        <span className="text-xs text-muted-foreground">—</span>
+                      )}
+                    </td>
                     <td className="max-w-[180px] px-4 py-3">
                       <div className="flex items-center gap-1.5">
                         <code className="truncate font-mono text-xs">{key.key}</code>
