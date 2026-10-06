@@ -218,6 +218,15 @@ function deviceAlreadyBound(doc: Doc<"connectKeys">, rawDevice: string): boolean
   return bound.some((d) => d.toUpperCase() === device);
 }
 
+/**
+ * Servers a key may talk to: the one it was issued for plus any extra servers
+ * the owner allowed on it. A request that names a server outside this set is a
+ * wrong-server attempt even when the key itself is perfectly valid.
+ */
+function keyAllowedServers(doc: Doc<"connectKeys">): Set<Id<"servers">> {
+  return new Set<Id<"servers">>([doc.serverId, ...(doc.allowedServers ?? [])]);
+}
+
 /* ------------------------------------------------------------------ */
 /*  Health                                                             */
 /* ------------------------------------------------------------------ */
@@ -426,7 +435,7 @@ const connect = httpAction(async (ctx, request) => {
   };
 
   if (keyDoc === null) return await fail(401, "invalid_key", "MEMBER KEY NOT REGISTERED");
-  if (serverRef.length > 0 && keyDoc.serverId !== server!._id) return await fail(401, "wrong_server", "MEMBER KEY NOT REGISTERED");
+  if (serverRef.length > 0 && !keyAllowedServers(keyDoc).has(server!._id)) return await fail(401, "wrong_server", "MEMBER KEY NOT REGISTERED");
   if (server === null) {
     const inferred = await ctx.runQuery(internal.nameserver.getServerById, { serverId: keyDoc.serverId });
     if (inferred === null) return await fail(403, "server_missing", "the server for this key no longer exists");
@@ -1248,7 +1257,7 @@ const v1AuthLogin = httpAction(async (ctx, request) => {
     accessLog(request, 403, "expired");
     return json({ status: 403, error_code: "ERR_KEY_EXPIRED", message: "Key has expired" }, 403, cors);
   }
-  if (keyDoc.maxUses > 0 && keyDoc.uses >= keyDoc.maxUses) {
+  if (keyDoc.maxUses > 0 && keyDoc.uses >= keyDoc.maxUses && !deviceAlreadyBound(keyDoc, hwid)) {
     accessLog(request, 403, "usage_limit");
     return json({ status: 403, error_code: "ERR_USAGE_LIMIT", message: "Key has reached its usage limit" }, 403, cors);
   }
@@ -1489,7 +1498,7 @@ const pubgmHandler = httpAction(async (ctx, request) => {
     accessLog(request, 200, "expired");
     return json(pubgErrorResponse("USER OR GAME NOT REGISTERED"), 200, cors);
   }
-  if (keyDoc.maxUses > 0 && keyDoc.uses >= keyDoc.maxUses) {
+  if (keyDoc.maxUses > 0 && keyDoc.uses >= keyDoc.maxUses && !deviceAlreadyBound(keyDoc, serial)) {
     accessLog(request, 200, "usage_limit");
     return json(pubgErrorResponse("USER OR GAME NOT REGISTERED"), 200, cors);
   }
@@ -1605,6 +1614,11 @@ const getkey = httpAction(async (ctx, request) => {
   const generate =
     request.method === "POST" ||
     pickString(url.searchParams.get("generate"), body.generate) === "1";
+  const settings = await ctx.runQuery(internal.nameserver.getSettingsInternal, {});
+  if (settings?.getkeyEnabled === false) {
+    accessLog(request, 403, "getkey_disabled");
+    return json({ ok: false, error: "the GetKey trial is currently turned off" }, 403, cors);
+  }
   if (!generate) {
     const usage = await ctx.runQuery(internal.nameserver.getGetkeyUsage, { tokenHash });
     accessLog(request, 200, "getkey_usage");
@@ -1770,6 +1784,75 @@ const deviceRegister = httpAction(async (ctx, request) => {
 });
 
 /* ------------------------------------------------------------------ */
+/*  GET /api/servers — public catalogue (active, apiEnabled)            */
+/*  Apps call this to discover which servers/games are connectable.     */
+/* ------------------------------------------------------------------ */
+
+const catalogue = httpAction(async (ctx, request) => {
+  const cors = corsFor(request);
+  const ip = clientIp(request);
+  if (rateHit(`catalogue:${ip}`, 120)) {
+    accessLog(request, 429, "rate_limit");
+    return json({ ok: false, error: "rate limited" }, 429, cors);
+  }
+  const servers = await ctx.runQuery(internal.nameserver.listApiServersInternal, {});
+  accessLog(request, 200, `${servers.length} servers`);
+  return json({ ok: true, count: servers.length, servers }, 200, cors);
+});
+
+/* ------------------------------------------------------------------ */
+/*  POST /heartbeat — live guard ping ("auto detect")                  */
+/*                                                                     */
+/*  Clients ping this every settings.heartbeatInterval seconds while    */
+/*  the panel or the game is open. Any ping clears the miss streak; a   */
+/*  run of settings.heartbeatLimit silent windows (3 by default) fires  */
+/*  the configured action, so leaving/opening is detected on its own.   */
+/* ------------------------------------------------------------------ */
+
+const heartbeatPing = httpAction(async (ctx, request) => {
+  const cors = corsFor(request);
+  const url = new URL(request.url);
+  const ip = clientIp(request);
+  if (rateHit(`heartbeat:${ip}`, 300)) {
+    accessLog(request, 429, "rate_limit");
+    return json({ ok: false, error: "rate limited" }, 429, cors);
+  }
+  const body = await readBody(request);
+  const key = pickString(
+    body.key, body.license, body.user_key,
+    url.searchParams.get("key"), url.searchParams.get("license"),
+  );
+  const device = pickString(
+    body.device, body.deviceId, body.serial, body.hwid,
+    url.searchParams.get("device"), url.searchParams.get("serial"),
+  ).slice(0, 128);
+  const app = pickString(
+    body.app, body.game, url.searchParams.get("app"), url.searchParams.get("game"),
+  ).slice(0, 64);
+  const serverRef = pickString(
+    body.server, body.serverCode, url.searchParams.get("server"),
+  );
+
+  let serverId: Id<"servers"> | undefined;
+  if (serverRef.length > 0) {
+    const server = await ctx.runQuery(internal.nameserver.getServerByCode, {
+      code: serverRef.toLowerCase(),
+    });
+    serverId = server?._id;
+  }
+
+  const res = await ctx.runMutation(internal.nameserver.heartbeat, {
+    key: key || undefined,
+    deviceId: device || undefined,
+    app: app || undefined,
+    serverId,
+    ip,
+  });
+  accessLog(request, 200, res.ok ? "heartbeat" : `heartbeat_${res.reason}`);
+  return json(res, 200, cors);
+});
+
+/* ------------------------------------------------------------------ */
 /*  CORS / method not allowed                                          */
 /* ------------------------------------------------------------------ */
 
@@ -1827,6 +1910,14 @@ http.route({ pathPrefix: "/s/", method: "GET", handler: shortRedirect });
 http.route({ path: "/api/device", method: "POST", handler: deviceRegister });
 http.route({ path: "/api/device", method: "GET", handler: deviceRegister });
 http.route({ path: "/api/device", method: "OPTIONS", handler: preflight });
+
+/* Live guard: the panel/game pings this while it is open. Registered before
+ * the custom-endpoint catch-all so an admin-defined endpoint can't shadow it. */
+http.route({ path: "/heartbeat", method: "POST", handler: heartbeatPing });
+http.route({ path: "/heartbeat", method: "GET", handler: heartbeatPing });
+http.route({ path: "/heartbeat", method: "OPTIONS", handler: preflight });
+http.route({ path: "/api/servers", method: "GET", handler: catalogue });
+http.route({ path: "/api/servers", method: "OPTIONS", handler: preflight });
 
 http.route({ pathPrefix: "/", method: "GET", handler: customEndpoint });
 http.route({ pathPrefix: "/", method: "POST", handler: customEndpoint });

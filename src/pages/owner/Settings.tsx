@@ -112,11 +112,17 @@ export default function SettingsPage() {
   const [getkeyHours, setGetkeyHours] = useState("5");
   const [getkeyMaxPerDay, setGetkeyMaxPerDay] = useState("3");
   const [getkeyServerId, setGetkeyServerId] = useState("");
+  const [getkeyEnabled, setGetkeyEnabled] = useState(true);
   const [getkeyWeb, setGetkeyWeb] = useState(true);
   const [getkeyWelcomeCoins, setGetkeyWelcomeCoins] = useState("5");
   const [getkeyMaxDevices, setGetkeyMaxDevices] = useState("0");
   const [getkeyEarnCoins, setGetkeyEarnCoins] = useState("5");
   const [getkeyEarnMaxPerDay, setGetkeyEarnMaxPerDay] = useState("3");
+  const [heartbeatEnabled, setHeartbeatEnabled] = useState(true);
+  const [heartbeatInterval, setHeartbeatInterval] = useState("10");
+  const [heartbeatTimeout, setHeartbeatTimeout] = useState("30");
+  const [heartbeatLimit, setHeartbeatLimit] = useState("3");
+  const [heartbeatAction, setHeartbeatAction] = useState("revoke");
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -136,11 +142,17 @@ export default function SettingsPage() {
       setGetkeyHours(String(settings.getkeyHours));
       setGetkeyMaxPerDay(String(settings.getkeyMaxPerDay));
       setGetkeyServerId(settings.getkeyServerId ?? "");
+      setGetkeyEnabled(settings.getkeyEnabled ?? true);
       setGetkeyWeb(settings.getkeyWeb ?? true);
       setGetkeyWelcomeCoins(String(settings.getkeyWelcomeCoins ?? 5));
       setGetkeyMaxDevices(String(settings.getkeyMaxDevices ?? 0));
       setGetkeyEarnCoins(String(settings.getkeyEarnCoins ?? 5));
       setGetkeyEarnMaxPerDay(String(settings.getkeyEarnMaxPerDay ?? 3));
+      setHeartbeatEnabled(settings.heartbeatEnabled ?? true);
+      setHeartbeatInterval(String(settings.heartbeatInterval ?? 10));
+      setHeartbeatTimeout(String(settings.heartbeatTimeout ?? 30));
+      setHeartbeatLimit(String(settings.heartbeatLimit ?? 3));
+      setHeartbeatAction(settings.heartbeatAction ?? "revoke");
     }
   }, [settings]);
 
@@ -212,6 +224,7 @@ export default function SettingsPage() {
         getkeyPrice: Number(getkeyPrice) || 0,
         getkeyHours: Number(getkeyHours) || 0,
         getkeyMaxPerDay: Number(getkeyMaxPerDay) || 1,
+        getkeyEnabled,
         getkeyWeb,
         getkeyWelcomeCoins: Number(getkeyWelcomeCoins) || 0,
         getkeyMaxDevices:
@@ -226,6 +239,11 @@ export default function SettingsPage() {
         getkeyServerId: getkeyServerId
           ? (getkeyServerId as Parameters<typeof updateSettings>[0]["getkeyServerId"])
           : undefined,
+        heartbeatEnabled,
+        heartbeatInterval: Number(heartbeatInterval) || 10,
+        heartbeatTimeout: Number(heartbeatTimeout) || 30,
+        heartbeatLimit: Number(heartbeatLimit) || 3,
+        heartbeatAction: heartbeatAction === "flag" ? "flag" : "revoke",
       });
       toast.success("Settings saved — applied immediately");
     } catch (err) {
@@ -647,6 +665,20 @@ export default function SettingsPage() {
                 </div>
                 <div className="flex items-center justify-between rounded-lg border border-border bg-muted/40 px-4 py-3 sm:col-span-3">
                   <div>
+                    <p className="text-sm font-medium">GetKey on</p>
+                    <p className="text-xs text-muted-foreground">
+                      Master switch. Turns the whole trial flow off — page and API —
+                      while keeping every setting below intact.
+                    </p>
+                  </div>
+                  <Switch
+                    checked={getkeyEnabled}
+                    onCheckedChange={setGetkeyEnabled}
+                    aria-label="GetKey trial on"
+                  />
+                </div>
+                <div className="flex items-center justify-between rounded-lg border border-border bg-muted/40 px-4 py-3 sm:col-span-3">
+                  <div>
                     <p className="text-sm font-medium">Public free-key page</p>
                     <p className="text-xs text-muted-foreground">
                       Let visitors claim a trial key at /getkey (Cloudflare human check + daily cap).
@@ -676,6 +708,96 @@ export default function SettingsPage() {
                       ))}
                     </SelectContent>
                   </Select>
+                </div>
+              </CardContent>
+            </Card>
+          </motion.div>
+
+          {/* ─── Auto detect (live guard) ─── */}
+          <motion.div variants={cardVariants}>
+            <Card className="border-border/70">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <Wifi className="size-4 text-primary" />
+                  Auto detect — live guard
+                </CardTitle>
+                <CardDescription>
+                  Clients ping /heartbeat while the panel or the game is open. Any
+                  ping resets the streak, so only a run of silent windows counts —
+                  closing the panel or logging out is detected on its own.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-5">
+                <div className="flex items-center justify-between rounded-lg border border-border bg-muted/40 px-4 py-3">
+                  <div>
+                    <p className="text-sm font-medium">Watch for disconnects</p>
+                    <p className="text-xs text-muted-foreground">
+                      Off = no heartbeat tracking at all. Per-key switches still apply.
+                    </p>
+                  </div>
+                  <Switch
+                    checked={heartbeatEnabled}
+                    onCheckedChange={setHeartbeatEnabled}
+                    aria-label="Live guard"
+                  />
+                </div>
+                <div className="grid grid-cols-1 gap-5 sm:grid-cols-3">
+                  <div className="space-y-2">
+                    <Label htmlFor="hb-interval">Ping every (seconds)</Label>
+                    <Input
+                      id="hb-interval"
+                      type="number"
+                      min={2}
+                      max={3600}
+                      value={heartbeatInterval}
+                      onChange={(e) => setHeartbeatInterval(e.target.value)}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      How often the client checks in (default 10).
+                    </p>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="hb-timeout">Silent for (seconds) = 1 miss</Label>
+                    <Input
+                      id="hb-timeout"
+                      type="number"
+                      min={3}
+                      max={86400}
+                      value={heartbeatTimeout}
+                      onChange={(e) => setHeartbeatTimeout(e.target.value)}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Default 30 — must be larger than the ping interval.
+                    </p>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="hb-limit">Misses in a row before acting</Label>
+                    <Input
+                      id="hb-limit"
+                      type="number"
+                      min={1}
+                      max={20}
+                      value={heartbeatLimit}
+                      onChange={(e) => setHeartbeatLimit(e.target.value)}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      3 = keluar 3x berturut-turut baru kena.
+                    </p>
+                  </div>
+                  <div className="space-y-2 sm:col-span-3">
+                    <Label>Action when the streak is hit</Label>
+                    <Select value={heartbeatAction} onValueChange={setHeartbeatAction}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="revoke">Revoke the key straight away</SelectItem>
+                        <SelectItem value="flag">
+                          Flag only — keep the key, just count the strike
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </div>
               </CardContent>
             </Card>

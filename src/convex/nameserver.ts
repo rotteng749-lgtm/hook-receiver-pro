@@ -125,6 +125,17 @@ function keyCost(settings: Doc<"settings"> | null, hours: number) {
   return { perDay, lifetime, days, cost: days > 0 ? perDay * days : lifetime };
 }
 
+/** Normalise a server's app list: trimmed, uppercased, deduped. */
+function cleanAppList(raw: string[] | undefined): string[] | undefined {
+  if (!raw || raw.length === 0) return undefined;
+  const out: string[] = [];
+  for (const entry of raw) {
+    const app = entry.trim().toUpperCase().slice(0, 24);
+    if (app.length > 0 && !out.includes(app)) out.push(app);
+  }
+  return out.length > 0 ? out : undefined;
+}
+
 /**
  * Normalise a key's extra server allowlist: drop the key's own server, drop
  * duplicates, and drop ids that no longer exist. Returns undefined when
@@ -242,6 +253,10 @@ export const updateSettings = mutation({
   },
   handler: async (ctx, args) => {
     await requireRole(ctx, ["owner"]);
+    // Read the current document first: callers send partial payloads (the
+    // Servers page only saves its own fields), and an omitted switch must keep
+    // the saved value instead of snapping back to its default.
+    const doc = await getSettingsDoc(ctx);
     // Sanitize the key prefix: A-Z, 0-9, 1-10 chars.
     const rawPrefix = (args.keyPrefix ?? DEFAULT_SETTINGS.keyPrefix)
       .trim()
@@ -307,18 +322,43 @@ export const updateSettings = mutation({
     // Live guard: clamp the numbers so a typo can't disable detection.
     const heartbeatInterval = Math.max(
       2,
-      Math.min(3600, Math.round(args.heartbeatInterval ?? DEFAULT_SETTINGS.heartbeatInterval)),
+      Math.min(
+        3600,
+        Math.round(
+          args.heartbeatInterval ??
+            doc?.heartbeatInterval ??
+            DEFAULT_SETTINGS.heartbeatInterval,
+        ),
+      ),
     );
     const heartbeatTimeout = Math.max(
       heartbeatInterval + 1,
-      Math.min(86_400, Math.round(args.heartbeatTimeout ?? DEFAULT_SETTINGS.heartbeatTimeout)),
+      Math.min(
+        86_400,
+        Math.round(
+          args.heartbeatTimeout ??
+            doc?.heartbeatTimeout ??
+            DEFAULT_SETTINGS.heartbeatTimeout,
+        ),
+      ),
     );
     const heartbeatLimit = Math.max(
       1,
-      Math.min(20, Math.round(args.heartbeatLimit ?? DEFAULT_SETTINGS.heartbeatLimit)),
+      Math.min(
+        20,
+        Math.round(
+          args.heartbeatLimit ??
+            doc?.heartbeatLimit ??
+            DEFAULT_SETTINGS.heartbeatLimit,
+        ),
+      ),
     );
     const heartbeatAction =
-      args.heartbeatAction === "flag" ? "flag" : DEFAULT_SETTINGS.heartbeatAction;
+      args.heartbeatAction === undefined
+        ? doc?.heartbeatAction ?? DEFAULT_SETTINGS.heartbeatAction
+        : args.heartbeatAction === "flag"
+          ? "flag"
+          : "revoke";
     const patch = {
       keyPrice: Math.max(0, Math.round(args.keyPrice)),
       keyPricePerDay,
@@ -337,20 +377,23 @@ export const updateSettings = mutation({
       getkeyPrice,
       getkeyHours,
       getkeyMaxPerDay,
-      getkeyWeb: args.getkeyWeb ?? DEFAULT_SETTINGS.getkeyWeb,
-      getkeyEnabled: args.getkeyEnabled ?? DEFAULT_SETTINGS.getkeyEnabled,
+      getkeyWeb: args.getkeyWeb ?? doc?.getkeyWeb ?? DEFAULT_SETTINGS.getkeyWeb,
+      getkeyEnabled:
+        args.getkeyEnabled ?? doc?.getkeyEnabled ?? DEFAULT_SETTINGS.getkeyEnabled,
       getkeyServerId,
       getkeyWelcomeCoins,
       getkeyMaxDevices,
       getkeyEarnCoins,
       getkeyEarnMaxPerDay,
-      heartbeatEnabled: args.heartbeatEnabled ?? DEFAULT_SETTINGS.heartbeatEnabled,
+      heartbeatEnabled:
+        args.heartbeatEnabled ??
+        doc?.heartbeatEnabled ??
+        DEFAULT_SETTINGS.heartbeatEnabled,
       heartbeatInterval,
       heartbeatTimeout,
       heartbeatLimit,
       heartbeatAction,
     };
-    const doc = await getSettingsDoc(ctx);
     if (doc) {
       await ctx.db.patch(doc._id, patch);
     } else {
@@ -520,6 +563,9 @@ export const createServer = mutation({
     code: v.string(),
     description: v.optional(v.string()),
     customSeal: v.optional(v.string()),
+    // Published in the public API catalogue, and the app ids it hosts.
+    apiEnabled: v.optional(v.boolean()),
+    apps: v.optional(v.array(v.string())),
   },
   handler: async (ctx, args) => {
     const { userId } = await requireRole(ctx, ["owner", "admin"]);
@@ -544,6 +590,8 @@ export const createServer = mutation({
       status: "active",
       createdBy: userId,
       ...(seal ? { customSeal: seal } : {}),
+      apiEnabled: args.apiEnabled,
+      apps: cleanAppList(args.apps),
     });
   },
 });
@@ -557,6 +605,9 @@ export const updateServer = mutation({
     customSeal: v.optional(v.string()),
     // Listed as a product on the public /getkey page.
     publicGetkey: v.optional(v.boolean()),
+    // Published in the public API catalogue, and the app ids it hosts.
+    apiEnabled: v.optional(v.boolean()),
+    apps: v.optional(v.array(v.string())),
   },
   handler: async (ctx, args) => {
     const { user } = await requireRole(ctx, ["owner", "admin"]);
@@ -579,6 +630,8 @@ export const updateServer = mutation({
       patch.customSeal = args.customSeal.trim() || undefined;
     }
     if (args.publicGetkey !== undefined) patch.publicGetkey = args.publicGetkey;
+    if (args.apiEnabled !== undefined) patch.apiEnabled = args.apiEnabled;
+    if (args.apps !== undefined) patch.apps = cleanAppList(args.apps);
     await ctx.db.patch(args.id, patch);
   },
 });
@@ -1408,6 +1461,8 @@ export const batchGenerateKeys = mutation({
     ipWhitelist: v.optional(v.array(v.string())),
     ipBlacklist: v.optional(v.array(v.string())),
     note: v.optional(v.string()),
+    allowedServers: v.optional(v.array(v.id("servers"))),
+    heartbeat: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     const { userId, user } = await requireRole(ctx, ["owner", "admin"]);
@@ -1427,6 +1482,7 @@ export const batchGenerateKeys = mutation({
     if (!isOwner && balance < cost) throw new Error(`Insufficient balance — generating ${count} keys costs ${cost}, your balance is ${balance}`);
     const maxDevices = args.maxDevices === undefined ? 1 : Math.max(0, Math.round(args.maxDevices));
     const expiresAt = hours > 0 ? Date.now() + hours * 60 * 60 * 1000 : 0;
+    const allowedServers = await cleanAllowedServers(ctx, server._id, args.allowedServers);
     const createdKeys: { key: string; id: Id<"connectKeys"> }[] = [];
     for (let i = 0; i < count; i++) {
       let key = generateKeyValue(prefix, keyFormat);
@@ -1449,6 +1505,8 @@ export const batchGenerateKeys = mutation({
         game: args.game?.trim() || undefined,
         ipWhitelist: args.ipWhitelist?.filter((ip) => ip.trim().length > 0) || undefined,
         ipBlacklist: args.ipBlacklist?.filter((ip) => ip.trim().length > 0) || undefined,
+        allowedServers,
+        heartbeat: args.heartbeat,
       });
       createdKeys.push({ key, id });
     }
@@ -1707,6 +1765,27 @@ export const getSettingsInternal = internalQuery({
   handler: async (ctx) => await getSettingsDoc(ctx),
 });
 
+/**
+ * Public catalogue: every active server that opted into the API list, with the
+ * apps it hosts. Apps call this to discover where they may connect — a key is
+ * still rejected on any server that is not in its own allowlist.
+ */
+export const listApiServersInternal = internalQuery({
+  args: {},
+  handler: async (ctx) => {
+    const servers = await ctx.db.query("servers").collect();
+    return servers
+      .filter((s) => s.status === "active" && s.apiEnabled !== false)
+      .map((s) => ({
+        id: s._id as string,
+        name: s.name,
+        code: s.code,
+        apps: s.apps ?? [],
+        description: s.description ?? "",
+      }));
+  },
+});
+
 /** Clear a key's device binding (used by the public /connect reset flow). */
 export const resetKeyDeviceInternal = internalMutation({
   args: { keyId: v.id("connectKeys") },
@@ -1930,11 +2009,10 @@ export const heartbeat = internalMutation({
       settings?.heartbeatLimit ?? DEFAULT_SETTINGS.heartbeatLimit,
     );
 
-*/
     // Resolve the key when a raw value came in, and refuse dead keys: a ping
     // must not resurrect a revoked/expired key.
     let keyDoc: Doc<"connectKeys"> | null = null;
-    const rawKey = (args.key ?? "").replace(/\p{Cc}/gu, ""); /*  -]/g, "").trim().toUpperCase().slice(0, 80);
+    const rawKey = (args.key ?? "").replace(/\p{Cc}/gu, "").trim().toUpperCase().slice(0, 80);
     if (args.keyId !== undefined) {
       keyDoc = await ctx.db.get(args.keyId);
     } else if (rawKey.length > 0) {
@@ -2039,7 +2117,15 @@ export const sweepHeartbeats = internalMutation({
     for (const session of stale) {
       // Sessions with no key (the panel itself being open) only tally misses.
       const keyDoc = session.keyId ? await ctx.db.get(session.keyId) : null;
-      if (keyDoc !== null && !heartbeatOn(settings, keyDoc)) {
+      // Forget sessions that can no longer act on anything: the guard is off
+      // for that key, the key was revoked, or it expired. Otherwise a dead
+      // session would keep re-firing a strike on every sweep.
+      if (
+        keyDoc !== null &&
+        (!heartbeatOn(settings, keyDoc) ||
+          keyDoc.status !== "active" ||
+          (keyDoc.expiresAt > 0 && now > keyDoc.expiresAt))
+      ) {
         await ctx.db.delete(session._id);
         continue;
       }
@@ -2047,9 +2133,16 @@ export const sweepHeartbeats = internalMutation({
       swept++;
 
       if (misses < limit) {
-        // Re-base the window so the next check is a full timeout later.
+        // Keep `lastSeenAt` untouched so the next sweep counts another miss.
         await ctx.db.patch(session._id, { misses, missed: true });
         if (keyDoc !== null) await ctx.db.patch(keyDoc._id, { misses });
+        continue;
+      }
+
+      // A session with no key is just the panel being open — there is nothing
+      // to act on, so drop it rather than logging a strike every window.
+      if (keyDoc === null) {
+        await ctx.db.delete(session._id);
         continue;
       }
 
@@ -2260,7 +2353,7 @@ export const genKeyAsOwner = internalMutation({
       0,
       Math.round(args.hours ?? settings?.defaultKeyHours ?? DEFAULT_SETTINGS.defaultKeyHours),
     );
-    const cost = settings?.keyPrice ?? DEFAULT_SETTINGS.keyPrice;
+    const cost = keyCost(settings, hours).cost;
     const prefix = settings?.keyPrefix ?? DEFAULT_SETTINGS.keyPrefix;
     const keyFormat = settings?.keyFormat ?? "";
 

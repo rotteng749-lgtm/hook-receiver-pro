@@ -342,7 +342,7 @@ export const info = query({
     const doc = await readSettings(ctx);
     const products = await listProducts(ctx);
     return {
-      enabled: doc?.getkeyWeb !== false,
+      enabled: doc?.getkeyEnabled !== false && doc?.getkeyWeb !== false,
       price: doc?.getkeyPrice ?? PRICE_DEFAULT,
       hours: doc?.getkeyHours ?? HOURS_DEFAULT,
       maxPerDay: doc?.getkeyMaxPerDay ?? MAX_PER_DAY_DEFAULT,
@@ -686,7 +686,7 @@ export const startClaim = action({
 
     const settings = await ctx.runQuery(internal.getkey.settingsInternal, {});
     const info = {
-      enabled: settings?.getkeyWeb !== false,
+      enabled: settings?.getkeyEnabled !== false && settings?.getkeyWeb !== false,
       price: settings?.getkeyPrice ?? PRICE_DEFAULT,
       hours: settings?.getkeyHours ?? HOURS_DEFAULT,
       maxPerDay: settings?.getkeyMaxPerDay ?? MAX_PER_DAY_DEFAULT,
@@ -887,7 +887,7 @@ export const startEarn = action({
     }
 
     const settings = await ctx.runQuery(internal.getkey.settingsInternal, {});
-    if (settings?.getkeyWeb === false) {
+    if (settings?.getkeyEnabled === false || settings?.getkeyWeb === false) {
       throw new Error("The free key page is currently disabled.");
     }
     const earnCoins = Math.max(0, settings?.getkeyEarnCoins ?? EARN_DEFAULT);

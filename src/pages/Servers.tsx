@@ -29,6 +29,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { CopyButton } from "@/components/panel/CopyButton";
 import { PageHeader } from "@/components/panel/PageHeader";
@@ -76,6 +77,8 @@ function NewServerDialog({ onCreated }: { onCreated?: () => void }) {
   const [code, setCode] = useState("");
   const [description, setDescription] = useState("");
   const [customSeal, setCustomSeal] = useState("");
+  const [apps, setApps] = useState("");
+  const [apiEnabled, setApiEnabled] = useState(true);
   const [busy, setBusy] = useState(false);
 
   const handleName = (value: string) => {
@@ -87,13 +90,22 @@ function NewServerDialog({ onCreated }: { onCreated?: () => void }) {
     e.preventDefault();
     setBusy(true);
     try {
-      await createServer({ name, code, description: description || undefined, customSeal: customSeal.trim() || undefined });
+      await createServer({
+        name,
+        code,
+        description: description || undefined,
+        customSeal: customSeal.trim() || undefined,
+        apiEnabled,
+        apps: apps.split(",").map((s) => s.trim()).filter(Boolean),
+      });
       toast.success(`Server "${name}" created`);
       setOpen(false);
       setName("");
       setCode("");
       setDescription("");
       setCustomSeal("");
+      setApps("");
+      setApiEnabled(true);
       onCreated?.();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to create server");
@@ -198,6 +210,32 @@ function NewServerDialog({ onCreated }: { onCreated?: () => void }) {
               Upload a PHP/JS file to auto-detect its MD5 seal. This seal is returned in connect responses.
             </p>
           </div>
+          <div className="space-y-2">
+            <Label htmlFor="server-apps">Apps / games it hosts (optional)</Label>
+            <Input
+              id="server-apps"
+              value={apps}
+              onChange={(e) => setApps(e.target.value)}
+              placeholder="MLBB, PUBG, CODM"
+            />
+            <p className="text-xs text-muted-foreground">
+              Comma-separated ids. One key can be allowed on several servers, so
+              a single license covers more than one app.
+            </p>
+          </div>
+          <div className="flex items-center justify-between rounded-lg border border-border bg-muted/40 px-4 py-3">
+            <div>
+              <p className="text-sm font-medium">List in the API catalogue</p>
+              <p className="text-xs text-muted-foreground">
+                Registered apps can discover this server and the apps it hosts.
+              </p>
+            </div>
+            <Switch
+              checked={apiEnabled}
+              onCheckedChange={setApiEnabled}
+              aria-label="List in the API catalogue"
+            />
+          </div>
           <DialogFooter>
             <Button type="submit" disabled={busy}>
               {busy && <Loader2 className="size-4 animate-spin" />}
@@ -216,6 +254,8 @@ function EditServerDialog({ server }: { server: ServerRow }) {
   const [name, setName] = useState(server.name);
   const [description, setDescription] = useState(server.description ?? "");
   const [customSeal, setCustomSeal] = useState(server.customSeal ?? "");
+  const [apps, setApps] = useState((server.apps ?? []).join(", "));
+  const [apiEnabled, setApiEnabled] = useState(server.apiEnabled !== false);
   const [busy, setBusy] = useState(false);
 
   const submit = async (e: React.FormEvent) => {
@@ -227,6 +267,8 @@ function EditServerDialog({ server }: { server: ServerRow }) {
         name,
         description: description || undefined,
         customSeal: customSeal.trim() || undefined,
+        apiEnabled,
+        apps: apps.split(",").map((s) => s.trim()).filter(Boolean),
       });
       toast.success("Server updated");
       setOpen(false);
@@ -300,6 +342,32 @@ function EditServerDialog({ server }: { server: ServerRow }) {
             <p className="text-xs text-muted-foreground">
               Upload a PHP/JS file to auto-detect its MD5 seal.
             </p>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="edit-server-apps">Apps / games it hosts (optional)</Label>
+            <Input
+              id="edit-server-apps"
+              value={apps}
+              onChange={(e) => setApps(e.target.value)}
+              placeholder="MLBB, PUBG, CODM"
+            />
+            <p className="text-xs text-muted-foreground">
+              Comma-separated ids — a key allowed on this server plus others can
+              cover several apps.
+            </p>
+          </div>
+          <div className="flex items-center justify-between rounded-lg border border-border bg-muted/40 px-4 py-3">
+            <div>
+              <p className="text-sm font-medium">List in the API catalogue</p>
+              <p className="text-xs text-muted-foreground">
+                Registered apps can discover this server and the apps it hosts.
+              </p>
+            </div>
+            <Switch
+              checked={apiEnabled}
+              onCheckedChange={setApiEnabled}
+              aria-label="List in the API catalogue"
+            />
           </div>
           <DialogFooter>
             <Button type="submit" disabled={busy}>
@@ -515,6 +583,18 @@ export default function Servers() {
 $data = json_decode($resp, true);
 echo $data["ok"] ? "OK!" : "Gagal: " . $data["reason"];`}</pre>
           </div>
+          <div className="mt-2 rounded-lg border border-border bg-muted/30 p-3">
+            <p className="mb-2 text-xs font-medium text-muted-foreground">
+              Auto detect + server catalogue:
+            </p>
+            <pre className="overflow-x-auto font-mono text-[11px] text-muted-foreground/80">{`// ping while the panel/game is open — ~10s is plenty.
+// Any ping resets the streak; the action fires after 3 silent windows.
+POST ${connectBase}/heartbeat
+{ "key": "YOUR_KEY", "device": "DEVICE_ID", "app": "MLBB" }
+
+// discover connectable servers and the apps each one hosts:
+GET ${connectBase}/api/servers`}</pre>
+          </div>
         </CardContent>
       </Card>
       </motion.div>
@@ -552,6 +632,16 @@ echo $data["ok"] ? "OK!" : "Gagal: " . $data["reason"];`}</pre>
                     {server.publicGetkey !== false && server.status === "active" && (
                       <Badge variant="outline" className="font-normal text-[11px]">
                         on GetKey
+                      </Badge>
+                    )}
+                    {(server.apps ?? []).length > 0 && (
+                      <Badge variant="outline" className="font-normal text-[11px]">
+                        {(server.apps ?? []).join(" · ")}
+                      </Badge>
+                    )}
+                    {server.apiEnabled === false && (
+                      <Badge variant="secondary" className="font-normal text-[11px] text-muted-foreground">
+                        hidden from API
                       </Badge>
                     )}
                   </div>

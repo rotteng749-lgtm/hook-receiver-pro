@@ -118,6 +118,8 @@ function GenerateKeyCard({ scope }: { scope: "owner" | "admin" }) {
   const [ipBlacklist, setIpBlacklist] = useState("");
   const [batchMode, setBatchMode] = useState(false);
   const [batchCount, setBatchCount] = useState("10");
+  const [extraServers, setExtraServers] = useState<string[]>([]);
+  const [guard, setGuard] = useState(true);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<{
     key: string;
@@ -131,6 +133,9 @@ function GenerateKeyCard({ scope }: { scope: "owner" | "admin" }) {
   const balance = stats?.balance ?? 0;
   const unlimited = scope === "owner" && stats?.unlimited === true;
   const activeServers = servers.filter((s) => s.status === "active");
+  // Extra servers this key may also connect to — the key is rejected with
+  // wrong-server everywhere else.
+  const otherServers = activeServers.filter((s) => s._id !== serverId);
   const keyFormat =
     settings?.keyFormat || `${settings?.keyPrefix ?? "NS"}-XXXX-XXXX-XXXX-XXXX-XXXX`;
 
@@ -164,6 +169,8 @@ function GenerateKeyCard({ scope }: { scope: "owner" | "admin" }) {
         game: game || undefined,
         ipWhitelist: ipWhitelist.split(",").map((s) => s.trim()).filter(Boolean),
         ipBlacklist: ipBlacklist.split(",").map((s) => s.trim()).filter(Boolean),
+        allowedServers: extraServers as Doc<"servers">["_id"][],
+        heartbeat: guard,
       };
 
       if (batchMode) {
@@ -182,6 +189,7 @@ function GenerateKeyCard({ scope }: { scope: "owner" | "admin" }) {
       setGame("");
       setIpWhitelist("");
       setIpBlacklist("");
+      setExtraServers([]);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to generate key");
     } finally {
@@ -237,6 +245,58 @@ function GenerateKeyCard({ scope }: { scope: "owner" | "admin" }) {
                   {activeServers.length === 0 && <p className="px-2 py-1.5 text-xs text-muted-foreground">No active servers.</p>}
                 </SelectContent>
               </Select>
+            </div>
+
+            <div className="space-y-2 sm:col-span-2">
+              <Label>
+                Also allowed on{" "}
+                <span className="font-normal text-muted-foreground">
+                  (optional — one key, several apps)
+                </span>
+              </Label>
+              {otherServers.length === 0 ? (
+                <p className="text-xs text-muted-foreground">
+                  Add another server to let a single key cover more than one app.
+                </p>
+              ) : (
+                <div className="flex flex-wrap gap-2">
+                  {otherServers.map((s) => {
+                    const on = extraServers.includes(s._id);
+                    return (
+                      <Button
+                        key={s._id}
+                        type="button"
+                        variant={on ? "default" : "outline"}
+                        size="sm"
+                        className="cursor-pointer gap-1.5"
+                        onClick={() =>
+                          setExtraServers((prev) =>
+                            on ? prev.filter((id) => id !== s._id) : [...prev, s._id],
+                          )
+                        }
+                      >
+                        {on ? <ShieldCheck className="size-3.5" /> : <Plus className="size-3.5" />}
+                        {s.name} · {s.code}
+                      </Button>
+                    );
+                  })}
+                </div>
+              )}
+              <p className="text-xs text-muted-foreground">
+                Any server outside this list is rejected as a wrong server, even
+                when the key itself is valid.
+              </p>
+            </div>
+
+            <div className="flex items-center justify-between rounded-lg border border-border bg-muted/40 px-4 py-3 sm:col-span-2">
+              <div>
+                <p className="text-sm font-medium">Auto detect on this key</p>
+                <p className="text-xs text-muted-foreground">
+                  Client pings /heartbeat while it is open — 3 silent windows in a
+                  row fire the action set in Settings.
+                </p>
+              </div>
+              <Switch checked={guard} onCheckedChange={setGuard} aria-label="Auto detect on this key" />
             </div>
 
             {batchMode ? (
@@ -434,15 +494,41 @@ export default function KeysPanel({ scope }: { scope: "owner" | "admin" }) {
   const renewKey = useMutation(api.nameserver.renewKey);
   const resetKeyDevice = useMutation(api.nameserver.resetKeyDevice);
   const updateKeyDevices = useMutation(api.nameserver.updateKeyDevices);
+  const heartbeats = useQuery(api.nameserver.listHeartbeats) ?? [];
+  const resetKeyGuard = useMutation(api.nameserver.resetKeyGuard);
   const balance = stats?.balance ?? 0;
   const [editKey, setEditKey] = useState<KeyRow | null>(null);
   const [editMaxDevices, setEditMaxDevices] = useState("1");
   const [editBusy, setEditBusy] = useState(false);
   const [historyKey, setHistoryKey] = useState<KeyRow | null>(null);
 
+  // Live-guard rollup per key: how many sessions are online right now, the
+  // deepest miss streak, and how many strikes have fired.
+  const guard = useMemo(() => {
+    const map = new Map<string, { online: number; misses: number; strikes: number }>();
+    for (const h of heartbeats) {
+      if (!h.keyId) continue;
+      const row = map.get(h.keyId) ?? { online: 0, misses: 0, strikes: 0 };
+      if (h.online) row.online += 1;
+      row.misses = Math.max(row.misses, h.misses);
+      row.strikes += h.strikes;
+      map.set(h.keyId, row);
+    }
+    return map;
+  }, [heartbeats]);
+
   const openEditDevices = (key: KeyRow) => {
     setEditKey(key);
     setEditMaxDevices(String(key.maxDevices ?? 1));
+  };
+
+  const resetGuard = async (key: KeyRow) => {
+    try {
+      await resetKeyGuard({ id: key._id });
+      toast.success("Auto-detect counters cleared for this key");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed");
+    }
   };
 
   const saveDevices = async () => {
@@ -577,6 +663,7 @@ export default function KeysPanel({ scope }: { scope: "owner" | "admin" }) {
                   <th className="px-4 py-3 font-medium">Key</th>
                   <th className="px-4 py-3 font-medium">Server</th>
                   <th className="px-4 py-3 font-medium">Status</th>
+                  <th className="px-4 py-3 font-medium">Guard</th>
                   <th className="px-4 py-3 font-medium">Game</th>
                   <th className="px-4 py-3 font-medium">Uses</th>
                   <th className="px-4 py-3 font-medium">Device</th>
@@ -608,6 +695,38 @@ export default function KeysPanel({ scope }: { scope: "owner" | "admin" }) {
                       <p className="font-mono text-[11px] text-muted-foreground">{key.serverCode}</p>
                     </td>
                     <td className="px-4 py-3"><KeyStatusBadge status={key.status} /></td>
+                    <td className="px-4 py-3 text-xs">
+                      {(() => {
+                        const g = guard.get(key._id);
+                        const online = g?.online ?? 0;
+                        const misses = g?.misses ?? key.misses ?? 0;
+                        const strikes = g?.strikes ?? key.strikes ?? 0;
+                        if (online === 0 && misses === 0 && strikes === 0) {
+                          return <span className="text-muted-foreground">—</span>;
+                        }
+                        const tone =
+                          online > 0
+                            ? "text-emerald-500"
+                            : strikes > 0
+                              ? "text-red-500"
+                              : "text-amber-500";
+                        const label =
+                          online > 0
+                            ? `${online} online`
+                            : strikes > 0
+                              ? `${strikes} strike${strikes === 1 ? "" : "s"}`
+                              : `${misses} miss${misses === 1 ? "" : "es"}`;
+                        return (
+                          <span
+                            className={`inline-flex items-center gap-1.5 ${tone}`}
+                            title="Auto-detect status — online means a client pinged recently"
+                          >
+                            <span className="h-1.5 w-1.5 rounded-full bg-current" />
+                            {label}
+                          </span>
+                        );
+                      })()}
+                    </td>
                     <td className="px-4 py-3">
                       {key.game ? (
                         <Badge variant="outline" className="gap-1 text-[10px]">
@@ -649,6 +768,11 @@ export default function KeysPanel({ scope }: { scope: "owner" | "admin" }) {
                         {key.canManage && (
                           <Button variant="ghost" size="icon-sm" className="cursor-pointer text-muted-foreground hover:text-foreground" title="Device limit" onClick={() => openEditDevices(key)}>
                             <Settings2 className="size-4" />
+                          </Button>
+                        )}
+                        {key.canManage && ((key.misses ?? 0) > 0 || (key.strikes ?? 0) > 0) && (
+                          <Button variant="ghost" size="icon-sm" className="cursor-pointer text-muted-foreground hover:text-foreground" title="Clear auto-detect guard" onClick={() => resetGuard(key)}>
+                            <ShieldAlert className="size-4" />
                           </Button>
                         )}
                         {key.canManage && key.deviceId && key.status !== "revoked" && (
