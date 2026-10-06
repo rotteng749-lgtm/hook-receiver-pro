@@ -152,6 +152,12 @@ const schema = defineSchema(
       // Listed as a product on the public /getkey page. undefined/true = shown,
       // false = hidden (owner controls what is available — e.g. only MLBB).
       publicGetkey: v.optional(v.boolean()),
+      // Published in the public API catalogue (GET /api/servers) so client
+      // apps can discover where to connect. undefined/true = listed.
+      apiEnabled: v.optional(v.boolean()),
+      // App/game ids this server hosts, e.g. ["MLBB", "PUBG"]. One server can
+      // serve several apps; the catalogue reports them so clients can pick.
+      apps: v.optional(v.array(v.string())),
     }).index("by_code", ["code"]),
 
     // Generated connect keys. Generating one deducts `cost` from the
@@ -187,6 +193,18 @@ const schema = defineSchema(
       // Empty array = no restriction.
       ipWhitelist: v.optional(v.array(v.string())),
       ipBlacklist: v.optional(v.array(v.string())),
+      // Extra servers this key may connect to, on top of its own `serverId`,
+      // so one key can cover several apps. undefined/empty = own server only,
+      // and a server outside this list is rejected on /connect.
+      allowedServers: v.optional(v.array(v.id("servers"))),
+      // Live guard ("auto detect"): the client pings /heartbeat while the
+      // panel/game is open. undefined = follow settings.heartbeatEnabled.
+      heartbeat: v.optional(v.boolean()),
+      // Last connect/heartbeat — drives the online dot in the keys table.
+      lastSeenAt: v.optional(v.number()),
+      // Consecutive missed heartbeats, and how many strike groups have fired.
+      misses: v.optional(v.number()),
+      strikes: v.optional(v.number()),
     })
       .index("by_key", ["key"])
       .index("by_server", ["serverId"])
@@ -211,6 +229,24 @@ const schema = defineSchema(
       resource: v.optional(v.string()),
     })
       .index("by_server", ["serverId"])
+      .index("by_key", ["keyId"]),
+
+    // One row per live client session: a key + device, or a bare panel/app
+    // session with no key. /heartbeat refreshes `lastSeenAt` and resets
+    // `misses`; the sweep cron counts silence and fires a strike every
+    // settings.heartbeatLimit consecutive misses.
+    heartbeats: defineTable({
+      keyId: v.optional(v.id("connectKeys")),
+      deviceId: v.optional(v.string()),
+      serverId: v.optional(v.id("servers")),
+      app: v.optional(v.string()), // "panel", "game", a server code, …
+      ip: v.optional(v.string()),
+      lastSeenAt: v.number(),
+      misses: v.number(), // consecutive missed windows (0 while alive)
+      strikes: v.number(), // strike groups fired for this session
+      missed: v.optional(v.boolean()), // currently inside a missed window
+    })
+      .index("by_seen", ["lastSeenAt"])
       .index("by_key", ["keyId"]),
 
     // Global owner settings (single doc, scope = "global").
@@ -256,6 +292,10 @@ const schema = defineSchema(
       // Ad type for the shortener: 1 = mainstream, 2 = adult.
       shortenerAdType: v.optional(v.number()),
       // ---- GetKey (coin system) ----
+      // Master switch for the whole trial flow — the public /getkey page, the
+      // POST /getkey API and the Telegram trial commands. Undefined = enabled.
+      // (getkeyWeb below only controls the public web page.)
+      getkeyEnabled: v.optional(v.boolean()),
       // Coins per generated key (default 10).
       getkeyPrice: v.optional(v.number()),
       // Key validity in hours (default 5).
@@ -280,6 +320,19 @@ const schema = defineSchema(
       // How many short-link passes one account may redeem per UTC day
       // (default 3). 0 = the earn button is disabled.
       getkeyEarnMaxPerDay: v.optional(v.number()),
+      // ---- Live guard ("auto detect") ----
+      // Clients ping POST /heartbeat while the panel/game is open. Silence
+      // longer than heartbeatTimeout counts as one miss, heartbeatLimit
+      // misses in a row fire the action, and any ping resets the streak.
+      heartbeatEnabled: v.optional(v.boolean()),
+      // How often clients should ping, in seconds (default 10).
+      heartbeatInterval: v.optional(v.number()),
+      // Silence before a ping counts as a miss, in seconds (default 30).
+      heartbeatTimeout: v.optional(v.number()),
+      // Consecutive misses before the action fires (default 3).
+      heartbeatLimit: v.optional(v.number()),
+      // What a full streak does: "revoke" the key or just "flag" it.
+      heartbeatAction: v.optional(v.string()),
     }).index("by_scope", ["scope"]),
 
     // User-created custom HTTP endpoints. Each row becomes a live route

@@ -60,6 +60,7 @@ export const DEFAULT_SETTINGS = {
   // GetKey (Panxcz coin system): 5 coins per key, key lasts 5 hours,
   // max 3 keys per day per account. New accounts get 5 welcome coins
   // (one free trial key) — top-ups are credited by the owner.
+  getkeyEnabled: true, // master switch for every trial-key flow
   getkeyPrice: 5,
   getkeyHours: 5,
   getkeyMaxPerDay: 3,
@@ -74,6 +75,14 @@ export const DEFAULT_SETTINGS = {
   // coins, at most getkeyEarnMaxPerDay passes per account per UTC day.
   getkeyEarnCoins: 5,
   getkeyEarnMaxPerDay: 3,
+  // Live guard ("auto detect"): the client pings /heartbeat while the panel or
+  // game is open. 10s interval, 30s of silence = one miss, 3 misses in a row
+  // fire the action, any ping resets the streak. "revoke" kills the key.
+  heartbeatEnabled: true,
+  heartbeatInterval: 10,
+  heartbeatTimeout: 30,
+  heartbeatLimit: 3,
+  heartbeatAction: "revoke", // "revoke" | "flag"
 } as const;
 
 /** Look up the single global settings doc (or null when never saved). */
@@ -114,6 +123,32 @@ function keyCost(settings: Doc<"settings"> | null, hours: number) {
   const lifetime = Math.max(0, Math.round(settings?.keyPrice ?? DEFAULT_SETTINGS.keyPrice));
   const days = hours > 0 ? Math.ceil(hours / 24) : 0;
   return { perDay, lifetime, days, cost: days > 0 ? perDay * days : lifetime };
+}
+
+/**
+ * Normalise a key's extra server allowlist: drop the key's own server, drop
+ * duplicates, and drop ids that no longer exist. Returns undefined when
+ * nothing extra is left so `undefined` keeps meaning "own server only".
+ */
+async function cleanAllowedServers(
+  ctx: QueryCtx | MutationCtx,
+  ownServerId: Id<"servers">,
+  raw: Id<"servers">[] | undefined,
+): Promise<Id<"servers">[] | undefined> {
+  if (!raw || raw.length === 0) return undefined;
+  const seen = new Set<Id<"servers">>([ownServerId]);
+  const out: Id<"servers">[] = [];
+  for (const id of raw) {
+    if (seen.has(id)) continue;
+    seen.add(id);
+    if ((await ctx.db.get(id)) !== null) out.push(id);
+  }
+  return out.length > 0 ? out : undefined;
+}
+
+/** Every server id a key is allowed to talk to (its own one first). */
+export function allowedServerIds(key: Doc<"connectKeys">): Set<Id<"servers">> {
+  return new Set<Id<"servers">>([key.serverId, ...(key.allowedServers ?? [])]);
 }
 
 async function requireRole(ctx: QueryCtx | MutationCtx, roles: PanelRole[]) {
@@ -162,6 +197,12 @@ export const getSettings = query({
       getkeyEarnCoins: doc?.getkeyEarnCoins ?? DEFAULT_SETTINGS.getkeyEarnCoins,
       getkeyEarnMaxPerDay:
         doc?.getkeyEarnMaxPerDay ?? DEFAULT_SETTINGS.getkeyEarnMaxPerDay,
+      getkeyEnabled: doc?.getkeyEnabled ?? DEFAULT_SETTINGS.getkeyEnabled,
+      heartbeatEnabled: doc?.heartbeatEnabled ?? DEFAULT_SETTINGS.heartbeatEnabled,
+      heartbeatInterval: doc?.heartbeatInterval ?? DEFAULT_SETTINGS.heartbeatInterval,
+      heartbeatTimeout: doc?.heartbeatTimeout ?? DEFAULT_SETTINGS.heartbeatTimeout,
+      heartbeatLimit: doc?.heartbeatLimit ?? DEFAULT_SETTINGS.heartbeatLimit,
+      heartbeatAction: doc?.heartbeatAction ?? DEFAULT_SETTINGS.heartbeatAction,
     };
   },
 });
@@ -182,6 +223,7 @@ export const updateSettings = mutation({
     shortenerApiKey: v.optional(v.string()),
     shortenerAdType: v.optional(v.number()),
     // GetKey (coin system) — owner-configurable.
+    getkeyEnabled: v.optional(v.boolean()),
     getkeyPrice: v.optional(v.number()),
     getkeyHours: v.optional(v.number()),
     getkeyMaxPerDay: v.optional(v.number()),
@@ -191,6 +233,12 @@ export const updateSettings = mutation({
     getkeyMaxDevices: v.optional(v.number()),
     getkeyEarnCoins: v.optional(v.number()),
     getkeyEarnMaxPerDay: v.optional(v.number()),
+    // Live guard ("auto detect") — owner-configurable.
+    heartbeatEnabled: v.optional(v.boolean()),
+    heartbeatInterval: v.optional(v.number()),
+    heartbeatTimeout: v.optional(v.number()),
+    heartbeatLimit: v.optional(v.number()),
+    heartbeatAction: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     await requireRole(ctx, ["owner"]);
@@ -256,6 +304,21 @@ export const updateSettings = mutation({
         args.keyPricePerDay ?? DEFAULT_SETTINGS.keyPricePerDay,
       ),
     );
+    // Live guard: clamp the numbers so a typo can't disable detection.
+    const heartbeatInterval = Math.max(
+      2,
+      Math.min(3600, Math.round(args.heartbeatInterval ?? DEFAULT_SETTINGS.heartbeatInterval)),
+    );
+    const heartbeatTimeout = Math.max(
+      heartbeatInterval + 1,
+      Math.min(86_400, Math.round(args.heartbeatTimeout ?? DEFAULT_SETTINGS.heartbeatTimeout)),
+    );
+    const heartbeatLimit = Math.max(
+      1,
+      Math.min(20, Math.round(args.heartbeatLimit ?? DEFAULT_SETTINGS.heartbeatLimit)),
+    );
+    const heartbeatAction =
+      args.heartbeatAction === "flag" ? "flag" : DEFAULT_SETTINGS.heartbeatAction;
     const patch = {
       keyPrice: Math.max(0, Math.round(args.keyPrice)),
       keyPricePerDay,
@@ -275,11 +338,17 @@ export const updateSettings = mutation({
       getkeyHours,
       getkeyMaxPerDay,
       getkeyWeb: args.getkeyWeb ?? DEFAULT_SETTINGS.getkeyWeb,
+      getkeyEnabled: args.getkeyEnabled ?? DEFAULT_SETTINGS.getkeyEnabled,
       getkeyServerId,
       getkeyWelcomeCoins,
       getkeyMaxDevices,
       getkeyEarnCoins,
       getkeyEarnMaxPerDay,
+      heartbeatEnabled: args.heartbeatEnabled ?? DEFAULT_SETTINGS.heartbeatEnabled,
+      heartbeatInterval,
+      heartbeatTimeout,
+      heartbeatLimit,
+      heartbeatAction,
     };
     const doc = await getSettingsDoc(ctx);
     if (doc) {
@@ -609,6 +678,10 @@ export const generateKey = mutation({
     game: v.optional(v.string()),
     ipWhitelist: v.optional(v.array(v.string())),
     ipBlacklist: v.optional(v.array(v.string())),
+    // Extra servers/apps this key may connect to (own server always allowed).
+    allowedServers: v.optional(v.array(v.id("servers"))),
+    // Per-key live guard; undefined = follow the global setting.
+    heartbeat: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     let userId: Id<"users">;
@@ -696,6 +769,8 @@ export const generateKey = mutation({
         game: args.game?.trim() || undefined,
         ipWhitelist: args.ipWhitelist?.filter((ip) => ip.trim().length > 0) || undefined,
         ipBlacklist: args.ipBlacklist?.filter((ip) => ip.trim().length > 0) || undefined,
+        allowedServers: await cleanAllowedServers(ctx, server._id, args.allowedServers),
+        heartbeat: args.heartbeat,
       });
     } catch (err) {
       console.error("[generateKey] Insert failed:", err);
@@ -1300,6 +1375,8 @@ export const updateKeySettings = mutation({
     ipWhitelist: v.optional(v.array(v.string())),
     ipBlacklist: v.optional(v.array(v.string())),
     note: v.optional(v.string()),
+    allowedServers: v.optional(v.array(v.id("servers"))),
+    heartbeat: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     const { user } = await requireRole(ctx, ["owner", "admin"]);
@@ -1311,6 +1388,10 @@ export const updateKeySettings = mutation({
     if (args.ipWhitelist !== undefined) patch.ipWhitelist = args.ipWhitelist.filter((ip) => ip.trim().length > 0);
     if (args.ipBlacklist !== undefined) patch.ipBlacklist = args.ipBlacklist.filter((ip) => ip.trim().length > 0);
     if (args.note !== undefined) patch.note = args.note?.trim().slice(0, 160) || undefined;
+    if (args.heartbeat !== undefined) patch.heartbeat = args.heartbeat;
+    if (args.allowedServers !== undefined) {
+      patch.allowedServers = (await cleanAllowedServers(ctx, key.serverId, args.allowedServers)) ?? undefined;
+    }
     await ctx.db.patch(args.id, patch);
   },
 });
@@ -1805,6 +1886,279 @@ export const recordConnect = internalMutation({
 
 /** Devices kept on disk for unlimited keys (oldest dropped beyond this). */
 const MAX_STORED_DEVICES = 50;
+
+/* ---------------------- live guard ("auto detect") ---------------------- */
+
+/** Is the live guard on for this key? Per-key flag wins over the global one. */
+export function heartbeatOn(
+  settings: Doc<"settings"> | null,
+  key: Doc<"connectKeys"> | null,
+): boolean {
+  const globalOn = settings?.heartbeatEnabled !== false;
+  if (key?.heartbeat === false) return false;
+  return globalOn;
+}
+
+/**
+ * One live ping. A session is a (key, device, app) triple — or a bare app
+ * session with no key, which is what the panel sends when it is merely open.
+ * Every ping resets the miss streak, so only *consecutive* silence counts.
+ */
+export const heartbeat = internalMutation({
+  args: {
+    key: v.optional(v.string()),
+    keyId: v.optional(v.id("connectKeys")),
+    deviceId: v.optional(v.string()),
+    serverId: v.optional(v.id("servers")),
+    app: v.optional(v.string()),
+    ip: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const now = Date.now();
+    const settings = await getSettingsDoc(ctx);
+    const interval = Math.max(
+      2,
+      settings?.heartbeatInterval ?? DEFAULT_SETTINGS.heartbeatInterval,
+    );
+    const timeoutMs =
+      Math.max(
+        interval + 1,
+        settings?.heartbeatTimeout ?? DEFAULT_SETTINGS.heartbeatTimeout,
+      ) * 1000;
+    const limit = Math.max(
+      1,
+      settings?.heartbeatLimit ?? DEFAULT_SETTINGS.heartbeatLimit,
+    );
+
+*/
+    // Resolve the key when a raw value came in, and refuse dead keys: a ping
+    // must not resurrect a revoked/expired key.
+    let keyDoc: Doc<"connectKeys"> | null = null;
+    const rawKey = (args.key ?? "").replace(/\p{Cc}/gu, ""); /*  -]/g, "").trim().toUpperCase().slice(0, 80);
+    if (args.keyId !== undefined) {
+      keyDoc = await ctx.db.get(args.keyId);
+    } else if (rawKey.length > 0) {
+      keyDoc = await ctx.db
+        .query("connectKeys")
+        .withIndex("by_key", (q) => q.eq("key", rawKey))
+        .first();
+    }
+    if (keyDoc !== null && keyDoc.status !== "active") {
+      return { ok: false as const, reason: keyDoc.status, interval, timeoutMs, limit };
+    }
+    if (
+      keyDoc !== null &&
+      keyDoc.expiresAt > 0 &&
+      now > keyDoc.expiresAt
+    ) {
+      return { ok: false as const, reason: "expired", interval, timeoutMs, limit };
+    }
+    if (!heartbeatOn(settings, keyDoc)) {
+      return { ok: true as const, enabled: false, interval, timeoutMs, limit };
+    }
+
+    const device = args.deviceId?.trim().slice(0, 128) || undefined;
+    const app = args.app?.trim().slice(0, 64) || undefined;
+
+    // Find the existing session for this exact (key, device, app) triple.
+    const candidates = await ctx.db.query("heartbeats").collect();
+    const existing = candidates.find(
+      (h) =>
+        (h.keyId ?? null) === (keyDoc?._id ?? null) &&
+        (h.deviceId ?? "") === (device ?? "") &&
+        (h.app ?? "") === (app ?? ""),
+    );
+
+    if (existing) {
+      await ctx.db.patch(existing._id, {
+        lastSeenAt: now,
+        misses: 0,
+        missed: false,
+        ip: args.ip?.slice(0, 64),
+        serverId: args.serverId,
+      });
+    } else {
+      await ctx.db.insert("heartbeats", {
+        keyId: keyDoc?._id,
+        deviceId: device,
+        serverId: args.serverId,
+        app,
+        ip: args.ip?.slice(0, 64),
+        lastSeenAt: now,
+        misses: 0,
+        strikes: 0,
+      });
+    }
+    if (keyDoc !== null) {
+      await ctx.db.patch(keyDoc._id, { lastSeenAt: now, misses: 0 });
+    }
+    return {
+      ok: true as const,
+      enabled: true,
+      interval,
+      timeoutMs,
+      limit,
+      keyId: keyDoc?._id ?? null,
+    };
+  },
+});
+
+/**
+ * The detection sweep, run on a cron. Every session that has been silent for
+ * longer than the timeout gets one miss; a run of `limit` misses in a row
+ * fires the action (revoke the key, or just flag it) and resets the streak so
+ * the next full silence is a fresh offence.
+ */
+export const sweepHeartbeats = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const settings = await getSettingsDoc(ctx);
+    if (settings?.heartbeatEnabled === false) return { swept: 0 };
+    const now = Date.now();
+    const interval = Math.max(
+      2,
+      settings?.heartbeatInterval ?? DEFAULT_SETTINGS.heartbeatInterval,
+    );
+    const timeoutMs =
+      Math.max(
+        interval + 1,
+        settings?.heartbeatTimeout ?? DEFAULT_SETTINGS.heartbeatTimeout,
+      ) * 1000;
+    const limit = Math.max(
+      1,
+      settings?.heartbeatLimit ?? DEFAULT_SETTINGS.heartbeatLimit,
+    );
+    const action = settings?.heartbeatAction ?? DEFAULT_SETTINGS.heartbeatAction;
+
+    const stale = await ctx.db
+      .query("heartbeats")
+      .withIndex("by_seen", (q) => q.lt("lastSeenAt", now - timeoutMs))
+      .collect();
+
+    let swept = 0;
+    for (const session of stale) {
+      // Sessions with no key (the panel itself being open) only tally misses.
+      const keyDoc = session.keyId ? await ctx.db.get(session.keyId) : null;
+      if (keyDoc !== null && !heartbeatOn(settings, keyDoc)) {
+        await ctx.db.delete(session._id);
+        continue;
+      }
+      const misses = (session.misses ?? 0) + 1;
+      swept++;
+
+      if (misses < limit) {
+        // Re-base the window so the next check is a full timeout later.
+        await ctx.db.patch(session._id, { misses, missed: true });
+        if (keyDoc !== null) await ctx.db.patch(keyDoc._id, { misses });
+        continue;
+      }
+
+      const strikes = (session.strikes ?? 0) + 1;
+      if (keyDoc !== null) {
+        if (action === "revoke") {
+          await ctx.db.patch(keyDoc._id, {
+            status: "revoked",
+            misses: 0,
+            strikes,
+          });
+        } else {
+          await ctx.db.patch(keyDoc._id, { misses: 0, strikes });
+        }
+      }
+      await ctx.db.patch(session._id, {
+        misses: 0,
+        strikes,
+        missed: true,
+        lastSeenAt: now,
+      });
+      await ctx.db.insert("connections", {
+        keyId: session.keyId,
+        key: (session.keyId ? keyDoc?.key ?? "" : session.app ?? "panel").slice(0, 80),
+        serverId: session.serverId,
+        ip: session.ip ?? "0.0.0.0",
+        deviceId: session.deviceId,
+        ok: false,
+        reason:
+          action === "revoke"
+            ? `heartbeat_strike_${strikes}_revoked`
+            : `heartbeat_strike_${strikes}`,
+      });
+    }
+    return { swept };
+  },
+});
+
+/** Live sessions for the panel, newest first. */
+export const listHeartbeats = query({
+  args: {},
+  handler: async (ctx) => {
+    await requireRole(ctx, ["owner", "admin"]);
+    const settings = await getSettingsDoc(ctx);
+    const timeoutMs =
+      Math.max(
+        (settings?.heartbeatInterval ?? DEFAULT_SETTINGS.heartbeatInterval) + 1,
+        settings?.heartbeatTimeout ?? DEFAULT_SETTINGS.heartbeatTimeout,
+      ) * 1000;
+    const now = Date.now();
+    const rows = await ctx.db.query("heartbeats").take(200);
+    const keyIds = new Set(rows.flatMap((r) => (r.keyId ? [r.keyId] : [])));
+    const keys = new Map<string, string>();
+    for (const id of keyIds) {
+      const k = await ctx.db.get(id);
+      if (k) keys.set(id as string, k.key);
+    }
+    return rows
+      .map((r) => ({
+        _id: r._id,
+        keyId: r.keyId ?? null,
+        key: r.keyId ? keys.get(r.keyId as string) ?? "" : "",
+        deviceId: r.deviceId ?? "",
+        app: r.app ?? "",
+        ip: r.ip ?? "",
+        lastSeenAt: r.lastSeenAt,
+        misses: r.misses ?? 0,
+        strikes: r.strikes ?? 0,
+        online: now - r.lastSeenAt <= timeoutMs,
+      }))
+      .sort((a, b) => b.lastSeenAt - a.lastSeenAt);
+  },
+});
+
+/** Drop one live session, or (with no id) every session for a key. */
+export const clearHeartbeats = mutation({
+  args: { id: v.optional(v.id("heartbeats")), keyId: v.optional(v.id("connectKeys")) },
+  handler: async (ctx, args) => {
+    await requireRole(ctx, ["owner", "admin"]);
+    if (args.id !== undefined) {
+      await ctx.db.delete(args.id);
+      return;
+    }
+    const rows = await ctx.db.query("heartbeats").collect();
+    for (const r of rows) {
+      if (args.keyId !== undefined && r.keyId === args.keyId) {
+        await ctx.db.delete(r._id);
+      }
+    }
+  },
+});
+
+/** Wipe a key's miss/strike counters and forget its dead sessions. */
+export const resetKeyGuard = mutation({
+  args: { id: v.id("connectKeys") },
+  handler: async (ctx, args) => {
+    const { user } = await requireRole(ctx, ["owner", "admin"]);
+    const key = await ctx.db.get(args.id);
+    if (key === null) throw new Error("Key not found");
+    if (roleOf(user) !== "owner" && key.createdBy !== user._id) {
+      throw new Error("Forbidden");
+    }
+    await ctx.db.patch(args.id, { misses: 0, strikes: 0 });
+    const rows = await ctx.db.query("heartbeats").collect();
+    for (const r of rows) {
+      if (r.keyId === args.id) await ctx.db.delete(r._id);
+    }
+  },
+});
 
 /* -------------------- internal helpers (telegram bot) -------------------- */
 
