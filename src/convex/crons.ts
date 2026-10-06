@@ -18,7 +18,7 @@ const crons = cronJobs();
 
 crons.interval(
   "heartbeat sweep",
-  { seconds: 30 },
+  { minutes: 5 },
   internal.nameserver.sweepHeartbeats,
   {},
 );
